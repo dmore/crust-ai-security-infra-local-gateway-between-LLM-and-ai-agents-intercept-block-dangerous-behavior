@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,6 +76,9 @@ func IsRunning() (bool, int) {
 	if err != nil {
 		return false, 0
 	}
+	if pid < 0 || pid > math.MaxUint32 {
+		return false, 0
+	}
 
 	// On Windows, OpenProcess succeeds only if the process exists.
 	// PROCESS_QUERY_LIMITED_INFORMATION is the least-privilege access right.
@@ -84,7 +88,7 @@ func IsRunning() (bool, int) {
 		_ = RemovePID() //nolint:errcheck // cleanup best effort
 		return false, 0
 	}
-	windows.CloseHandle(h)
+	windows.CloseHandle(h) //nolint:errcheck // best-effort cleanup
 
 	return true, pid
 }
@@ -98,22 +102,23 @@ func Stop() error {
 		return errors.New("crust is not running")
 	}
 
+	if pid < 0 || pid > math.MaxUint32 {
+		return fmt.Errorf("invalid PID %d: out of uint32 range", pid)
+	}
 	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, uint32(pid))
 	if err != nil {
 		return fmt.Errorf("failed to open process: %w", err)
 	}
-	defer windows.CloseHandle(h)
+	defer windows.CloseHandle(h) //nolint:errcheck // best-effort cleanup
 
 	// Terminate the process (exit code 1)
 	if err := windows.TerminateProcess(h, 1); err != nil {
 		return fmt.Errorf("failed to stop crust: %w", err)
 	}
 
-	// Wait for process to exit (with timeout)
-	event, err := windows.WaitForSingleObject(h, 3000) // 3 seconds
-	if err != nil || event == uint32(0x00000102) {     // WAIT_TIMEOUT
-		// Best effort — process may be stuck
-	}
+	// Wait for process to exit (with timeout); ignore errors —
+	// the process may already be gone or stuck.
+	windows.WaitForSingleObject(h, 3000) //nolint:errcheck // best-effort wait
 
 	_ = RemovePID() //nolint:errcheck // cleanup best effort
 	return nil

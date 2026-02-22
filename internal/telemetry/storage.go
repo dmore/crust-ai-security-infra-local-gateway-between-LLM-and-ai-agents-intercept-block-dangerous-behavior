@@ -287,11 +287,9 @@ func (s *Storage) UpdateTraceEndTime(traceID string, endTime time.Time) error {
 	})
 }
 
-// InsertSpan inserts a new span
-func (s *Storage) InsertSpan(span *Span) error {
-	ctx := context.Background()
-
-	id, err := s.queries.InsertSpan(ctx, db.InsertSpanParams{
+// spanToInsertParams converts a Span to the db insert parameters.
+func spanToInsertParams(span *Span) db.InsertSpanParams {
+	return db.InsertSpanParams{
 		TraceRowid:    int64Ptr(span.TraceRowID),
 		SpanID:        span.SpanID,
 		ParentSpanID:  strPtr(span.ParentSpanID),
@@ -305,7 +303,14 @@ func (s *Storage) InsertSpan(span *Span) error {
 		OutputTokens:  int64Ptr(span.OutputTokens),
 		StatusCode:    strPtr(span.StatusCode),
 		StatusMessage: strPtr(span.StatusMessage),
-	})
+	}
+}
+
+// InsertSpan inserts a new span
+func (s *Storage) InsertSpan(span *Span) error {
+	ctx := context.Background()
+
+	id, err := s.queries.InsertSpan(ctx, spanToInsertParams(span))
 	if err != nil {
 		return fmt.Errorf("failed to insert span: %w", err)
 	}
@@ -347,21 +352,7 @@ func (s *Storage) RecordSpanTx(traceID, sessionID string, mainSpan *Span, toolSp
 
 	// 2. Insert main span
 	mainSpan.TraceRowID = dbTrace.ID
-	spanID, err := qtx.InsertSpan(ctx, db.InsertSpanParams{
-		TraceRowid:    int64Ptr(mainSpan.TraceRowID),
-		SpanID:        mainSpan.SpanID,
-		ParentSpanID:  strPtr(mainSpan.ParentSpanID),
-		Name:          mainSpan.Name,
-		SpanKind:      strPtr(mainSpan.SpanKind),
-		StartTime:     timePtr(mainSpan.StartTime),
-		EndTime:       timePtr(mainSpan.EndTime),
-		Attributes:    mainSpan.Attributes,
-		Events:        mainSpan.Events,
-		InputTokens:   int64Ptr(mainSpan.InputTokens),
-		OutputTokens:  int64Ptr(mainSpan.OutputTokens),
-		StatusCode:    strPtr(mainSpan.StatusCode),
-		StatusMessage: strPtr(mainSpan.StatusMessage),
-	})
+	spanID, err := qtx.InsertSpan(ctx, spanToInsertParams(mainSpan))
 	if err != nil {
 		return fmt.Errorf("insert span: %w", err)
 	}
@@ -370,21 +361,7 @@ func (s *Storage) RecordSpanTx(traceID, sessionID string, mainSpan *Span, toolSp
 	// 3. Insert tool spans
 	for _, ts := range toolSpans {
 		ts.TraceRowID = dbTrace.ID
-		_, err = qtx.InsertSpan(ctx, db.InsertSpanParams{
-			TraceRowid:    int64Ptr(ts.TraceRowID),
-			SpanID:        ts.SpanID,
-			ParentSpanID:  strPtr(ts.ParentSpanID),
-			Name:          ts.Name,
-			SpanKind:      strPtr(ts.SpanKind),
-			StartTime:     timePtr(ts.StartTime),
-			EndTime:       timePtr(ts.EndTime),
-			Attributes:    ts.Attributes,
-			Events:        ts.Events,
-			InputTokens:   int64Ptr(ts.InputTokens),
-			OutputTokens:  int64Ptr(ts.OutputTokens),
-			StatusCode:    strPtr(ts.StatusCode),
-			StatusMessage: strPtr(ts.StatusMessage),
-		})
+		_, err = qtx.InsertSpan(ctx, spanToInsertParams(ts))
 		if err != nil {
 			return fmt.Errorf("insert tool span %s: %w", ts.Name, err)
 		}

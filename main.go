@@ -3,10 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -19,6 +17,7 @@ import (
 
 	"github.com/BakeLens/crust/internal/earlyinit" // side-effect import: init() runs before bubbletea's via dependency order + lexicographic tie-breaking
 
+	"github.com/BakeLens/crust/internal/cli"
 	"github.com/BakeLens/crust/internal/completion"
 	"github.com/BakeLens/crust/internal/config"
 	"github.com/BakeLens/crust/internal/daemon"
@@ -44,127 +43,6 @@ import (
 
 // Version is set at build time via ldflags: -X main.Version=x.y.z
 var Version = "2.2.0"
-
-// =============================================================================
-// API Client (inlined from internal/cli)
-// =============================================================================
-
-// apiClient provides API access for CLI commands
-type apiClient struct {
-	cfg    *config.Config
-	client *http.Client // uses Unix socket / named pipe transport (or TCP for remote)
-	remote string       // non-empty when connecting to a remote daemon
-}
-
-// newAPIClient creates a CLI API client.
-// If remoteAddr is empty, connects via local Unix socket / named pipe.
-// If remoteAddr is set (e.g., "localhost:9090"), connects over TCP.
-func newAPIClient(remoteAddr ...string) *apiClient {
-	cfg, err := config.Load(config.DefaultConfigPath())
-	if err != nil {
-		cfg = config.DefaultConfig()
-	}
-	if len(remoteAddr) > 0 && remoteAddr[0] != "" {
-		return &apiClient{
-			cfg:    cfg,
-			client: &http.Client{},
-			remote: remoteAddr[0],
-		}
-	}
-	socketPath := cfg.API.SocketPath
-	if socketPath == "" {
-		socketPath = daemon.SocketFile(cfg.Server.Port)
-	}
-	return &apiClient{
-		cfg:    cfg,
-		client: &http.Client{Transport: security.APITransport(socketPath)},
-	}
-}
-
-// apiURL returns the base URL for the management API.
-// For local: dummy host routed via socket/pipe.
-// For remote: TCP address of the daemon.
-func (c *apiClient) apiURL() string {
-	if c.remote != "" {
-		return "http://" + c.remote
-	}
-	return dashboard.DefaultAPIBase
-}
-
-// proxyBaseURL returns the proxy base URL
-func (c *apiClient) proxyBaseURL() string {
-	if c.remote != "" {
-		return "http://" + c.remote
-	}
-	return fmt.Sprintf("http://localhost:%d", c.cfg.Server.Port)
-}
-
-// checkHealth checks if the proxy server is healthy (still uses TCP for the proxy)
-func (c *apiClient) checkHealth() (bool, error) {
-	url := c.proxyBaseURL() + "/health"
-	resp, err := http.Get(url) //nolint:gosec,noctx // URL is from trusted config
-	if err != nil || resp == nil {
-		return false, err
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode == http.StatusOK, nil
-}
-
-// isServerRunning checks if the Crust management API is reachable
-func (c *apiClient) isServerRunning() bool {
-	url := c.apiURL() + "/api/crust/rules/reload"
-	resp, err := c.client.Post(url, "application/json", nil) //nolint:noctx
-	if err != nil || resp == nil {
-		return false
-	}
-	resp.Body.Close()
-	return true
-}
-
-// reloadRules triggers a hot reload of rules
-func (c *apiClient) reloadRules() ([]byte, error) {
-	url := c.apiURL() + "/api/crust/rules/reload"
-	resp, err := c.client.Post(url, "application/json", nil) //nolint:noctx
-	if err != nil || resp == nil {
-		return nil, errors.New("server not running")
-	}
-	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
-}
-
-// getRules fetches all rules from the server
-func (c *apiClient) getRules() ([]byte, error) {
-	url := c.apiURL() + "/api/crust/rules"
-	resp, err := c.client.Get(url) //nolint:noctx
-	if err != nil || resp == nil {
-		return nil, errors.New("server not running")
-	}
-	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
-}
-
-// rulesResponse represents the API response for rules listing
-type rulesResponse struct {
-	Rules []rules.Rule `json:"rules"`
-	Total int          `json:"total"`
-}
-
-// rulesResponse uses rules.Rule directly — no mirrored structs needed
-// since the daemon API already serializes rules.Rule as JSON.
-
-// getRulesParsed fetches and parses rules from the server
-func (c *apiClient) getRulesParsed() (*rulesResponse, error) {
-	body, err := c.getRules()
-	if err != nil {
-		return nil, err
-	}
-
-	var rulesResp rulesResponse
-	if err := json.Unmarshal(body, &rulesResp); err != nil {
-		return nil, err
-	}
-	return &rulesResp, nil
-}
 
 var log = logger.New("main")
 
@@ -630,12 +508,12 @@ func runDaemon(cfg *config.Config, logLevel string, disableBuiltin bool, endpoin
 	if listenAddr != "" && listenAddr != "127.0.0.1" && listenAddr != "localhost" {
 		// Expose management API on proxy port for remote access (Docker/container mode).
 		// On localhost, the Unix socket is used instead (more secure).
-		// Register specific sub-paths so that /api/v1/... from LLM clients
-		// (e.g. PhpStorm) falls through to the proxy handler.
+		// Register only management API sub-paths so that /api/v1/... from
+		// LLM clients (e.g. IDE plugins) falls through to the proxy handler.
 		mgmtHandler := manager.APIHandler()
-		mux.Handle("/api/security/", mgmtHandler)
-		mux.Handle("/api/telemetry/", mgmtHandler)
-		mux.Handle("/api/crust/", mgmtHandler)
+		for _, prefix := range security.APIPrefixes() {
+			mux.Handle(prefix, mgmtHandler)
+		}
 	}
 	mux.Handle("/", proxyHandler)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -719,19 +597,19 @@ func runStatus(args []string) {
 	_ = statusFlags.Parse(args)
 
 	// Resolve client, PID, and log file based on local vs remote
-	var client *apiClient
+	var client *cli.APIClient
 	var pid int
 	var logFile string
 
 	if *apiAddr != "" {
-		client = newAPIClient(*apiAddr)
+		client = cli.NewAPIClient(*apiAddr)
 	} else {
 		running, localPID := daemon.IsRunning()
 		if *jsonOutput {
 			status := map[string]any{"running": running, "pid": localPID}
 			if running {
-				c := newAPIClient()
-				healthy, _ := c.checkHealth() //nolint:errcheck // error means unhealthy
+				c := cli.NewAPIClient()
+				healthy, _ := c.CheckHealth() //nolint:errcheck // error means unhealthy
 				status["healthy"] = healthy
 				status["log_file"] = daemon.LogFile()
 			}
@@ -743,19 +621,19 @@ func runStatus(args []string) {
 			tui.PrintInfo("Crust is not running")
 			return
 		}
-		client = newAPIClient()
+		client = cli.NewAPIClient()
 		pid = localPID
 		logFile = daemon.LogFileDisplay()
 	}
 
 	if *live {
-		if err := dashboard.Run(client.client, client.apiURL(), client.proxyBaseURL(), pid, logFile); err != nil {
+		if err := dashboard.Run(client.Client, client.APIURL(), client.ProxyBaseURL(), pid, logFile); err != nil {
 			tui.PrintError(fmt.Sprintf("Dashboard error: %v", err))
 		}
 		return
 	}
 
-	data := dashboard.FetchStatus(client.client, client.apiURL(), client.proxyBaseURL(), pid, logFile)
+	data := dashboard.FetchStatus(client.Client, client.APIURL(), client.ProxyBaseURL(), pid, logFile)
 	if *jsonOutput {
 		out, _ := json.MarshalIndent(data, "", "  ") //nolint:errcheck // marshal won't fail
 		fmt.Println(string(out))
@@ -887,9 +765,9 @@ func printUsage() {
 
 // notifyRulesReload triggers a hot reload if the server is running,
 // or prints an info message with the given offline hint.
-func notifyRulesReload(client *apiClient, running bool, offlineHint string) {
+func notifyRulesReload(client *cli.APIClient, running bool, offlineHint string) {
 	if running {
-		if _, err := client.reloadRules(); err == nil {
+		if _, err := client.ReloadRules(); err == nil {
 			tui.PrintSuccess("Hot reload triggered")
 		}
 	} else {
@@ -916,8 +794,8 @@ func runAddRule(args []string) {
 	}
 
 	filePath := args[0]
-	client := newAPIClient()
-	serverRunning := client.isServerRunning()
+	client := cli.NewAPIClient()
+	serverRunning := client.IsServerRunning()
 
 	// Read and validate rule file
 	data, err := os.ReadFile(filePath) //nolint:gosec // filePath is a user-provided CLI argument, validated by loader.ValidateYAML below
@@ -956,8 +834,8 @@ func runRemoveRule(args []string) {
 	}
 
 	filename := args[0]
-	client := newAPIClient()
-	serverRunning := client.isServerRunning()
+	client := cli.NewAPIClient()
+	serverRunning := client.IsServerRunning()
 
 	loader := rules.NewLoader(rules.DefaultUserRulesDir())
 	if err := loader.RemoveRuleFile(filename); err != nil {
@@ -977,8 +855,8 @@ func runListRules(args []string) {
 	apiAddr := listFlags.String("api-addr", "", "Remote daemon address (host:port)")
 	_ = listFlags.Parse(args)
 
-	client := newAPIClient(*apiAddr)
-	body, err := client.getRules()
+	client := cli.NewAPIClient(*apiAddr)
+	body, err := client.GetRules()
 	if err != nil {
 		exitNotRunning()
 	}
@@ -989,7 +867,7 @@ func runListRules(args []string) {
 	}
 
 	// Parse and render
-	rulesResp, err := client.getRulesParsed()
+	rulesResp, err := client.GetRulesParsed()
 	if err != nil {
 		fmt.Println(string(body))
 		return
@@ -1002,8 +880,8 @@ func runListRules(args []string) {
 
 // runReloadRules handles the reload-rules subcommand
 func runReloadRules(_ []string) {
-	client := newAPIClient()
-	body, err := client.reloadRules()
+	client := cli.NewAPIClient()
+	body, err := client.ReloadRules()
 	if err != nil {
 		exitNotRunning()
 	}

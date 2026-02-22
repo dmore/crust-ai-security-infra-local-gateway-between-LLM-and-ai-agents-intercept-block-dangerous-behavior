@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/BakeLens/crust/internal/cli"
 	"github.com/BakeLens/crust/internal/rules"
 	"github.com/muesli/termenv"
 )
@@ -349,7 +350,7 @@ func TestRulesResponseUnmarshal(t *testing.T) {
 		]
 	}`
 
-	var resp rulesResponse
+	var resp cli.RulesResponse
 	if err := json.Unmarshal([]byte(jsonData), &resp); err != nil {
 		t.Fatalf("unmarshal error: %v", err)
 	}

@@ -52,7 +52,8 @@ func SecureOpenFile(path string, flag int) (*os.File, error) {
 // removed (PROTECTED_DACL prevents inheritance from parent directories).
 func restrictToOwner(path string) error {
 	// Get the current user's SID from the process token.
-	token, err := windows.OpenCurrentProcessToken()
+	var token windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
 	if err != nil {
 		return fmt.Errorf("open process token: %w", err)
 	}

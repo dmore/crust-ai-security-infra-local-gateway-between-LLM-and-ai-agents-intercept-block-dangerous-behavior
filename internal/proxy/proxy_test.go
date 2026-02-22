@@ -163,23 +163,6 @@ func TestBuildUpstreamURL_EndpointMode(t *testing.T) {
 			wantHost: "localhost:11434",
 			wantPath: "/v1/chat/completions",
 		},
-		// Issue #19: /api/v1 prefix from clients like PhpStorm
-		{
-			name:     "issue19: /api/v1 prefix stripped in endpoint mode",
-			upstream: "http://localhost:11434/v1",
-			reqPath:  "/api/v1/chat/completions",
-			model:    "qwen3",
-			wantHost: "localhost:11434",
-			wantPath: "/v1/chat/completions",
-		},
-		{
-			name:     "issue19: /api/v1 prefix stripped — plain host endpoint",
-			upstream: "http://localhost:11434",
-			reqPath:  "/api/v1/chat/completions",
-			model:    "qwen3",
-			wantHost: "localhost:11434",
-			wantPath: "/v1/chat/completions",
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -257,48 +240,13 @@ func TestBuildUpstreamURL_AutoMode(t *testing.T) {
 			wantHost: "chatgpt.com",
 			wantPath: "/backend-api/codex/responses",
 		},
-		// Issue #19: client sends /api/v1/... — the /api prefix must be
-		// stripped so the upstream URL doesn't become
-		// https://api.openai.com/api/v1/chat/completions (404).
 		{
-			name:     "issue19: /api/v1 prefix stripped for openai",
+			name:     "anthropic model resolves to anthropic",
 			upstream: "http://fallback:8080",
-			reqPath:  "/api/v1/chat/completions",
-			model:    "gpt-4o",
-			wantHost: "api.openai.com",
-			wantPath: "/v1/chat/completions",
-		},
-		{
-			name:     "issue19: /api/v1 prefix stripped for anthropic",
-			upstream: "http://fallback:8080",
-			reqPath:  "/api/v1/messages",
+			reqPath:  "/v1/messages",
 			model:    "claude-sonnet-4-5-20250929",
 			wantHost: "api.anthropic.com",
 			wantPath: "/v1/messages",
-		},
-		{
-			name:     "issue19: /api/v1 prefix stripped for deepseek",
-			upstream: "http://fallback:8080",
-			reqPath:  "/api/v1/chat/completions",
-			model:    "deepseek-chat",
-			wantHost: "api.deepseek.com",
-			wantPath: "/v1/chat/completions",
-		},
-		{
-			name:     "issue19: /api/v1 prefix stripped for fallback",
-			upstream: "http://fallback:8080",
-			reqPath:  "/api/v1/chat/completions",
-			model:    "unknown-model",
-			wantHost: "fallback:8080",
-			wantPath: "/v1/chat/completions",
-		},
-		{
-			name:     "issue19: /api prefix stripped for responses endpoint",
-			upstream: "http://fallback:8080",
-			reqPath:  "/api/responses",
-			model:    "gpt-4o",
-			wantHost: "api.openai.com",
-			wantPath: "/v1/responses",
 		},
 	}
 	for _, tt := range tests {
@@ -332,7 +280,7 @@ func setupTestProxy(t *testing.T, upstream *httptest.Server) *Proxy {
 
 // setupSecurityWithRules sets up the global security manager with the given rules.
 // Returns a cleanup function to restore original state.
-func setupSecurityWithRules(t *testing.T, yamlRules string) func() { //nolint:unparam
+func setupSecurityWithRules(t *testing.T, yamlRules string) func() {
 	t.Helper()
 
 	// Write rules to temp directory
@@ -708,6 +656,73 @@ func TestEscapeJSON_SpecialCharacters(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("escapeJSON(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+// stripAPIPrefix tests (issue #19)
+func TestStripAPIPrefix(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"/api/v1/chat/completions", "/v1/chat/completions"},
+		{"/api/v1/messages", "/v1/messages"},
+		{"/api/responses", "/responses"},
+		{"/api", "/"},
+		{"/api/", "/"},
+		{"/v1/chat/completions", "/v1/chat/completions"}, // no-op
+		{"/apis/foo", "/apis/foo"},                       // not stripped
+		{"/health", "/health"},                           // unrelated
+	}
+	for _, tt := range tests {
+		got := stripAPIPrefix(tt.input)
+		if got != tt.want {
+			t.Errorf("stripAPIPrefix(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+// Issue #19 end-to-end: /api/v1 prefix from IDE clients must be stripped
+// before reaching upstream. Verifies stripAPIPrefix + buildUpstreamURL are
+// wired together in ServeHTTP.
+func TestIssue19_APIPrefixStrippedEndToEnd(t *testing.T) {
+	var receivedPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer upstream.Close()
+
+	proxy := setupTestProxy(t, upstream)
+
+	tests := []struct {
+		name     string
+		reqPath  string
+		wantPath string
+	}{
+		{"chat completions", "/api/v1/chat/completions", "/v1/chat/completions"},
+		{"messages", "/api/v1/messages", "/v1/messages"},
+		{"responses", "/api/responses", "/v1/responses"}, // /v1 prepended by buildUpstreamURL for pathless providers
+		{"no prefix passthrough", "/v1/chat/completions", "/v1/chat/completions"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			receivedPath = ""
+			body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
+			req := httptest.NewRequest(http.MethodPost, tt.reqPath, bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+
+			proxy.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+			}
+			if receivedPath != tt.wantPath {
+				t.Errorf("upstream received path %q, want %q", receivedPath, tt.wantPath)
+			}
+		})
 	}
 }
 
@@ -1884,5 +1899,169 @@ func TestExtractUsageAndBody_LargeNonJsonBody(t *testing.T) {
 	}
 	if len(body) != len(bigBody) {
 		t.Errorf("body length = %d, want %d", len(body), len(bigBody))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// processNonStreamingResponse tests
+// ---------------------------------------------------------------------------
+
+// Success path: extracts token usage and body from a 200 response.
+func TestProcessNonStreamingResponse_Success(t *testing.T) {
+	jsonBody := `{"id":"chatcmpl-1","choices":[{"message":{"content":"hello"}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(jsonBody)),
+	}
+
+	body, inTok, outTok, toolCalls := processNonStreamingResponse(
+		resp, types.APITypeOpenAICompletion, "trace-1", "sess-1", "gpt-4",
+	)
+
+	if body == nil {
+		t.Fatal("response body should not be nil")
+	}
+	if inTok != 10 {
+		t.Errorf("inputTokens = %d, want 10", inTok)
+	}
+	if outTok != 5 {
+		t.Errorf("outputTokens = %d, want 5", outTok)
+	}
+	if len(toolCalls) != 0 {
+		t.Errorf("toolCalls = %d, want 0 (no tool calls in response)", len(toolCalls))
+	}
+}
+
+// Success path with tool calls: extracts tool calls from OpenAI response.
+func TestProcessNonStreamingResponse_WithToolCalls(t *testing.T) {
+	jsonBody := `{"id":"chatcmpl-1","choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"Bash","arguments":"{\"command\":\"ls\"}"}}]}}],"usage":{"prompt_tokens":20,"completion_tokens":15}}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(jsonBody)),
+	}
+
+	body, inTok, outTok, toolCalls := processNonStreamingResponse(
+		resp, types.APITypeOpenAICompletion, "trace-1", "sess-1", "gpt-4",
+	)
+
+	if body == nil {
+		t.Fatal("response body should not be nil")
+	}
+	if inTok != 20 {
+		t.Errorf("inputTokens = %d, want 20", inTok)
+	}
+	if outTok != 15 {
+		t.Errorf("outputTokens = %d, want 15", outTok)
+	}
+	if len(toolCalls) != 1 {
+		t.Fatalf("toolCalls = %d, want 1", len(toolCalls))
+	}
+	if toolCalls[0].Name != "Bash" {
+		t.Errorf("toolCalls[0].Name = %q, want %q", toolCalls[0].Name, "Bash")
+	}
+}
+
+// Error path: reads error body from a non-2xx response.
+func TestProcessNonStreamingResponse_ErrorStatus(t *testing.T) {
+	errorBody := `{"error":{"message":"rate limit exceeded","type":"rate_limit_error"}}`
+	resp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(errorBody)),
+	}
+
+	body, inTok, outTok, toolCalls := processNonStreamingResponse(
+		resp, types.APITypeOpenAICompletion, "trace-1", "sess-1", "gpt-4",
+	)
+
+	if string(body) != errorBody {
+		t.Errorf("body = %q, want %q", body, errorBody)
+	}
+	if inTok != 0 || outTok != 0 {
+		t.Errorf("tokens should be 0 for error response, got %d/%d", inTok, outTok)
+	}
+	if len(toolCalls) != 0 {
+		t.Errorf("toolCalls should be empty for error response, got %d", len(toolCalls))
+	}
+}
+
+// Error path: oversized error body is truncated to maxErrorBodySize.
+func TestProcessNonStreamingResponse_ErrorBodyTruncation(t *testing.T) {
+	// maxErrorBodySize is 1MB; create a body slightly larger
+	bigBody := strings.Repeat("x", 1*1024*1024+100)
+	resp := &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader(bigBody)),
+	}
+
+	body, _, _, _ := processNonStreamingResponse(
+		resp, types.APITypeOpenAICompletion, "trace-1", "sess-1", "gpt-4",
+	)
+
+	if int64(len(body)) != 1*1024*1024 {
+		t.Errorf("body length = %d, want %d (should be truncated to maxErrorBodySize)", len(body), 1*1024*1024)
+	}
+}
+
+// Anthropic success path: extracts usage from Anthropic response format.
+func TestProcessNonStreamingResponse_Anthropic(t *testing.T) {
+	jsonBody := `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hello"}],"usage":{"input_tokens":8,"output_tokens":3}}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(jsonBody)),
+	}
+
+	body, inTok, outTok, toolCalls := processNonStreamingResponse(
+		resp, types.APITypeAnthropic, "trace-1", "sess-1", "claude-sonnet-4-5-20250929",
+	)
+
+	if body == nil {
+		t.Fatal("response body should not be nil")
+	}
+	if inTok != 8 {
+		t.Errorf("inputTokens = %d, want 8", inTok)
+	}
+	if outTok != 3 {
+		t.Errorf("outputTokens = %d, want 3", outTok)
+	}
+	if len(toolCalls) != 0 {
+		t.Errorf("toolCalls = %d, want 0", len(toolCalls))
+	}
+}
+
+// Security interception: blocked tool calls are removed when security is active.
+func TestProcessNonStreamingResponse_SecurityInterception(t *testing.T) {
+	// Set up security rules that block "Bash" tool
+	cleanup := setupSecurityWithRules(t, `
+rules:
+  - name: block-bash
+    match:
+      tool: Bash
+    action: block
+    message: "Bash blocked"
+`)
+	defer cleanup()
+
+	jsonBody := `{"id":"chatcmpl-1","choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"Bash","arguments":"{\"command\":\"rm -rf /\"}"}}]}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(jsonBody)),
+	}
+
+	body, _, _, toolCalls := processNonStreamingResponse(
+		resp, types.APITypeOpenAICompletion, "trace-sec", "sess-sec", "gpt-4",
+	)
+
+	if body == nil {
+		t.Fatal("response body should not be nil")
+	}
+	// With security active, blocked tool calls should be filtered out
+	if len(toolCalls) != 0 {
+		t.Errorf("toolCalls = %d, want 0 (Bash should be blocked)", len(toolCalls))
 	}
 }

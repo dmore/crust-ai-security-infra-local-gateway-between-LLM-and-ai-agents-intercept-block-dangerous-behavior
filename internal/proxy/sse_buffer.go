@@ -202,11 +202,8 @@ func (b *BufferedSSEWriter) FlushAll() error {
 	b.completed = true
 
 	for _, event := range b.events {
-		if _, err := b.underlying.Write(event.Raw); err != nil {
+		if err := b.writeRaw(event.Raw); err != nil {
 			return err
-		}
-		if b.flusher != nil {
-			b.flusher.Flush()
 		}
 	}
 
@@ -293,11 +290,8 @@ func (b *BufferedSSEWriter) FlushModified(interceptor *security.Interceptor, blo
 
 func (b *BufferedSSEWriter) flushEventsUnlocked() error {
 	for _, event := range b.events {
-		if _, err := b.underlying.Write(event.Raw); err != nil {
+		if err := b.writeRaw(event.Raw); err != nil {
 			return err
-		}
-		if b.flusher != nil {
-			b.flusher.Flush()
 		}
 	}
 	return nil
@@ -398,27 +392,14 @@ func (b *BufferedSSEWriter) flushFilteredAnthropicEvents(blockedIndices, replace
 			// Handle content_block_start
 			if bytes.Contains(event.Data, []byte(`"content_block_start"`)) && !replacedStartSent[eventIndex] {
 				replacedStartSent[eventIndex] = true
-
-				replacedEvent := map[string]any{
+				if err := b.writeSSEEvent("content_block_start", map[string]any{
 					"type":  "content_block_start",
 					"index": eventIndex,
 					"content_block": map[string]any{
-						"type":  "tool_use",
-						"id":    tc.ID,
-						"name":  shellToolName,
-						"input": map[string]any{},
+						"type": "tool_use", "id": tc.ID, "name": shellToolName, "input": map[string]any{},
 					},
-				}
-				data, err := json.Marshal(replacedEvent)
-				if err != nil {
-					log.Debug("Failed to marshal replaced event: %v", err)
-					continue
-				}
-				if _, err := b.underlying.Write([]byte("event: content_block_start\ndata: " + string(data) + "\n\n")); err != nil {
+				}); err != nil {
 					return err
-				}
-				if b.flusher != nil {
-					b.flusher.Flush()
 				}
 				continue
 			}
@@ -426,32 +407,20 @@ func (b *BufferedSSEWriter) flushFilteredAnthropicEvents(blockedIndices, replace
 			// Handle content_block_delta
 			if bytes.Contains(event.Data, []byte(`"content_block_delta"`)) && !replacedDeltaSent[eventIndex] {
 				replacedDeltaSent[eventIndex] = true
-
 				input := buildBlockedReplacement(tc.Name, matchResult)
 				inputJSONBytes, err := json.Marshal(input)
 				if err != nil {
-					log.Debug("Failed to marshal replacement input: %v", err)
 					continue
 				}
-				inputJSON := string(inputJSONBytes)
-				replacedEvent := map[string]any{
+				if err := b.writeSSEEvent("content_block_delta", map[string]any{
 					"type":  "content_block_delta",
 					"index": eventIndex,
 					"delta": map[string]any{
 						"type":         "input_json_delta",
-						"partial_json": inputJSON,
+						"partial_json": string(inputJSONBytes),
 					},
-				}
-				data, err := json.Marshal(replacedEvent)
-				if err != nil {
-					log.Debug("Failed to marshal replaced delta: %v", err)
-					continue
-				}
-				if _, err := b.underlying.Write([]byte("event: content_block_delta\ndata: " + string(data) + "\n\n")); err != nil {
+				}); err != nil {
 					return err
-				}
-				if b.flusher != nil {
-					b.flusher.Flush()
 				}
 				continue
 			}
@@ -466,83 +435,56 @@ func (b *BufferedSSEWriter) flushFilteredAnthropicEvents(blockedIndices, replace
 		if !warningInjected && bytes.Contains(event.Data, []byte(`"message_stop"`)) {
 			// Only inject for remove mode; replace mode already has text blocks
 			if len(blockedIndices) > 0 {
-				if err := b.injectAnthropicWarning(blockedCalls); err != nil {
+				if err := b.injectWarning(blockedCalls); err != nil {
 					log.Warn("Failed to inject warning: %v", err)
 				}
 			}
 			warningInjected = true
 		}
 
-		if _, err := b.underlying.Write(event.Raw); err != nil {
+		if err := b.writeRaw(event.Raw); err != nil {
 			return err
-		}
-		if b.flusher != nil {
-			b.flusher.Flush()
 		}
 	}
 
 	return nil
 }
 
-// injectAnthropicWarning injects a text content block with security warning
+// injectWarning injects a security warning into the SSE stream in the appropriate format.
+func (b *BufferedSSEWriter) injectWarning(blockedCalls []security.BlockedToolCall) error {
+	switch b.apiType {
+	case types.APITypeAnthropic:
+		return b.injectAnthropicWarning(blockedCalls)
+	case types.APITypeOpenAICompletion:
+		return b.injectOpenAIWarning(blockedCalls)
+	case types.APITypeOpenAIResponses:
+		return b.injectOpenAIResponsesWarning(blockedCalls)
+	default:
+		return nil
+	}
+}
+
 func (b *BufferedSSEWriter) injectAnthropicWarning(blockedCalls []security.BlockedToolCall) error {
 	warning := security.BuildWarningContent(blockedCalls)
 
-	// Inject content_block_start for text
-	startEvent := anthropicContentBlockStartEvent{
-		Type:  "content_block_start",
-		Index: WarningBlockIndex, // Use high index to not conflict
-		ContentBlock: anthropicContentBlockMeta{
-			Type: "text",
-			Text: "",
-		},
-	}
-	startData, err := json.Marshal(startEvent)
-	if err != nil {
-		log.Debug("Failed to marshal warning start event: %v", err)
-		return nil
-	}
-	if _, err := b.underlying.Write([]byte("event: content_block_start\ndata: " + string(startData) + "\n\n")); err != nil {
+	if err := b.writeSSEEvent("content_block_start", map[string]any{
+		"type":          "content_block_start",
+		"index":         WarningBlockIndex,
+		"content_block": map[string]any{"type": "text", "text": ""},
+	}); err != nil {
 		return err
 	}
-
-	// Inject content_block_delta with warning text
-	deltaEvent := anthropicContentBlockDeltaEvent{
-		Type:  "content_block_delta",
-		Index: WarningBlockIndex,
-		Delta: anthropicDeltaContent{
-			Type: "text_delta",
-			Text: warning,
-		},
-	}
-	deltaData, err := json.Marshal(deltaEvent)
-	if err != nil {
-		log.Debug("Failed to marshal warning delta event: %v", err)
-		return nil
-	}
-	if _, err := b.underlying.Write([]byte("event: content_block_delta\ndata: " + string(deltaData) + "\n\n")); err != nil {
+	if err := b.writeSSEEvent("content_block_delta", map[string]any{
+		"type":  "content_block_delta",
+		"index": WarningBlockIndex,
+		"delta": map[string]any{"type": "text_delta", "text": warning},
+	}); err != nil {
 		return err
 	}
-
-	// Inject content_block_stop
-	stopEvent := anthropicContentBlockStopEvent{
-		Type:  "content_block_stop",
-		Index: WarningBlockIndex,
-	}
-	stopData, err := json.Marshal(stopEvent)
-	if err != nil {
-		log.Debug("Failed to marshal warning stop event: %v", err)
-		return nil
-	}
-	if _, err := b.underlying.Write([]byte("event: content_block_stop\ndata: " + string(stopData) + "\n\n")); err != nil {
-		return err
-	}
-
-	if b.flusher != nil {
-		b.flusher.Flush()
-	}
-
-	return nil
+	return b.writeSSEEvent("content_block_stop", map[string]any{
+		"type":  "content_block_stop",
+		"index": WarningBlockIndex,
+	})
 }
 
 func (b *BufferedSSEWriter) flushFilteredOpenAIEvents(blockedIndices, replacedIndices map[int]rules.MatchResult, blockedCalls []security.BlockedToolCall) error {
@@ -559,16 +501,13 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIEvents(blockedIndices, replacedIn
 		if bytes.Equal(bytes.TrimSpace(event.Data), []byte("[DONE]")) {
 			// Inject warning before [DONE] for remove mode
 			if !warningInjected && len(blockedIndices) > 0 {
-				if err := b.injectOpenAIWarning(blockedCalls); err != nil {
+				if err := b.injectWarning(blockedCalls); err != nil {
 					log.Warn("Failed to inject warning: %v", err)
 				}
 				warningInjected = true
 			}
-			if _, err := b.underlying.Write(event.Raw); err != nil {
+			if err := b.writeRaw(event.Raw); err != nil {
 				return err
-			}
-			if b.flusher != nil {
-				b.flusher.Flush()
 			}
 			continue
 		}
@@ -576,11 +515,8 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIEvents(blockedIndices, replacedIn
 		var chunk OpenAIStreamChunk
 		if err := json.Unmarshal(event.Data, &chunk); err != nil {
 			// Not a valid chunk, send as-is
-			if _, err := b.underlying.Write(event.Raw); err != nil {
+			if err := b.writeRaw(event.Raw); err != nil {
 				return err
-			}
-			if b.flusher != nil {
-				b.flusher.Flush()
 			}
 			continue
 		}
@@ -674,65 +610,33 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIEvents(blockedIndices, replacedIn
 			}
 		}
 
-		var dataToWrite []byte
 		if modified {
-			var err error
-			dataToWrite, err = json.Marshal(chunk)
-			if err != nil {
-				log.Debug("Failed to marshal modified chunk: %v", err)
-				dataToWrite = event.Data // Fall back to original
+			if err := b.writeSSEData(chunk); err != nil {
+				return err
 			}
 		} else {
-			dataToWrite = event.Data
-		}
-
-		formatted := fmt.Sprintf("data: %s\n\n", dataToWrite)
-		if _, err := b.underlying.Write([]byte(formatted)); err != nil {
-			return err
-		}
-		if b.flusher != nil {
-			b.flusher.Flush()
+			if err := b.writeRaw(fmt.Appendf(nil, "data: %s\n\n", event.Data)); err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-// injectOpenAIWarning injects a content delta with security warning
 func (b *BufferedSSEWriter) injectOpenAIWarning(blockedCalls []security.BlockedToolCall) error {
 	warning := security.BuildWarningContent(blockedCalls)
-
-	chunk := openAIWarningChunk{
-		ID:      "security-warning",
-		Object:  "chat.completion.chunk",
-		Created: time.Now().Unix(),
-		Model:   b.model,
-		Choices: []openAIWarningChoice{
-			{
-				Index: 0,
-				Delta: openAIWarningDelta{
-					Content: warning,
-				},
-				FinishReason: nil,
-			},
-		},
-	}
-
-	data, err := json.Marshal(chunk)
-	if err != nil {
-		log.Debug("Failed to marshal OpenAI warning chunk: %v", err)
-		return nil
-	}
-	formatted := fmt.Sprintf("data: %s\n\n", data)
-
-	if _, err := b.underlying.Write([]byte(formatted)); err != nil {
-		return err
-	}
-	if b.flusher != nil {
-		b.flusher.Flush()
-	}
-
-	return nil
+	return b.writeSSEData(map[string]any{
+		"id":      "security-warning",
+		"object":  "chat.completion.chunk",
+		"created": time.Now().Unix(),
+		"model":   b.model,
+		"choices": []map[string]any{{
+			"index":         0,
+			"delta":         map[string]any{"content": warning},
+			"finish_reason": nil,
+		}},
+	})
 }
 
 func (b *BufferedSSEWriter) flushFilteredOpenAIResponsesEvents(blockedIndices, replacedIndices map[int]rules.MatchResult, blockedCalls []security.BlockedToolCall) error {
@@ -898,31 +802,27 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIResponsesEvents(blockedIndices, r
 		// Inject warning before response.completed (for remove mode)
 		if !warningInjected && event.EventType == "response.completed" {
 			if len(blockedIndices) > 0 {
-				if err := b.injectOpenAIResponsesWarning(blockedCalls); err != nil {
+				if err := b.injectWarning(blockedCalls); err != nil {
 					log.Warn("Failed to inject Responses API warning: %v", err)
 				}
 			}
 			warningInjected = true
 		}
 
-		// Write the event using Raw (preserves event: lines)
-		if _, err := b.underlying.Write(event.Raw); err != nil {
+		if err := b.writeRaw(event.Raw); err != nil {
 			return err
-		}
-		if b.flusher != nil {
-			b.flusher.Flush()
 		}
 	}
 
 	return nil
 }
 
-// writeSSEEvent marshals data as JSON and writes it as an SSE event
+// writeSSEEvent marshals data as JSON and writes it as an SSE event with "event: <type>\ndata: ...\n\n" framing.
 func (b *BufferedSSEWriter) writeSSEEvent(eventType string, data any) error {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
-		log.Debug("Failed to marshal SSE event: %v", err)
-		return nil // non-fatal
+		log.Warn("Failed to marshal SSE event: %v", err)
+		return err
 	}
 	formatted := fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, jsonData)
 	if _, err := b.underlying.Write([]byte(formatted)); err != nil {
@@ -934,76 +834,40 @@ func (b *BufferedSSEWriter) writeSSEEvent(eventType string, data any) error {
 	return nil
 }
 
-// injectOpenAIResponsesWarning injects a text delta event with security warning
-func (b *BufferedSSEWriter) injectOpenAIResponsesWarning(blockedCalls []security.BlockedToolCall) error {
-	warning := security.BuildWarningContent(blockedCalls)
-
-	// Emit as a response.output_text.delta event
-	deltaData := map[string]any{
-		"type":          "response.output_text.delta",
-		"output_index":  WarningBlockIndex,
-		"content_index": 0,
-		"delta":         warning,
-	}
-	data, err := json.Marshal(deltaData)
+// writeSSEData writes an SSE event with "data: ...\n\n" framing (no event type line).
+func (b *BufferedSSEWriter) writeSSEData(data any) error {
+	jsonData, err := json.Marshal(data)
 	if err != nil {
-		log.Debug("Failed to marshal Responses API warning: %v", err)
-		return nil
+		log.Warn("Failed to marshal SSE data: %v", err)
+		return err
 	}
-	formatted := fmt.Sprintf("event: response.output_text.delta\ndata: %s\n\n", data)
+	formatted := fmt.Sprintf("data: %s\n\n", jsonData)
 	if _, err := b.underlying.Write([]byte(formatted)); err != nil {
 		return err
 	}
 	if b.flusher != nil {
 		b.flusher.Flush()
 	}
-
 	return nil
 }
 
-// Anthropic SSE event types for compile-time type safety
-type anthropicContentBlockStartEvent struct {
-	Type         string                    `json:"type"`
-	Index        int                       `json:"index"`
-	ContentBlock anthropicContentBlockMeta `json:"content_block"`
+// writeRaw writes pre-formatted bytes and flushes.
+func (b *BufferedSSEWriter) writeRaw(raw []byte) error {
+	if _, err := b.underlying.Write(raw); err != nil {
+		return err
+	}
+	if b.flusher != nil {
+		b.flusher.Flush()
+	}
+	return nil
 }
 
-type anthropicContentBlockMeta struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
-type anthropicContentBlockDeltaEvent struct {
-	Type  string                `json:"type"`
-	Index int                   `json:"index"`
-	Delta anthropicDeltaContent `json:"delta"`
-}
-
-type anthropicDeltaContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
-type anthropicContentBlockStopEvent struct {
-	Type  string `json:"type"`
-	Index int    `json:"index"`
-}
-
-// OpenAI SSE event types for compile-time type safety
-type openAIWarningChunk struct {
-	ID      string                `json:"id"`
-	Object  string                `json:"object"`
-	Created int64                 `json:"created"`
-	Model   string                `json:"model"`
-	Choices []openAIWarningChoice `json:"choices"`
-}
-
-type openAIWarningChoice struct {
-	Index        int                `json:"index"`
-	Delta        openAIWarningDelta `json:"delta"`
-	FinishReason *string            `json:"finish_reason"`
-}
-
-type openAIWarningDelta struct {
-	Content string `json:"content,omitempty"`
+func (b *BufferedSSEWriter) injectOpenAIResponsesWarning(blockedCalls []security.BlockedToolCall) error {
+	warning := security.BuildWarningContent(blockedCalls)
+	return b.writeSSEEvent("response.output_text.delta", map[string]any{
+		"type":          "response.output_text.delta",
+		"output_index":  WarningBlockIndex,
+		"content_index": 0,
+		"delta":         warning,
+	})
 }

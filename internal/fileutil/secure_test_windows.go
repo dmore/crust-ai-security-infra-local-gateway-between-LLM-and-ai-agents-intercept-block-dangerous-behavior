@@ -15,9 +15,9 @@ func assertOwnerOnlyWindows(t *testing.T, path string) {
 	t.Helper()
 
 	// Get the current user's SID.
-	token, err := windows.OpenCurrentProcessToken()
-	if err != nil {
-		t.Fatalf("OpenCurrentProcessToken: %v", err)
+	var token windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token); err != nil {
+		t.Fatalf("OpenProcessToken: %v", err)
 	}
 	defer token.Close()
 
@@ -56,6 +56,9 @@ func assertOwnerOnlyWindows(t *testing.T, path string) {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, uint32(i), &ace); err != nil {
 			t.Fatalf("GetAce(%d): %v", i, err)
+		}
+		if ace == nil {
+			t.Fatalf("GetAce(%d) returned nil", i)
 		}
 
 		// The SID starts at the SidStart field of ACCESS_ALLOWED_ACE.

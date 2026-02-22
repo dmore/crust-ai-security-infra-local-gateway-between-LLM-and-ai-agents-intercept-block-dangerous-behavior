@@ -186,73 +186,14 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Read request body with size limit to prevent DoS
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	bodyBytes, err := io.ReadAll(r.Body)
-	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			log.Warn("Request body too large (limit: %dMB)", maxRequestBodySize/(1024*1024))
-			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
-			return
-		}
-		log.Error("Failed to read request body: %v", err)
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+	bodyBytes, parseBytes, reqBody, ok := readAndDecompressBody(w, r)
+	if !ok {
 		return
-	}
-	_ = r.Body.Close()
-
-	// Decompress request body for local parsing only (model extraction, security scanning).
-	// The original compressed body is forwarded to upstream untouched for full transparency.
-	parseBytes := bodyBytes
-	if len(bodyBytes) > 4 {
-		contentEncoding := r.Header.Get("Content-Encoding")
-		if contentEncoding == "" {
-			// Auto-detect by magic bytes
-			if bodyBytes[0] == 0x1f && bodyBytes[1] == 0x8b {
-				contentEncoding = encodingGzip
-			} else if bodyBytes[0] == 0x28 && bodyBytes[1] == 0xb5 && bodyBytes[2] == 0x2f && bodyBytes[3] == 0xfd {
-				contentEncoding = "zstd"
-			}
-		}
-		switch contentEncoding {
-		case encodingGzip:
-			if gr, err := gzip.NewReader(bytes.NewReader(bodyBytes)); err == nil {
-				if decompressed, err := io.ReadAll(gr); err == nil {
-					parseBytes = decompressed
-				}
-				if err := gr.Close(); err != nil {
-					log.Debug("Failed to close gzip reader: %v", err)
-				}
-			}
-		case "zstd":
-			if decoder, err := zstd.NewReader(nil); err == nil {
-				if decompressed, err := decoder.DecodeAll(bodyBytes, nil); err == nil {
-					parseBytes = decompressed
-				}
-				decoder.Close()
-			}
-		}
-
-		// Fail-closed: reject requests with unsupported Content-Encoding
-		// that we couldn't decompress (prevents bypassing security scanning).
-		// Only reject when a Content-Encoding header was present but we couldn't decode it.
-		if contentEncoding != "" && bytes.Equal(parseBytes, bodyBytes) {
-			log.Warn("Unsupported Content-Encoding %q — rejecting request", contentEncoding)
-			http.Error(w, "Unsupported Content-Encoding: "+contentEncoding, http.StatusUnsupportedMediaType)
-			return
-		}
 	}
 
 	// Save decompressed request body for telemetry (human-readable JSON)
 	requestBody := make([]byte, len(parseBytes))
 	copy(requestBody, parseBytes)
-
-	// Parse model name and messages (from decompressed bytes)
-	var reqBody RequestBody
-	if err := json.Unmarshal(parseBytes, &reqBody); err != nil && len(parseBytes) > 0 {
-		log.Debug("Request body parse error: %v", err)
-	}
 
 	// Compute session ID from messages (system prompt + first user message)
 	sessionID := computeSessionID(reqBody.Messages)
@@ -260,7 +201,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		sessionID = traceID // fallback to traceID if no messages
 	}
 
-	// Strip /api prefix sent by some clients (e.g. PhpStorm) before any
+	// Strip /api prefix sent by some IDE clients before any
 	// path-based logic so detectAPIType and buildUpstreamURL both see
 	// the canonical path.
 	reqPath := stripAPIPrefix(r.URL.Path)
@@ -309,37 +250,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx = r.Context()
 	}
 
-	// Build upstream URL
-	upstreamURL, providerAPIKey, err := p.buildUpstreamURL(reqPath, reqBody.Model)
-	if err != nil {
-		log.Warn("Failed to build upstream URL: %v", err)
-		http.Error(w, "invalid upstream URL", http.StatusBadGateway)
+	upstreamReq, targetURLStr, providerAPIKey, ok := p.prepareUpstreamRequest(
+		ctx, w, r, reqPath, reqBody.Model, bodyBytes, apiType,
+	)
+	if !ok {
 		return
 	}
-	upstreamURL.RawQuery = r.URL.RawQuery
-
-	targetURLStr := upstreamURL.String()
-
-	log.Debug("Forwarding %s %s model=%s → %s", r.Method, r.URL.Path, reqBody.Model, targetURLStr)
-
-	// Clone original request for maximum transparency — preserves all headers,
-	// trailers, and internal state exactly as the client sent them.
-	targetURL, err := url.Parse(targetURLStr)
-	if err != nil {
-		http.Error(w, "invalid upstream URL", http.StatusBadGateway)
-		return
-	}
-	upstreamReq := r.Clone(ctx)
-	upstreamReq.URL = targetURL
-	upstreamReq.Host = targetURL.Host
-	upstreamReq.RequestURI = "" // required for http.Client.Do()
-	upstreamReq.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-	upstreamReq.ContentLength = int64(len(bodyBytes))
-
-	// Remove hop-by-hop headers (including Connection-listed per RFC 7230 §6.1)
-	stripHopByHopHeaders(upstreamReq.Header)
-
-	injectAuth(upstreamReq.Header, providerAPIKey, p.apiKey, apiType.IsAnthropic())
 
 	// For streaming requests, use reverse proxy for better streaming support
 	if reqBody.Stream {
@@ -387,42 +303,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	// Read response body
-	var responseBody []byte
-	var inputTokens, outputTokens int64
-	var toolCalls []telemetry.ToolCall
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		inputTokens, outputTokens, responseBody = extractUsageAndBody(resp, apiType)
-		toolCalls = extractToolCalls(responseBody, apiType)
-
-		// Security interception for non-streaming responses
-		interceptor := security.GetGlobalInterceptor()
-		if interceptor != nil && interceptor.IsEnabled() && len(toolCalls) > 0 {
-			secCfg := security.GetInterceptionConfig()
-			result, err := interceptor.InterceptToolCalls(responseBody, traceID, sessionID, reqBody.Model, apiType, secCfg.BlockMode)
-			if err != nil {
-				log.Warn("Security interception error: %v", err)
-			} else {
-				responseBody = result.ModifiedResponse
-				if result.HasBlockedCalls {
-					log.Info("Blocked %d tool calls", len(result.BlockedToolCalls))
-				}
-				toolCalls = result.AllowedToolCalls
-			}
-		}
-
-	} else {
-		var err error
-		responseBody, err = io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize+1))
-		if err != nil {
-			log.Warn("Failed to read error response body: %v", err)
-		}
-		if int64(len(responseBody)) > maxErrorBodySize {
-			log.Warn("Error response body too large, truncating to %dKB", maxErrorBodySize/1024)
-			responseBody = responseBody[:maxErrorBodySize]
-		}
-	}
+	responseBody, inputTokens, outputTokens, toolCalls := processNonStreamingResponse(
+		resp, apiType, traceID, sessionID, reqBody.Model,
+	)
 
 	duration := time.Since(startTime)
 
@@ -454,6 +337,157 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.Itoa(len(responseBody)))
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(responseBody) //nolint:gosec // binary proxy relay, not HTML; nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+}
+
+// readAndDecompressBody reads the request body with size limits, decompresses
+// gzip/zstd for local security scanning (forwarding original bytes upstream),
+// and parses the JSON. Returns ok=false if an HTTP error was already written.
+func readAndDecompressBody(w http.ResponseWriter, r *http.Request) (
+	bodyBytes, parseBytes []byte, reqBody RequestBody, ok bool,
+) {
+	// Read request body with size limit to prevent DoS
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			log.Warn("Request body too large (limit: %dMB)", maxRequestBodySize/(1024*1024))
+			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+			return nil, nil, RequestBody{}, false
+		}
+		log.Error("Failed to read request body: %v", err)
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return nil, nil, RequestBody{}, false
+	}
+	_ = r.Body.Close()
+
+	// Decompress request body for local parsing only (model extraction, security scanning).
+	// The original compressed body is forwarded to upstream untouched for full transparency.
+	parseBytes = bodyBytes
+	if len(bodyBytes) > 4 {
+		contentEncoding := r.Header.Get("Content-Encoding")
+		if contentEncoding == "" {
+			// Auto-detect by magic bytes
+			if bodyBytes[0] == 0x1f && bodyBytes[1] == 0x8b {
+				contentEncoding = encodingGzip
+			} else if bodyBytes[0] == 0x28 && bodyBytes[1] == 0xb5 && bodyBytes[2] == 0x2f && bodyBytes[3] == 0xfd {
+				contentEncoding = "zstd"
+			}
+		}
+		switch contentEncoding {
+		case encodingGzip:
+			if gr, err := gzip.NewReader(bytes.NewReader(bodyBytes)); err == nil {
+				if decompressed, err := io.ReadAll(gr); err == nil {
+					parseBytes = decompressed
+				}
+				if err := gr.Close(); err != nil {
+					log.Debug("Failed to close gzip reader: %v", err)
+				}
+			}
+		case "zstd":
+			if decoder, err := zstd.NewReader(nil); err == nil {
+				if decompressed, err := decoder.DecodeAll(bodyBytes, nil); err == nil {
+					parseBytes = decompressed
+				}
+				decoder.Close()
+			}
+		}
+
+		// Fail-closed: reject requests with unsupported Content-Encoding
+		// that we couldn't decompress (prevents bypassing security scanning).
+		// Only reject when a Content-Encoding header was present but we couldn't decode it.
+		if contentEncoding != "" && bytes.Equal(parseBytes, bodyBytes) {
+			log.Warn("Unsupported Content-Encoding %q — rejecting request", contentEncoding)
+			http.Error(w, "Unsupported Content-Encoding: "+contentEncoding, http.StatusUnsupportedMediaType)
+			return nil, nil, RequestBody{}, false
+		}
+	}
+
+	// Parse model name and messages (from decompressed bytes)
+	if err := json.Unmarshal(parseBytes, &reqBody); err != nil && len(parseBytes) > 0 {
+		log.Debug("Request body parse error: %v", err)
+	}
+
+	return bodyBytes, parseBytes, reqBody, true
+}
+
+// prepareUpstreamRequest builds the upstream URL, clones the incoming request,
+// strips hop-by-hop headers, and injects authentication. Returns ok=false if
+// an HTTP error was already written.
+func (p *Proxy) prepareUpstreamRequest(
+	ctx context.Context, w http.ResponseWriter, r *http.Request,
+	reqPath, model string, bodyBytes []byte, apiType types.APIType,
+) (upstreamReq *http.Request, targetURLStr, providerAPIKey string, ok bool) {
+	upstreamURL, providerAPIKey, err := p.buildUpstreamURL(reqPath, model)
+	if err != nil {
+		log.Warn("Failed to build upstream URL: %v", err)
+		http.Error(w, "invalid upstream URL", http.StatusBadGateway)
+		return nil, "", "", false
+	}
+	upstreamURL.RawQuery = r.URL.RawQuery
+	targetURLStr = upstreamURL.String()
+
+	log.Debug("Forwarding %s %s model=%s → %s", r.Method, r.URL.Path, model, targetURLStr)
+
+	// Clone original request for maximum transparency — preserves all headers,
+	// trailers, and internal state exactly as the client sent them.
+	targetURL, err := url.Parse(targetURLStr)
+	if err != nil {
+		http.Error(w, "invalid upstream URL", http.StatusBadGateway)
+		return nil, "", "", false
+	}
+	upstreamReq = r.Clone(ctx)
+	upstreamReq.URL = targetURL
+	upstreamReq.Host = targetURL.Host
+	upstreamReq.RequestURI = "" // required for http.Client.Do()
+	upstreamReq.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	upstreamReq.ContentLength = int64(len(bodyBytes))
+
+	// Remove hop-by-hop headers (including Connection-listed per RFC 7230 §6.1)
+	stripHopByHopHeaders(upstreamReq.Header)
+
+	injectAuth(upstreamReq.Header, providerAPIKey, p.apiKey, apiType.IsAnthropic())
+
+	return upstreamReq, targetURLStr, providerAPIKey, true
+}
+
+// processNonStreamingResponse reads the response body, extracts token usage
+// and tool calls, and applies Layer 1 security interception.
+func processNonStreamingResponse(
+	resp *http.Response, apiType types.APIType,
+	traceID, sessionID, model string,
+) (responseBody []byte, inputTokens, outputTokens int64, toolCalls []telemetry.ToolCall) {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		inputTokens, outputTokens, responseBody = extractUsageAndBody(resp, apiType)
+		toolCalls = extractToolCalls(responseBody, apiType)
+
+		// Security interception for non-streaming responses
+		interceptor := security.GetGlobalInterceptor()
+		if interceptor != nil && interceptor.IsEnabled() && len(toolCalls) > 0 {
+			secCfg := security.GetInterceptionConfig()
+			result, err := interceptor.InterceptToolCalls(responseBody, traceID, sessionID, model, apiType, secCfg.BlockMode)
+			if err != nil {
+				log.Warn("Security interception error: %v", err)
+			} else {
+				responseBody = result.ModifiedResponse
+				if result.HasBlockedCalls {
+					log.Info("Blocked %d tool calls", len(result.BlockedToolCalls))
+				}
+				toolCalls = result.AllowedToolCalls
+			}
+		}
+	} else {
+		var err error
+		responseBody, err = io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize+1))
+		if err != nil {
+			log.Warn("Failed to read error response body: %v", err)
+		}
+		if int64(len(responseBody)) > maxErrorBodySize {
+			log.Warn("Error response body too large, truncating to %dKB", maxErrorBodySize/1024)
+			responseBody = responseBody[:maxErrorBodySize]
+		}
+	}
+	return
 }
 
 // handleStreamingRequest handles SSE streaming requests
@@ -706,9 +740,9 @@ readLoop:
 }
 
 // stripAPIPrefix removes a leading "/api" segment from the request path.
-// Some clients (e.g. JetBrains IDEs) prepend /api/ when targeting an
-// OpenAI-compatible endpoint. Only strips when "/api" is followed by "/"
-// or is the entire path — "/apis/..." is left untouched.
+// Some IDE clients prepend /api/ when targeting an OpenAI-compatible
+// endpoint. Only strips when "/api" is followed by "/" or is the entire
+// path — "/apis/..." is left untouched.
 func stripAPIPrefix(path string) string {
 	if path == "/api" {
 		return "/"
@@ -760,9 +794,6 @@ func injectAuth(h http.Header, providerKey, gatewayKey string, isAnthropic bool)
 // it always uses the configured upstream URL.
 // Returns the target URL and an optional per-provider API key.
 func (p *Proxy) buildUpstreamURL(reqPath, model string) (url.URL, string, error) {
-	// Strip /api prefix (idempotent — ServeHTTP also strips for detectAPIType).
-	reqPath = stripAPIPrefix(reqPath)
-
 	u := *p.upstreamURL
 
 	if p.autoMode {
