@@ -1,0 +1,4 @@
+# Enforce LF line endings for text files commonly checked by linters.
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.sh   text eol=lf

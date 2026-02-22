@@ -280,7 +280,7 @@ func setupTestProxy(t *testing.T, upstream *httptest.Server) *Proxy {
 
 // setupSecurityWithRules sets up the global security manager with the given rules.
 // Returns a cleanup function to restore original state.
-func setupSecurityWithRules(t *testing.T, yamlRules string) func() { //nolint:unparam
+func setupSecurityWithRules(t *testing.T, yamlRules string) func() {
 	t.Helper()
 
 	// Write rules to temp directory
@@ -671,8 +671,8 @@ func TestStripAPIPrefix(t *testing.T) {
 		{"/api", "/"},
 		{"/api/", "/"},
 		{"/v1/chat/completions", "/v1/chat/completions"}, // no-op
-		{"/apis/foo", "/apis/foo"},                        // not stripped
-		{"/health", "/health"},                            // unrelated
+		{"/apis/foo", "/apis/foo"},                       // not stripped
+		{"/health", "/health"},                           // unrelated
 	}
 	for _, tt := range tests {
 		got := stripAPIPrefix(tt.input)
