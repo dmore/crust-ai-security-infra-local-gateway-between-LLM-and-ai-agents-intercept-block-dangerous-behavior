@@ -45,15 +45,10 @@ func stripControlChars(s string) string {
 // NFKC handles fullwidth→ASCII, compatibility decomposition, etc.
 // stripConfusables handles Cyrillic/Greek homoglyphs (а→a, е→e, etc.).
 func NormalizeUnicode(s string) string {
-	// SECURITY: Sanitize invalid UTF-8 before NFKC normalization.
-	// Invalid bytes (e.g., 0xF5) can interfere with NFKC processing of
-	// subsequent valid runes, breaking idempotency.
 	s = strings.ToValidUTF8(s, "\uFFFD")
 	s = norm.NFKC.String(s)
 	s = stripConfusables(s)
-	// Re-normalize: confusable replacement (e.g., Cyrillic а→a) can create
-	// new composition pairs with adjacent combining marks (e.g., a + U+0323
-	// → ạ U+1EA1). Without this second pass, NormalizeUnicode is not idempotent.
+	s = stripInvisible(s)
 	s = norm.NFKC.String(s)
 	return s
 }

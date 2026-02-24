@@ -309,6 +309,64 @@ scenarios:
     description: "MCP tool reading multiple safe source files"
 
   # ============================================================================
+  # DLP — Must NOT false positive on legitimate code patterns
+  # ============================================================================
+
+  # Writing code that checks for AWS key prefixes (no real key)
+  - tool: Write
+    args:
+      file_path: "/home/user/project/validate.go"
+      content: "if strings.HasPrefix(key, \"AKIA\") {\n\treturn errors.New(\"real key\")\n}"
+    description: "DLP safe: code checking AWS key prefix (no real key)"
+
+  # Writing code that references GitHub token prefix (no full token)
+  - tool: Write
+    args:
+      file_path: "/home/user/project/auth.go"
+      content: "const githubTokenPrefix = \"ghp_\"\nif !strings.HasPrefix(token, githubTokenPrefix) {"
+    description: "DLP safe: code checking ghp_ prefix (no full token)"
+
+  # Writing Stripe test key (sk_test_, not sk_live_)
+  - tool: Write
+    args:
+      file_path: "/home/user/project/stripe_test.go"
+      content: "stripe.Key = \"sk_test_ABCDEFGHIJKLMNOPQRSTUVWXYZab\""
+    description: "DLP safe: Stripe test key (sk_test_ not sk_live_)"
+
+  # Writing code mentioning Slack token format (no full token)
+  - tool: Write
+    args:
+      file_path: "/home/user/project/slack.go"
+      content: "// Slack tokens start with xoxb-\ntoken := os.Getenv(\"SLACK_TOKEN\")"
+    description: "DLP safe: comment about Slack token format (no real token)"
+
+  # Grepping for AWS keys via Bash (execute, not write)
+  - tool: Bash
+    args:
+      command: "grep -r 'AKIA' /home/user/project/"
+    description: "DLP safe: grepping for AWS keys (execute, not write)"
+
+  # Writing code with key-value patterns (not Mailgun key-)
+  - tool: Write
+    args:
+      file_path: "/home/user/project/config.go"
+      content: "config[\"key-name\"] = \"some-value\""
+    description: "DLP safe: key-value config (not a real API key)"
+
+  # Writing code referencing Google API key env var
+  - tool: Write
+    args:
+      file_path: "/home/user/project/google.go"
+      content: "apiKey := os.Getenv(\"GOOGLE_API_KEY\")"
+    description: "DLP safe: reading Google API key from env var"
+
+  # Reading a file that happens to contain a real AWS key (read, not write)
+  - tool: Read
+    args:
+      file_path: "/home/user/project/old_config.py"
+    description: "DLP safe: reading file (DLP only fires on writes)"
+
+  # ============================================================================
   # Shell Features (previously false-positived by PreFilter)
   # ============================================================================
 

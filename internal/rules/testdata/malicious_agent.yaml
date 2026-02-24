@@ -297,3 +297,8 @@ scenarios:
       url: "file:////home//user//.ssh//id_rsa"
     expect: BLOCKED
     description: "Double-slash file:// path bypass"
+
+  # ============================================================================
+  # 11. DLP — Secret detection tests moved to dlp_test.go (TestDLPSecretDetection)
+  #     to avoid GitHub Push Protection false positives on test fixtures.
+  # ============================================================================

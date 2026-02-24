@@ -1,0 +1,6 @@
+# Allowlist for test fixtures with fake secrets.
+
+[allowlist]
+  paths = [
+    '''internal/rules/testdata/''',
+  ]
