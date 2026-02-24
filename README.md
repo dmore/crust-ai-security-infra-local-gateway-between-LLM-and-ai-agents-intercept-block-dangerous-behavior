@@ -51,6 +51,8 @@ irm https://raw.githubusercontent.com/BakeLens/crust/main/install.ps1 | iex
 
 **Docker:**
 ```bash
+docker compose up -d        # uses the included docker-compose.yml
+# or manually:
 docker build -t crust https://github.com/BakeLens/crust.git
 docker run -p 9090:9090 crust
 ```
@@ -96,7 +98,7 @@ crust stop       # Stop crust
 
 ## Built-in Protection
 
-Crust ships with **14 security rules** out of the box:
+Crust ships with **14 security rules** and **19 DLP token-detection patterns** out of the box:
 
 | Category | What's Protected |
 |----------|-----------------|
@@ -107,11 +109,12 @@ Crust ships with **14 security rules** out of the box:
 | **Package Tokens** | npm, pip, Cargo, Composer, NuGet, Gem, Hex auth tokens |
 | **Git Credentials** | `.git-credentials`, `.gitconfig` with credentials |
 | **Persistence** | Shell RC files, `authorized_keys`, crontabs |
+| **DLP Token Detection** | Content-based scanning for real API keys and tokens (AWS, GitHub, Stripe, OpenAI, Anthropic, and [14 more](docs/how-it-works.md#dlp-secret-detection)) |
 | **Key Exfiltration** | Content-based PEM private key detection |
 | **Self-Protection** | Agents cannot read, modify, or disable Crust itself |
 | **Dangerous Commands** | `eval`/`exec` with dynamic code execution |
 
-All rules are open source: [`internal/rules/builtin/security.yaml`](internal/rules/builtin/security.yaml)
+All rules are open source: [`internal/rules/builtin/security.yaml`](internal/rules/builtin/security.yaml) (path rules) and [`internal/rules/dlp.go`](internal/rules/dlp.go) (DLP patterns)
 
 ## Custom Rules
 
@@ -150,6 +153,8 @@ Crust inspects tool calls at two layers:
 1. **Layer 0 (Request Scan)**: Scans tool calls in conversation history before they reach the LLM — catches agents replaying dangerous actions.
 2. **Layer 1 (Response Scan)**: Scans tool calls in the LLM's response before they execute — blocks new dangerous actions in real-time.
 
+Layer 1 applies a [10-step evaluation pipeline](docs/how-it-works.md) — input sanitization, Unicode normalization, obfuscation detection, DLP secret scanning, path-based rules, and fallback content matching — each step in microseconds.
+
 All activity is logged locally to encrypted storage.
 
 ## Documentation
@@ -160,6 +165,8 @@ All activity is logged locally to encrypted storage.
 | [CLI Reference](docs/cli.md) | Commands, flags, environment variables |
 | [How It Works](docs/how-it-works.md) | Architecture, rule schema, protection categories |
 | [Docker](docs/docker.md) | Dockerfile, docker-compose, TUI in containers |
+| [Shell Parsing](docs/shell-parsing.md) | How Bash commands are parsed for path and command extraction |
+| [Migration](docs/migration.md) | Upgrade guides for breaking changes between versions |
 | [TUI Design](docs/tui.md) | Terminal UI internals, plain mode, Docker behavior |
 
 ## Build from Source

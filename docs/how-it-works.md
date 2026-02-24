@@ -81,6 +81,34 @@ Layer 1 Rule Evaluation Order:
 
 ---
 
+## DLP Secret Detection
+
+Step 7 of the evaluation pipeline runs hardcoded DLP (Data Loss Prevention) patterns against all operations. These patterns detect real API keys and tokens by their format, regardless of file path or tool name.
+
+| Provider | Pattern |
+|----------|---------|
+| AWS | Access key IDs (`AKIA...`, `ASIA...`) |
+| GitHub | Personal access tokens, fine-grained tokens (`ghp_...`, `github_pat_...`) |
+| GitLab | Personal access tokens (`glpat-...`) |
+| Slack | Bot/app tokens, webhook URLs |
+| Stripe | Live keys, webhook signing secrets (`sk_live_...`, `whsec_...`) |
+| Google | API keys (`AIza...`) |
+| SendGrid | API keys (`SG....`) |
+| Heroku | API keys (`heroku_...`) |
+| OpenAI | Project keys (`sk-proj-...`) |
+| Anthropic | API keys (`sk-ant-api03-...`) |
+| Shopify | Shared secrets, access tokens (`shpss_...`, `shpat_...`) |
+| Databricks | Access tokens (`dapi...`) |
+| PyPI | Upload tokens (`pypi-...`) |
+| npm | Auth tokens (`npm_...`) |
+| age | Secret keys (`AGE-SECRET-KEY-...`) |
+
+Patterns are sourced from [gitleaks v8.24](https://github.com/gitleaks/gitleaks), curated for blocking (not warning). See `internal/rules/dlp.go` for the full list.
+
+In addition, [gitleaks](https://github.com/gitleaks/gitleaks) is used as a secondary scanner if installed, providing coverage for additional token formats beyond the hardcoded set.
+
+---
+
 ## Built-in Rule Principles
 
 1. **Protect secrets first** - Credentials are the #1 target; block all access paths
