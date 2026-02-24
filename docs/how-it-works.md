@@ -12,8 +12,16 @@ Agent Request ──▶ [Layer 0: History Scan] ──▶ LLM ──▶ [Layer 1
                "Bad agent detected"                   "Action blocked"
 
 Layer 1 Rule Evaluation Order:
-  1. Operation-based Rules → path/command/host matching for known tools
-  2. Fallback Rules (content-only) → raw JSON matching, works for ANY tool
+  1. Sanitize tool name → strip null bytes and control chars
+  2. Extract paths, commands, content from tool arguments
+  3. Normalize Unicode → NFKC, strip invisible chars and confusables (all text fields)
+  4. Block null bytes in write content
+  5. Detect obfuscation (base64, hex, IFS) and shell evasion
+  6. Self-protection → block management API/socket access
+  7. DLP Secret Detection → blocks real API keys/tokens (hardcoded + gitleaks)
+  8. Path normalization → expand ~, env vars, globs, resolve symlinks
+  9. Operation-based Rules → path/command/host matching for known tools
+  10. Fallback Rules (content-only) → raw JSON matching, works for ANY tool
 ```
 
 **Layer 0 (Request History):** Scans tool_calls in conversation history. Catches "bad agent" patterns where malicious actions already occurred in past turns.
@@ -68,6 +76,7 @@ Layer 1 Rule Evaluation Order:
 | LLM generates `rm -rf /etc` | - | ✅ Blocked |
 | `$(cat .env)` obfuscation | - | ✅ Blocked |
 | Symlink bypass | - | ✅ Blocked (composite) |
+| Leaking real API keys/tokens | - | ✅ Blocked (DLP) |
 | MCP plugin (e.g. Playwright) | - | ✅ Blocked (content-only) |
 
 ---
@@ -88,7 +97,7 @@ The rule engine can protect against various attack vectors:
 
 | Category | Examples |
 |----------|----------|
-| Credentials | .env, SSH keys, cloud creds, tokens |
+| Credentials | .env, SSH keys, cloud creds, tokens, DLP secret detection |
 | System | `/etc/passwd`, `/etc/shadow`, binaries, kernel modules, boot |
 | Persistence | Shell RC, cron, systemd, git hooks |
 | Privilege Escalation | Sudoers, PAM, LD_PRELOAD |

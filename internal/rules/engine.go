@@ -73,6 +73,7 @@ type Engine struct {
 	normalizer *Normalizer
 	loader     *Loader
 	preFilter  *PreFilter
+	dlpScanner *DLPScanner
 
 	// Configuration
 	config EngineConfig
@@ -148,6 +149,7 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 		normalizer: NewNormalizer(),
 		loader:     loader,
 		preFilter:  NewPreFilter(),
+		dlpScanner: NewDLPScanner(),
 		config:     cfg,
 		hitCounts:  make(map[string]*int64),
 	}
@@ -208,6 +210,7 @@ func NewTestEngine(rules []Rule) (*Engine, error) {
 		normalizer: NewNormalizer(),
 		loader:     NewLoader(""),
 		preFilter:  NewPreFilter(),
+		dlpScanner: &DLPScanner{},
 		config:     EngineConfig{DisableBuiltin: true},
 		hitCounts:  make(map[string]*int64),
 	}
@@ -328,11 +331,37 @@ func (e *Engine) AddRulesFromFile(path string) (string, error) {
 // Evaluate evaluates a tool call against path-based rules
 // Returns MatchResult (same as pattern-based for compatibility)
 func (e *Engine) Evaluate(call ToolCall) MatchResult {
-	// Step 1: Extract paths and operation from the tool call
+	// Step 1: Sanitize tool name — defense-in-depth at the security boundary.
+	call.Name = SanitizeToolName(call.Name)
+
+	// Step 2: Extract paths and operation from the tool call.
 	info := e.extractor.Extract(call.Name, call.Arguments)
 
-	// Step 1.4: PreFilter — detect obfuscation patterns the AST parser misses
-	// (base64 decode, hex escapes, IFS manipulation, dangerous curl/nc flags)
+	// Step 3: Normalize Unicode (NFKC + strip invisible) before any matching.
+	if info.Command != "" {
+		info.Command = NormalizeUnicode(info.Command)
+	}
+	if info.Content != "" {
+		info.Content = NormalizeUnicode(info.Content)
+	}
+	if info.RawJSON != "" {
+		info.RawJSON = NormalizeUnicode(info.RawJSON)
+	}
+
+	// Step 4: Block null bytes in write content.
+	if (info.Operation == OpWrite || info.Operation == OpNone) && info.Content != "" {
+		if strings.ContainsRune(info.Content, 0) {
+			return MatchResult{
+				Matched:  true,
+				RuleName: "builtin:block-null-byte-write",
+				Severity: SeverityHigh,
+				Action:   ActionBlock,
+				Message:  "Cannot write content containing null bytes",
+			}
+		}
+	}
+
+	// Step 5: PreFilter — detect obfuscation (base64, hex, IFS, curl/nc).
 	if info.Command != "" {
 		if match := e.preFilter.Check(info.Command); match != nil {
 			return MatchResult{
@@ -345,7 +374,7 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 		}
 	}
 
-	// Step 1.5: Block evasive commands that prevent static analysis
+	// Step 6: Block evasive commands that prevent static analysis.
 	if info.Evasive {
 		return MatchResult{
 			Matched:  true,
@@ -356,19 +385,7 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 		}
 	}
 
-	// Step 1.55: Normalize content for confusable/fullwidth bypass prevention.
-	// This protects both the hardcoded self-protection check and all content-only rules.
-	if info.Content != "" {
-		info.Content = NormalizeUnicode(info.Content)
-	}
-	if info.RawJSON != "" {
-		info.RawJSON = NormalizeUnicode(info.RawJSON)
-	}
-
-	// Step 1.6: Hardcoded self-protection — block management API access.
-	// This check lives in Go code (not YAML) so it cannot be tampered with
-	// by agents modifying rule files or triggering hot-reload.
-	// Uses RawJSON (full payload) — not Content, which may be overwritten to a single field.
+	// Step 7: Self-protection — block management API access (hardcoded, not YAML).
 	if info.RawJSON != "" && selfProtectAPIRegex.MatchString(info.RawJSON) {
 		return MatchResult{
 			Matched:  true,
@@ -379,8 +396,7 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 		}
 	}
 
-	// Step 1.65: Block management API access via Unix socket / named pipe.
-	// Agents may try curl --unix-socket, socat, or direct Python AF_UNIX.
+	// Step 8: Block management API access via Unix socket / named pipe.
 	if info.RawJSON != "" && selfProtectSocketRegex.MatchString(info.RawJSON) {
 		return MatchResult{
 			Matched:  true,
@@ -391,37 +407,56 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 		}
 	}
 
+	// Step 9: DLP — detect API keys/tokens in all operations.
+	{
+		dlpContent := info.RawJSON
+		if dlpContent == "" {
+			dlpContent = info.Content
+		}
+		if dlpContent != "" {
+			for _, pat := range dlpPatterns {
+				if pat.re.MatchString(dlpContent) {
+					return MatchResult{
+						Matched:  true,
+						RuleName: pat.name,
+						Severity: SeverityCritical,
+						Action:   ActionBlock,
+						Message:  pat.message,
+					}
+				}
+			}
+
+			if findings := e.dlpScanner.Scan(dlpContent); len(findings) > 0 {
+				f := findings[0]
+				msg := "Blocked secret — " + f.Description
+				if len(findings) > 1 {
+					msg += fmt.Sprintf(" (and %d more)", len(findings)-1)
+				}
+				return MatchResult{
+					Matched:  true,
+					RuleName: "builtin:dlp-gitleaks-" + f.RuleID,
+					Severity: SeverityHigh,
+					Action:   ActionBlock,
+					Message:  msg,
+				}
+			}
+		}
+	}
+
 	e.mu.RLock()
 	rules := e.merged
 	e.mu.RUnlock()
 
-	// Step 1.9: Filter out bare shell globs from extracted paths.
-	// The shell parser may extract glob patterns (*, ?, *.txt) from
-	// redirections like "<*" or arguments. These are not real file paths —
-	// the shell expands them before any file operation. Without filtering,
-	// a bare "*" normalizes to "/cwd/*" which matches any protected glob
-	// pattern (e.g., **/.env), causing false positives.
+	// Step 10: Filter bare shell globs — they're not real paths.
 	info.Paths = filterShellGlobs(info.Paths)
 
-	// Step 2: Normalize extracted paths (without symlink resolution yet)
+	// Step 11: Normalize paths (expand ~, env vars; no symlink resolution yet).
 	normalizedPaths := e.normalizer.NormalizeAll(info.Paths)
 
-	// Step 2.1: Expand glob patterns against the real filesystem.
-	// Crust runs on the same host as the agent and can check what files
-	// actually exist. When a command uses a glob (e.g., "cat ~/.e*"), the
-	// shell extractor preserves the literal glob since it can't expand it
-	// in dry-run mode. We expand it here using filepath.Glob so that
-	// "~/.e*" resolves to "~/.env" (if it exists) and the normal matcher
-	// catches it precisely — no heuristic reverse-glob needed.
-	// If the glob matches nothing, the path is dropped (nothing to protect).
+	// Step 12: Expand globs against real filesystem (e.g. ~/.e* → ~/.env).
 	normalizedPaths = expandFileGlobs(normalizedPaths)
 
-	// Step 2.5: Block /proc access (Linux-only, no-op on other platforms).
-	// /proc exposes process environ, cmdline, memory — all sensitive.
-	// Hardcoded in Go (not YAML) so it cannot be tampered with.
-	// Check BEFORE symlink resolution: EvalSymlinks on /proc/self/fd/N resolves
-	// to the target file, losing the /proc/ prefix. The normalizer already
-	// maps /dev/fd → /proc/self/fd so traversals like /dev/fd/../environ match.
+	// Step 13: Block /proc access (hardcoded; checked before symlink resolution).
 	if blocked, path := hasProcPath(normalizedPaths); blocked {
 		return MatchResult{
 			Matched:  true,
@@ -432,26 +467,18 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 		}
 	}
 
-	// Step 2.9: Resolve symlinks for rule matching (after proc check).
-	// Match against BOTH pre-resolved and post-resolved paths so rules work
-	// regardless of whether they use symlink paths or real paths.
-	// Example: on macOS /etc is a symlink to /private/etc — a rule for
-	// "/etc/passwd" matches the pre-resolved path, while "/private/etc/passwd"
-	// matches the resolved path. User-created symlinks (ln -s ~/.ssh/id_rsa
-	// /tmp/x) are caught by the resolved path matching the SSH key rule.
+	// Step 14: Resolve symlinks — match both original and resolved paths.
 	resolvedPaths := e.normalizer.resolveSymlinks(normalizedPaths)
 	allPaths := mergeUnique(normalizedPaths, resolvedPaths)
 
-	// Step 3: Evaluate operation-based rules (for known tools)
+	// Step 15: Evaluate operation-based rules (for known tools).
 	if info.Operation != OpNone {
 		if result := e.evaluateOperationRules(rules, info, allPaths, call.Name); result.Matched {
 			return result
 		}
 	}
 
-	// Step 4: Fallback rules (content-only) - matches raw JSON of ANY tool including MCP
-	// Uses RawJSON (full payload) so extractContentField overwrites don't hide fields.
-	// Uses pre-compiled content regex from CompiledMatch when available.
+	// Step 16: Fallback content-only rules — matches raw JSON of any tool.
 	contentForRules := info.RawJSON
 	if contentForRules == "" {
 		contentForRules = info.Content
@@ -461,11 +488,7 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 			continue
 		}
 		if compiled.Rule.IsContentOnly() && contentForRules != "" {
-			// Respect actions filter if rule specifies actions.
-			// E.g., detect-private-key-write with actions:[write] should NOT
-			// fire on read operations (grep "PRIVATE KEY" *.py).
-			// OpNone (unknown tools, MCP plugins) still matches regardless —
-			// preserves catch-all behavior for unrecognized tools.
+			// Respect actions filter; OpNone (unknown/MCP tools) always matches.
 			if info.Operation != OpNone && !compiled.Rule.HasAction(info.Operation) {
 				continue
 			}
