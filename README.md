@@ -86,6 +86,8 @@ Point your agent to Crust:
 
 That's it. Crust auto-detects the provider from the model name and passes through your auth. Works with all major coding agents out of the box — each agent's tool names are recognized automatically. Clients that send `/api/v1/...` paths (e.g. some JetBrains configurations) are also supported — the `/api` prefix is stripped automatically.
 
+For providers with non-standard base paths like [OpenRouter](https://openrouter.ai) (`https://openrouter.ai/api`), use `--endpoint` — Crust preserves the upstream base path when forwarding requests.
+
 ```bash
 crust status     # Check if running
 crust logs -f    # Follow logs

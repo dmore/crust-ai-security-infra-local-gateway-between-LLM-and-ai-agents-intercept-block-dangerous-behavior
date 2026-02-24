@@ -140,12 +140,12 @@ func TestBuildUpstreamURL_EndpointMode(t *testing.T) {
 			wantPath: "/v1/chat/completions",
 		},
 		{
-			name:     "no false match on partial segment /v1 vs /v1beta",
+			name:     "base path preserved for non-matching prefix /v1 vs /v1beta",
 			upstream: "http://localhost:11434/v1",
 			reqPath:  "/v1beta/completions",
 			model:    "x",
 			wantHost: "localhost:11434",
-			wantPath: "/v1beta/completions",
+			wantPath: "/v1/v1beta/completions",
 		},
 		{
 			name:     "responses normalization",
@@ -162,6 +162,22 @@ func TestBuildUpstreamURL_EndpointMode(t *testing.T) {
 			model:    "gpt-4o",
 			wantHost: "localhost:11434",
 			wantPath: "/v1/chat/completions",
+		},
+		{
+			name:     "base path /api preserved (OpenRouter)",
+			upstream: "https://openrouter.ai/api",
+			reqPath:  "/v1/models",
+			model:    "",
+			wantHost: "openrouter.ai",
+			wantPath: "/api/v1/models",
+		},
+		{
+			name:     "base path /api preserved for chat completions",
+			upstream: "https://openrouter.ai/api",
+			reqPath:  "/v1/chat/completions",
+			model:    "gpt-4",
+			wantHost: "openrouter.ai",
+			wantPath: "/api/v1/chat/completions",
 		},
 	}
 	for _, tt := range tests {

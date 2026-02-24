@@ -49,14 +49,29 @@ func NewStorage(dbPath string, encryptionKey string) (*Storage, error) {
 
 	dsn := dbPath + "?" + params.Encode()
 
-	conn, err := sql.Open("sqlite3", dsn)
+	conn, err := openAndPing(dsn)
+	if err != nil && dbPath != ":memory:" && conn != nil {
+		// Stale WAL/SHM files from a crashed process can prevent SQLite
+		// from opening on Windows ("The segment is already unlocked").
+		// Close the broken handle, remove only the -wal and -shm files
+		// (NOT the main .db), then retry. The -wal/-shm are regenerated
+		// automatically by SQLite; removing them is safe when no other
+		// process holds the database open. Data committed to the WAL but
+		// not yet checkpointed may be lost, but this only happens after
+		// an unclean shutdown where the WAL is already corrupted.
+		conn.Close()
+		walRemoved := removeStaleWALFiles(dbPath)
+		if walRemoved {
+			log.Warn("Removed stale WAL/SHM files after failed open, retrying")
+			conn, err = openAndPing(dsn)
+		}
+	}
 	if err != nil {
+		if conn != nil {
+			conn.Close()
+		}
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
-
-	// SQLite supports only one writer at a time. Limiting to 1 connection
-	// serializes all DB access at the Go level, preventing SQLITE_BUSY errors.
-	conn.SetMaxOpenConns(1)
 
 	// Verify encryption is working by running a simple query
 	encrypted := false
@@ -82,6 +97,32 @@ func NewStorage(dbPath string, encryptionKey string) (*Storage, error) {
 	}
 
 	return s, nil
+}
+
+// openAndPing opens a SQLite connection and pings it to verify it works.
+func openAndPing(dsn string) (*sql.DB, error) {
+	conn, err := sql.Open("sqlite3", dsn)
+	if err != nil {
+		return nil, err
+	}
+	conn.SetMaxOpenConns(1)
+	if err := conn.PingContext(context.Background()); err != nil {
+		return conn, err
+	}
+	return conn, nil
+}
+
+// removeStaleWALFiles removes leftover -wal and -shm files for the given DB.
+// These are safe to remove when no process holds the database open; SQLite
+// regenerates them on next connection. Returns true if any files were removed.
+func removeStaleWALFiles(dbPath string) bool {
+	removed := false
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := os.Remove(dbPath + suffix); err == nil {
+			removed = true
+		}
+	}
+	return removed
 }
 
 // IsEncrypted returns whether the database is encrypted

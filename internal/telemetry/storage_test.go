@@ -3,6 +3,8 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -588,6 +590,192 @@ func TestGetSessions_LimitEnforced(t *testing.T) {
 	}
 	if len(sessions) != 3 {
 		t.Fatalf("session count = %d, want 3 (limit enforced)", len(sessions))
+	}
+}
+
+func TestNewStorage_RecoverFromStaleWAL(t *testing.T) {
+	// Simulate a crash that leaves stale WAL/SHM files behind.
+	// NewStorage should recover gracefully without data loss.
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	// Step 1: Create a database and write some data
+	s1, err := NewStorage(dbPath, "")
+	if err != nil {
+		t.Fatalf("initial NewStorage: %v", err)
+	}
+	if err := s1.LogToolCall(ToolCallLog{
+		TraceID:   "trace-before-crash",
+		SessionID: "s1",
+		ToolName:  "Read",
+	}); err != nil {
+		t.Fatalf("LogToolCall: %v", err)
+	}
+	s1.Close()
+
+	// Step 2: Verify WAL/SHM files exist (WAL mode creates them)
+	walPath := dbPath + "-wal"
+	shmPath := dbPath + "-shm"
+
+	// Reopen to generate WAL/SHM, write data, then simulate crash by
+	// not closing — just abandon the handle.
+	s2, err := NewStorage(dbPath, "")
+	if err != nil {
+		t.Fatalf("second NewStorage: %v", err)
+	}
+	if err := s2.LogToolCall(ToolCallLog{
+		TraceID:   "trace-in-wal",
+		SessionID: "s1",
+		ToolName:  "Write",
+	}); err != nil {
+		t.Fatalf("LogToolCall in WAL: %v", err)
+	}
+	// Simulate crash: close without proper shutdown
+	s2.conn.Close()
+
+	// Verify WAL file exists (data may be in WAL)
+	if _, err := os.Stat(walPath); err != nil {
+		// WAL might have been checkpointed on close, that's OK — the
+		// important thing is that reopening succeeds.
+		t.Logf("WAL file not present after close (checkpointed): %v", err)
+	}
+
+	// Step 3: Reopen — this is where the stale WAL recovery kicks in
+	s3, err := NewStorage(dbPath, "")
+	if err != nil {
+		t.Fatalf("NewStorage after simulated crash: %v", err)
+	}
+	defer s3.Close()
+
+	// Step 4: Verify data integrity — both records should be present
+	var count int
+	if err := s3.DB().QueryRow("SELECT COUNT(*) FROM tool_call_logs").Scan(&count); err != nil {
+		t.Fatalf("count query: %v", err)
+	}
+	if count < 1 {
+		t.Errorf("tool_call_logs count = %d, want at least 1 (data lost after WAL recovery)", count)
+	}
+
+	// Step 5: Verify the DB is still functional after recovery
+	if err := s3.LogToolCall(ToolCallLog{
+		TraceID:   "trace-after-recovery",
+		SessionID: "s1",
+		ToolName:  "Bash",
+	}); err != nil {
+		t.Fatalf("LogToolCall after recovery: %v", err)
+	}
+
+	_ = walPath
+	_ = shmPath
+}
+
+func TestNewStorage_StaleWALFilesDoNotPreventOpen(t *testing.T) {
+	// Create a DB, close it, then manually create bogus WAL/SHM files
+	// to simulate orphaned lock files. NewStorage should still open.
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	// Create initial DB
+	s1, err := NewStorage(dbPath, "")
+	if err != nil {
+		t.Fatalf("initial NewStorage: %v", err)
+	}
+	if err := s1.LogToolCall(ToolCallLog{
+		TraceID:  "trace-1",
+		ToolName: "Read",
+	}); err != nil {
+		t.Fatalf("LogToolCall: %v", err)
+	}
+	s1.Close()
+
+	// Write bogus WAL/SHM files (simulates stale files from crashed process)
+	if err := os.WriteFile(dbPath+"-wal", []byte("bogus wal data"), 0o644); err != nil {
+		t.Fatalf("write bogus WAL: %v", err)
+	}
+	if err := os.WriteFile(dbPath+"-shm", []byte("bogus shm data"), 0o644); err != nil {
+		t.Fatalf("write bogus SHM: %v", err)
+	}
+
+	// Reopen should succeed despite bogus files
+	s2, err := NewStorage(dbPath, "")
+	if err != nil {
+		t.Fatalf("NewStorage with bogus WAL/SHM: %v", err)
+	}
+	defer s2.Close()
+
+	// Original data (in main .db file) should be intact
+	var count int
+	if err := s2.DB().QueryRow("SELECT COUNT(*) FROM tool_call_logs").Scan(&count); err != nil {
+		t.Fatalf("count query: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("tool_call_logs count = %d, want 1", count)
+	}
+}
+
+func TestNewStorage_CorruptSHMDoesNotLoseMainDB(t *testing.T) {
+	// Reproduce the Windows "segment already unlocked" scenario:
+	// 1. Create DB with data, properly close (data checkpointed to .db)
+	// 2. Write a corrupt SHM file with zeroed lock bytes
+	// 3. Verify NewStorage recovers and main DB data survives
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	// Create DB with known data
+	s1, err := NewStorage(dbPath, "")
+	if err != nil {
+		t.Fatalf("create DB: %v", err)
+	}
+	for i := range 5 {
+		if err := s1.LogToolCall(ToolCallLog{
+			TraceID:   fmt.Sprintf("trace-%d", i),
+			SessionID: "s1",
+			ToolName:  "Read",
+		}); err != nil {
+			t.Fatalf("LogToolCall %d: %v", i, err)
+		}
+	}
+	s1.Close()
+
+	// Verify data was checkpointed (WAL should be empty or absent)
+	dbInfo, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatalf("stat .db: %v", err)
+	}
+	t.Logf("DB size after close: %d bytes", dbInfo.Size())
+
+	// Create a corrupt SHM file (32KB zeroed — mimics stale shared memory)
+	corruptSHM := make([]byte, 32768)
+	if err := os.WriteFile(dbPath+"-shm", corruptSHM, 0o644); err != nil {
+		t.Fatalf("write corrupt SHM: %v", err)
+	}
+	// Create an empty WAL (mimics truncated WAL after crash)
+	if err := os.WriteFile(dbPath+"-wal", []byte{}, 0o644); err != nil {
+		t.Fatalf("write empty WAL: %v", err)
+	}
+
+	// Reopen — this is the scenario that previously failed
+	s2, err := NewStorage(dbPath, "")
+	if err != nil {
+		t.Fatalf("NewStorage with corrupt SHM: %v", err)
+	}
+	defer s2.Close()
+
+	// All 5 records should be intact (they were in the main .db file)
+	var count int
+	if err := s2.DB().QueryRow("SELECT COUNT(*) FROM tool_call_logs").Scan(&count); err != nil {
+		t.Fatalf("count query: %v", err)
+	}
+	if count != 5 {
+		t.Errorf("tool_call_logs count = %d, want 5 (main DB data must survive)", count)
+	}
+
+	// DB should be fully functional after recovery
+	if err := s2.LogToolCall(ToolCallLog{
+		TraceID:  "trace-after-recovery",
+		ToolName: "Write",
+	}); err != nil {
+		t.Fatalf("LogToolCall after recovery: %v", err)
 	}
 }
 

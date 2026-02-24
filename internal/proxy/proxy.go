@@ -820,14 +820,20 @@ func (p *Proxy) buildUpstreamURL(reqPath, model string) (url.URL, string, error)
 	}
 
 	// Endpoint mode (or auto mode with unrecognized model):
-	// Use ResolveReference which keeps the base scheme+host and replaces
-	// the path with reqPath — no manual path dedup needed.
+	// Append reqPath to the base URL's path so that upstream base paths
+	// (e.g. "https://openrouter.ai/api") are preserved.
 	if reqPath == "/responses" {
 		reqPath = "/v1/responses"
 	}
-	ref := &url.URL{Path: reqPath}
-	resolved := u.ResolveReference(ref)
-	return *resolved, "", nil
+	basePath := strings.TrimSuffix(u.Path, "/")
+	// Deduplicate when reqPath already starts with the base path
+	// (e.g. base="/v1", req="/v1/chat/completions" → "/v1/chat/completions").
+	if basePath != "" && strings.HasPrefix(reqPath, basePath+"/") {
+		u.Path = reqPath
+	} else {
+		u.Path = path.Join(u.Path, reqPath)
+	}
+	return u, "", nil
 }
 
 // extractUsageAndBody extracts token usage and body from response

@@ -566,7 +566,6 @@ func runDaemon(cfg *config.Config, logLevel string, disableBuiltin bool, endpoin
 
 	if err := server.Shutdown(ctx); err != nil {
 		log.Error("Server forced to shutdown: %v", err)
-		os.Exit(1)
 	}
 
 	log.Info("Crust stopped")
