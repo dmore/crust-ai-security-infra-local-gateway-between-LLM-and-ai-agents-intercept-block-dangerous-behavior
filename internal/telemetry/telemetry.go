@@ -255,7 +255,11 @@ func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "...[truncated]"
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "...[truncated]"
 }
 
 // generateSpanID generates a cryptographically secure span ID

@@ -377,7 +377,7 @@ func readAndDecompressBody(w http.ResponseWriter, r *http.Request) (
 		switch contentEncoding {
 		case encodingGzip:
 			if gr, err := gzip.NewReader(bytes.NewReader(bodyBytes)); err == nil {
-				if decompressed, err := io.ReadAll(gr); err == nil {
+				if decompressed, err := io.ReadAll(io.LimitReader(gr, maxRequestBodySize+1)); err == nil {
 					parseBytes = decompressed
 				}
 				if err := gr.Close(); err != nil {
@@ -876,18 +876,15 @@ func extractUsageAndBody(resp *http.Response, apiType types.APIType) (inputToken
 		if err != nil {
 			log.Debug("Failed to create gzip reader, using raw body: %v", err)
 			resp.Header.Del("Content-Encoding")
-			// Fall through with bodyBytes = rawBytes
 		} else {
 			decompressed, readErr := io.ReadAll(io.LimitReader(gzReader, maxResponseBodySize+1))
 			gzReader.Close()
 			if readErr != nil {
 				log.Debug("Failed to decompress gzip body, using raw body: %v", readErr)
 				resp.Header.Del("Content-Encoding")
-				// Fall through with bodyBytes = rawBytes
 			} else if int64(len(decompressed)) > maxResponseBodySize {
 				log.Warn("Decompressed response body too large (limit: %dMB)", maxResponseBodySize/(1024*1024))
 				resp.Header.Del("Content-Encoding")
-				// Fall through with bodyBytes = rawBytes
 			} else {
 				bodyBytes = decompressed
 				resp.Header.Del("Content-Encoding")
@@ -939,13 +936,15 @@ func extractToolCalls(bodyBytes []byte, apiType types.APIType) []telemetry.ToolC
 				} `json:"message"`
 			} `json:"choices"`
 		}
-		if err := json.Unmarshal(bodyBytes, &resp); err == nil && len(resp.Choices) > 0 {
-			for _, tc := range resp.Choices[0].Message.ToolCalls {
-				toolCalls = append(toolCalls, telemetry.ToolCall{
-					ID:        tc.ID,
-					Name:      tc.Function.Name,
-					Arguments: tc.Function.Arguments,
-				})
+		if err := json.Unmarshal(bodyBytes, &resp); err == nil {
+			for _, choice := range resp.Choices {
+				for _, tc := range choice.Message.ToolCalls {
+					toolCalls = append(toolCalls, telemetry.ToolCall{
+						ID:        tc.ID,
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
+					})
+				}
 			}
 		}
 
@@ -1125,7 +1124,10 @@ func toRawMessage(v any) json.RawMessage {
 		return nil
 	}
 	if s, ok := v.(string); ok {
-		return json.RawMessage(s)
+		if json.Valid([]byte(s)) {
+			return json.RawMessage(s)
+		}
+		return nil
 	}
 	b, err := json.Marshal(v)
 	if err != nil {

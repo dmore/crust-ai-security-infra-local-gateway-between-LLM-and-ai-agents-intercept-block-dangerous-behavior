@@ -186,6 +186,10 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 	// Load user rules
 	if err := e.ReloadUserRules(); err != nil {
 		log.Warn("Failed to load user rules: %v", err)
+		// Ensure builtin rules are merged even if user rules fail to load
+		e.mu.Lock()
+		e.rebuildMergedLocked()
+		e.mu.Unlock()
 	}
 
 	return e, nil
@@ -836,7 +840,9 @@ func (e *Engine) GetAllRules() []Rule {
 func (e *Engine) GetCompiledRules() []CompiledRule {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return e.merged
+	out := make([]CompiledRule, len(e.merged))
+	copy(out, e.merged)
+	return out
 }
 
 // OnReload registers a callback to be called after rules are reloaded.

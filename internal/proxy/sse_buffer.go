@@ -185,7 +185,7 @@ func (b *BufferedSSEWriter) GetToolCalls() []telemetry.ToolCall {
 		toolCalls = append(toolCalls, telemetry.ToolCall{
 			ID:        tc.ID,
 			Name:      tc.Name,
-			Arguments: json.RawMessage(tc.Arguments.Bytes()),
+			Arguments: json.RawMessage(bytes.Clone(tc.Arguments.Bytes())),
 		})
 	}
 	return toolCalls
@@ -615,7 +615,7 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIEvents(blockedIndices, replacedIn
 				return err
 			}
 		} else {
-			if err := b.writeRaw(fmt.Appendf(nil, "data: %s\n\n", event.Data)); err != nil {
+			if err := b.writeRaw(event.Raw); err != nil {
 				return err
 			}
 		}

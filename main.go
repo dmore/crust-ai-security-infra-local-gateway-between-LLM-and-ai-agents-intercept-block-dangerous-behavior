@@ -17,6 +17,7 @@ import (
 
 	"github.com/BakeLens/crust/internal/earlyinit" // side-effect import: init() runs before bubbletea's via dependency order + lexicographic tie-breaking
 
+	"github.com/BakeLens/crust/internal/acpwrap"
 	"github.com/BakeLens/crust/internal/cli"
 	"github.com/BakeLens/crust/internal/completion"
 	"github.com/BakeLens/crust/internal/config"
@@ -87,6 +88,9 @@ func main() {
 			return
 		case "lint-rules":
 			runLintRules(os.Args[2:])
+			return
+		case "acp-wrap":
+			runAcpWrap(os.Args[2:])
 			return
 		case "uninstall":
 			runUninstall()
@@ -386,7 +390,9 @@ func runDaemon(cfg *config.Config, logLevel string, disableBuiltin bool, endpoin
 	if proxyPort > 0 {
 		cfg.Server.Port = proxyPort
 	}
-	cfg.Telemetry.Enabled = telemetryEnabled
+	if telemetryEnabled {
+		cfg.Telemetry.Enabled = true
+	}
 	if retentionDays > 0 {
 		cfg.Telemetry.RetentionDays = retentionDays
 	}
@@ -547,17 +553,21 @@ func runDaemon(cfg *config.Config, logLevel string, disableBuiltin bool, endpoin
 	log.Info("  API: %s", socketPath)
 
 	// Start server
+	serverErr := make(chan error, 1)
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("Server error: %v", err)
-			os.Exit(1)
+			serverErr <- err
 		}
 	}()
 
-	// Wait for interrupt signal (os.Interrupt is portable across Unix and Windows)
+	// Wait for interrupt signal or server error
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
-	<-quit
+	select {
+	case <-quit:
+	case err := <-serverErr:
+		log.Error("Server error: %v", err)
+	}
 
 	log.Info("Shutting down...")
 
@@ -717,6 +727,7 @@ func printUsage() {
 
 	fmt.Println(tui.Separator("Other"))
 	fmt.Print(tui.AlignColumns([][2]string{
+		{"crust acp-wrap [flags] -- <cmd...>", "ACP stdio proxy with security rules"},
 		{"crust completion [--install]", "Install shell completion (bash/zsh/fish)"},
 		{"crust uninstall", "Uninstall crust completely"},
 		{"crust help", "Show this help message"},
@@ -885,6 +896,59 @@ func runReloadRules(_ []string) {
 		exitNotRunning()
 	}
 	fmt.Println(string(body))
+}
+
+// runAcpWrap handles the acp-wrap subcommand
+func runAcpWrap(args []string) {
+	wrapFlags := flag.NewFlagSet("acp-wrap", flag.ExitOnError)
+	configPath := wrapFlags.String("config", config.DefaultConfigPath(), "Path to configuration file")
+	logLevel := wrapFlags.String("log-level", "warn", "Log level: trace, debug, info, warn, error")
+	rulesDir := wrapFlags.String("rules-dir", "", "Override rules directory")
+	disableBuiltin := wrapFlags.Bool("disable-builtin", false, "Disable builtin security rules")
+	_ = wrapFlags.Parse(args)
+
+	agentCmd := wrapFlags.Args()
+	if len(agentCmd) == 0 {
+		fmt.Fprintf(os.Stderr, "Usage: crust acp-wrap [flags] -- <agent-command> [args...]\n")
+		os.Exit(1)
+	}
+
+	// Logger to stderr only — stdout is the ACP pipe
+	logger.SetColored(false)
+	if *logLevel != "" {
+		logger.SetGlobalLevelFromString(*logLevel)
+	}
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		cfg = config.DefaultConfig()
+	}
+
+	dir := *rulesDir
+	if dir == "" {
+		dir = cfg.Rules.UserDir
+	}
+	if dir == "" {
+		dir = rules.DefaultUserRulesDir()
+	}
+
+	// Ensure user rules directory exists so the engine can load
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "crust acp-wrap: failed to create rules dir: %v\n", err)
+		os.Exit(1)
+	}
+
+	engine, err := rules.NewEngine(rules.EngineConfig{
+		UserRulesDir:        dir,
+		DisableBuiltin:      *disableBuiltin || cfg.Rules.DisableBuiltin,
+		SubprocessIsolation: true,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "crust acp-wrap: failed to init rules: %v\n", err)
+		os.Exit(1)
+	}
+
+	os.Exit(acpwrap.Run(engine, agentCmd))
 }
 
 // runUninstall handles the uninstall subcommand

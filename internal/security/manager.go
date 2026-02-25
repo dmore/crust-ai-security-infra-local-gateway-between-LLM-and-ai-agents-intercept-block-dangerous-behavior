@@ -30,6 +30,7 @@ type Manager struct {
 	apiListener   net.Listener
 	socketPath    string // Unix socket path or Windows pipe name (for cleanup)
 	stopChan      chan struct{}
+	stopOnce      sync.Once
 	wg            sync.WaitGroup
 }
 
@@ -159,7 +160,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 		return nil
 	}
 
-	close(m.stopChan)
+	m.stopOnce.Do(func() { close(m.stopChan) })
 
 	if m.apiHTTPServer != nil {
 		if err := m.apiHTTPServer.Shutdown(ctx); err != nil {

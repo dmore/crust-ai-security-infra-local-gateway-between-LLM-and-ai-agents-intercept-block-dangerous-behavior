@@ -1,6 +1,7 @@
 package security
 
 import (
+	"context"
 	"sync"
 	"testing"
 
@@ -57,6 +58,21 @@ func TestGetInterceptionConfig_RaceFree(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestManager_ShutdownTwiceNoPanic(t *testing.T) {
+	m := &Manager{
+		stopChan: make(chan struct{}),
+	}
+	ctx := context.Background()
+	// First shutdown should succeed
+	if err := m.Shutdown(ctx); err != nil {
+		t.Fatalf("first Shutdown: %v", err)
+	}
+	// Second shutdown must not panic (double close of stopChan)
+	if err := m.Shutdown(ctx); err != nil {
+		t.Fatalf("second Shutdown: %v", err)
+	}
 }
 
 func TestGetInterceptionConfig_NilManager(t *testing.T) {

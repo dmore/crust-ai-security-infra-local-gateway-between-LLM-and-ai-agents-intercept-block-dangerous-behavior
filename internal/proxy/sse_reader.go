@@ -134,7 +134,7 @@ func (r *SSEReader) finalizeToolCalls() {
 		r.toolCallsArr = append(r.toolCallsArr, telemetry.ToolCall{
 			ID:        tc.ID,
 			Name:      tc.Name,
-			Arguments: json.RawMessage(tc.Arguments.Bytes()),
+			Arguments: json.RawMessage(bytes.Clone(tc.Arguments.Bytes())),
 		})
 	}
 }

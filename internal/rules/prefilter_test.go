@@ -174,6 +174,28 @@ func TestPreFilter_NetworkExfiltration(t *testing.T) {
 	}
 }
 
+func TestIsSafeCommand_IFSManipulation(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		safe bool
+	}{
+		{"IFS=/ cat /etc/passwd", false},
+		{"ifs=x cmd", false},
+		{"IFS= read -r line", false},
+		{"echo $IFS", true},            // reading IFS, not setting it
+		{"cat /etc/hosts", true},       // no IFS manipulation
+		{"export PATH=/usr/bin", true}, // normal env var, not IFS
+	}
+	for _, tt := range tests {
+		t.Run(tt.cmd, func(t *testing.T) {
+			got := IsSafeCommand(tt.cmd)
+			if got != tt.safe {
+				t.Errorf("IsSafeCommand(%q) = %v, want %v", tt.cmd, got, tt.safe)
+			}
+		})
+	}
+}
+
 func TestPreFilter_IndirectExpansion(t *testing.T) {
 	pf := NewPreFilter()
 

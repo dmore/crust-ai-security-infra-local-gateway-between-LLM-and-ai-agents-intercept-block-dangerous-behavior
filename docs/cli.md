@@ -20,6 +20,9 @@ crust remove-rule FILE                      # Remove user rules
 crust reload-rules                          # Force reload all rules
 crust lint-rules [FILE]                     # Validate rule syntax
 
+# ACP Proxy
+crust acp-wrap [flags] -- <cmd...>          # ACP stdio proxy with security rules
+
 # Other
 crust version [--json]                      # Show version
 crust completion [--install]                # Install shell completion (bash/zsh/fish)
@@ -48,6 +51,15 @@ crust uninstall                             # Complete removal
 | Flag | Description |
 |------|-------------|
 | `--api-addr HOST:PORT` | Connect to a remote daemon (e.g. Docker) over TCP instead of the local Unix socket |
+
+## ACP Wrap Flags
+
+| Flag | Description |
+|------|-------------|
+| `--config PATH` | Path to configuration file |
+| `--log-level LEVEL` | `trace`, `debug`, `info`, `warn` (default), `error` |
+| `--rules-dir DIR` | Override user rules directory |
+| `--disable-builtin` | Disable builtin security rules |
 
 ## Environment Variables
 
@@ -85,4 +97,8 @@ crust list-rules --json
 # Remote dashboard (daemon running in Docker)
 crust status --live --api-addr localhost:9090
 crust list-rules --api-addr localhost:9090
+
+# ACP proxy: wrap Codex for JetBrains/Zed
+crust acp-wrap -- codex acp
+crust acp-wrap --log-level debug -- goose acp
 ```

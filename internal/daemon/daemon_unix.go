@@ -128,6 +128,7 @@ func Daemonize(args []string, extraEnvKeys []string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to open log file: %w", err)
 	}
+	defer logFile.Close()
 
 	// Prepare command to re-execute self
 	executable, err := os.Executable()

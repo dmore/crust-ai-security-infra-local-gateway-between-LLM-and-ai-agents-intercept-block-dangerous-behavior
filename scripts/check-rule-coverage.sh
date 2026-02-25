@@ -33,8 +33,11 @@ if [[ ! -d "$RULES_DIR" ]]; then
     exit 1
 fi
 
-# Extract rule names from security.yaml
-mapfile -t RULES < <(grep -E '^\s+-\s+name:\s+' "$SECURITY_YAML" | sed 's/.*name:\s*//' | tr -d ' ')
+# Extract rule names from security.yaml (avoid mapfile for bash 3.x compat)
+RULES=()
+while IFS= read -r line; do
+    [[ -n "$line" ]] && RULES+=("$line")
+done < <(grep -E '^\s+-\s+name:\s+' "$SECURITY_YAML" | sed 's/.*name:\s*//' | tr -d ' ')
 
 echo "=== Rule Coverage Check ==="
 echo ""
@@ -43,7 +46,10 @@ echo ""
 
 # Check fuzz coverage (COVERS markers)
 FUZZ_TEST="$RULES_DIR/fuzz_test.go"
-mapfile -t COVERS_MARKERS < <(grep -E '//\s*COVERS:\s*' "$FUZZ_TEST" 2>/dev/null | sed 's/.*COVERS:\s*//' | tr -d ' ' || true)
+COVERS_MARKERS=()
+while IFS= read -r line; do
+    [[ -n "$line" ]] && COVERS_MARKERS+=("$line")
+done < <(grep -E '//\s*COVERS:\s*' "$FUZZ_TEST" 2>/dev/null | sed 's/.*COVERS:\s*//' | tr -d ' ' || true)
 FUZZ_COVERED=$(printf '%s\n' "${COVERS_MARKERS[@]}" | tr '\n' ' ')
 
 FUZZ_MISSING=()

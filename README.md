@@ -11,6 +11,7 @@
 <p align="center">
   <a href="https://getcrust.io">Website</a> •
   <a href="#quick-start">Quick Start</a> •
+  <a href="#acp-integration">ACP</a> •
   <a href="#built-in-protection">Protection</a> •
   <a href="#how-it-works">How It Works</a> •
   <a href="#documentation">Docs</a> •
@@ -77,6 +78,12 @@ Point your agent to Crust:
 | **[JetBrains AI](https://www.jetbrains.com/ai/)** | Settings → AI Assistant → Providers & API keys → Base URL → `http://localhost:9090/v1` |
 | **[Continue](https://github.com/continuedev/continue)** | Set `apiBase` to `http://localhost:9090/v1` in config |
 | **[Aider](https://github.com/Aider-AI/aider)** | `OPENAI_API_BASE=http://localhost:9090/v1` |
+
+<details>
+<summary><strong>More agents...</strong></summary>
+
+| Agent | Configuration |
+|-------|---------------|
 | **[Zed](https://github.com/zed-industries/zed)** | Set `api_url` to `http://localhost:9090/v1` in settings |
 | **[Tabby](https://github.com/TabbyML/tabby)** | Set `api_endpoint` to `http://localhost:9090/v1` in config |
 | **[avante.nvim](https://github.com/yetone/avante.nvim)** | Set `endpoint` to `http://localhost:9090/v1` in config |
@@ -86,15 +93,43 @@ Point your agent to Crust:
 | **[OpenCode](https://github.com/opencode-ai/opencode)** | `OPENAI_BASE_URL=http://localhost:9090/v1` |
 | **Any OpenAI-compatible agent** | Set your LLM base URL to `http://localhost:9090/v1` |
 
-That's it. Crust auto-detects the provider from the model name and passes through your auth. Works with all major coding agents out of the box — each agent's tool names are recognized automatically. Clients that send `/api/v1/...` paths (e.g. some JetBrains configurations) are also supported — the `/api` prefix is stripped automatically.
+</details>
 
-For providers with non-standard base paths like [OpenRouter](https://openrouter.ai) (`https://openrouter.ai/api`), use `--endpoint` — Crust preserves the upstream base path when forwarding requests.
+Crust auto-detects the provider from the model name and passes through your auth — no endpoint URL or API key configuration needed. Clients that send `/api/v1/...` paths (e.g. some JetBrains configurations) are also supported. For providers with non-standard base paths like [OpenRouter](https://openrouter.ai) (`https://openrouter.ai/api`), use `--endpoint`.
 
 ```bash
 crust status     # Check if running
 crust logs -f    # Follow logs
 crust stop       # Stop crust
 ```
+
+## ACP Integration
+
+For IDEs that use the [Agent Client Protocol](https://agentclientprotocol.com) (ACP), Crust can wrap any ACP agent as a transparent stdio proxy — intercepting file reads, writes, and terminal commands before the IDE executes them. No changes to the agent or IDE required.
+
+```bash
+crust acp-wrap -- codex acp
+```
+
+Tested with JetBrains IDEs (PhpStorm 2025.3); other ACP-compatible editors should work but are not yet verified.
+
+<details>
+<summary><strong>JetBrains setup</strong> (<code>~/.jetbrains/acp.json</code>)</summary>
+
+```json
+{
+  "agent_servers": {
+    "Codex via Crust": {
+      "command": "crust",
+      "args": ["acp-wrap", "--", "codex", "acp"]
+    }
+  }
+}
+```
+
+Open **Settings → AI Assistant → Agents** or click **Add Custom Agent** in the AI Chat panel. See [JetBrains ACP docs](https://www.jetbrains.com/help/ai-assistant/acp.html) for details.
+
+</details>
 
 ## Built-in Protection
 
@@ -148,12 +183,13 @@ crust add-rule my-rules.yaml    # Rules active immediately (hot reload)
   <img src="docs/crust.png" alt="Crust architecture" width="90%" />
 </p>
 
-Crust inspects tool calls at two layers:
+Crust inspects tool calls at multiple layers:
 
 1. **Layer 0 (Request Scan)**: Scans tool calls in conversation history before they reach the LLM — catches agents replaying dangerous actions.
 2. **Layer 1 (Response Scan)**: Scans tool calls in the LLM's response before they execute — blocks new dangerous actions in real-time.
+3. **ACP Mode**: Wraps ACP agents as a stdio proxy, intercepting JSON-RPC file/terminal requests before the IDE executes them.
 
-Layer 1 applies a [10-step evaluation pipeline](docs/how-it-works.md) — input sanitization, Unicode normalization, obfuscation detection, DLP secret scanning, path-based rules, and fallback content matching — each step in microseconds.
+Layers 0–1 apply a [10-step evaluation pipeline](docs/how-it-works.md) — input sanitization, Unicode normalization, obfuscation detection, DLP secret scanning, path-based rules, and fallback content matching — each step in microseconds. ACP mode reuses the same rule engine.
 
 All activity is logged locally to encrypted storage.
 

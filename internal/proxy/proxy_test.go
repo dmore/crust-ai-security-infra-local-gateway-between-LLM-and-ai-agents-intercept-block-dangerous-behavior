@@ -106,6 +106,51 @@ func TestExtractToolCallsFromJSON(t *testing.T) {
 	}
 }
 
+func TestExtractToolCalls_MultipleChoices(t *testing.T) {
+	// Verify tool calls from all choices are extracted, not just Choices[0].
+	body := `{
+		"choices": [
+			{"message": {"tool_calls": [{"id": "tc1", "type": "function", "function": {"name": "Bash", "arguments": "{\"command\":\"ls\"}"}}]}},
+			{"message": {"tool_calls": [{"id": "tc2", "type": "function", "function": {"name": "Read", "arguments": "{\"path\":\"/etc/shadow\"}"}}]}}
+		]
+	}`
+	got := extractToolCalls([]byte(body), types.APITypeOpenAICompletion)
+	if len(got) != 2 {
+		t.Fatalf("extractToolCalls returned %d tool calls, want 2", len(got))
+	}
+	if got[0].Name != "Bash" {
+		t.Errorf("choice[0] tool call name = %q, want %q", got[0].Name, "Bash")
+	}
+	if got[1].Name != "Read" {
+		t.Errorf("choice[1] tool call name = %q, want %q", got[1].Name, "Read")
+	}
+}
+
+func TestToRawMessage_InvalidJSON(t *testing.T) {
+	// Non-JSON strings should return nil, not be passed through as raw JSON.
+	tests := []struct {
+		name  string
+		input any
+		isNil bool
+	}{
+		{"valid_json_string", `{"key":"value"}`, false},
+		{"invalid_json_string", "not json at all", true},
+		{"json_object", map[string]string{"key": "value"}, false},
+		{"nil_input", nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := toRawMessage(tt.input)
+			if tt.isNil && got != nil {
+				t.Errorf("toRawMessage(%v) = %s, want nil", tt.input, string(got))
+			}
+			if !tt.isNil && got == nil {
+				t.Errorf("toRawMessage(%v) = nil, want non-nil", tt.input)
+			}
+		})
+	}
+}
+
 func TestBuildUpstreamURL_EndpointMode(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -188,7 +188,7 @@ func IsSafeCommand(cmd string) bool {
 	// Quick string checks before regex (performance)
 	suspicious := []string{
 		"eval ", "base64 -d", "base64 --decode",
-		"${!", "IFS=", ":()", "-e /bin",
+		"${!", "ifs=", ":()", "-e /bin",
 	}
 	cmdLower := strings.ToLower(cmd)
 	for _, s := range suspicious {

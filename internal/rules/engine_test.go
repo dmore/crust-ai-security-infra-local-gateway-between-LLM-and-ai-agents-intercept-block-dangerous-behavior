@@ -761,3 +761,31 @@ func TestSelfProtectSocketRegex_Allows(t *testing.T) {
 		})
 	}
 }
+
+func TestGetCompiledRules_DefensiveCopy(t *testing.T) {
+	testRules := []Rule{
+		{
+			Name:    "test-rule",
+			Actions: []Operation{OpRead},
+			Block:   Block{Paths: []string{"/secret/**"}},
+			Message: "blocked",
+		},
+	}
+	engine, err := NewTestEngine(testRules)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get a copy and modify it
+	rules1 := engine.GetCompiledRules()
+	if len(rules1) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(rules1))
+	}
+	rules1[0].Rule.Name = "MUTATED"
+
+	// Second call should still return the original
+	rules2 := engine.GetCompiledRules()
+	if rules2[0].Rule.Name != "test-rule" {
+		t.Errorf("GetCompiledRules returned mutated data: got %q, want %q", rules2[0].Rule.Name, "test-rule")
+	}
+}
