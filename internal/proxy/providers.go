@@ -24,6 +24,7 @@ var builtinProviders = map[string]config.ProviderConfig{
 	"moonshot":     {URL: "https://api.moonshot.ai"},
 	"kimi":         {URL: "https://api.moonshot.ai"},
 	"gemini":       {URL: "https://generativelanguage.googleapis.com"},
+	"glm":          {URL: "https://open.bigmodel.cn/api/paas/v4"},
 	"mistral":      {URL: "https://api.mistral.ai"},
 	"groq":         {URL: "https://api.groq.com/openai"},
 	"llama":        {URL: "https://api.groq.com/openai"},
