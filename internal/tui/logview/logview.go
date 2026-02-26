@@ -181,7 +181,7 @@ func (m model) View() string {
 	}
 
 	// Header
-	title := tui.BrandGradient("crust", true) + " " + tui.StyleTitle.Render("logs")
+	title := tui.BrandGradient("CRUST", true) + " " + tui.BrandGradient("LOGS", true)
 	mode := ""
 	if m.follow {
 		mode = tui.StyleSuccess.Render(" (following)")

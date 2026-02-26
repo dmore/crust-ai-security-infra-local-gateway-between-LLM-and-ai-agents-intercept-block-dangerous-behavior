@@ -165,8 +165,8 @@ func Render(rulesList []rules.Rule, total int) error {
 	delegate := newRuleDelegate()
 
 	l := list.New(items, delegate, 80, 24)
-	l.Title = fmt.Sprintf("Crust Rules (%d total)", total)
-	l.Styles.Title = tui.StyleTitle
+	l.Title = tui.BrandGradient("CRUST", true) + " " + tui.BrandGradient("RULES", true) + tui.StyleMuted.Render(fmt.Sprintf("  (%d total)", total))
+	l.Styles.Title = lipgloss.NewStyle()
 	l.Styles.FilterPrompt = lipgloss.NewStyle().Foreground(tui.ColorAccent)
 	l.Styles.FilterCursor = lipgloss.NewStyle().Foreground(tui.ColorSuccess)
 	l.SetShowStatusBar(true)
