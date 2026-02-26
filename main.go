@@ -1174,12 +1174,13 @@ func printDoctorResult(r proxy.DoctorResult) {
 		style = tui.StyleError
 	}
 
+	// Pad raw name before styling so column width counts visible chars, not ANSI codes.
 	name := r.Name
 	if r.IsUser {
-		name += " " + tui.Faint("(user)")
+		name += " *"
 	}
-
-	fmt.Printf("  %s %-14s %s\n", style.Render(icon), tui.StyleBold.Render(name), tui.Faint(r.URL))
+	paddedName := fmt.Sprintf("%-14s", name)
+	fmt.Printf("  %s %s %s\n", style.Render(icon), tui.StyleBold.Render(paddedName), tui.Faint(r.URL))
 	fmt.Printf("    %s  %s %s\n", style.Render(tag), r.Diagnosis, tui.Faint(latency))
 	fmt.Println()
 }
