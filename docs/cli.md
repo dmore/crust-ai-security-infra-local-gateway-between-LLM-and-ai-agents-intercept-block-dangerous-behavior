@@ -23,6 +23,10 @@ crust lint-rules [FILE]                     # Validate rule syntax
 # ACP Proxy
 crust acp-wrap [flags] -- <cmd...>          # ACP stdio proxy with security rules
 
+# Diagnostics
+crust doctor [--timeout 5s] [--retries N]   # Check provider endpoint connectivity
+crust doctor --report                       # Generate sanitized report for GitHub issues
+
 # Other
 crust version [--json]                      # Show version
 crust completion [--install]                # Install shell completion (bash/zsh/fish)
@@ -51,6 +55,15 @@ crust uninstall                             # Complete removal
 | Flag | Description |
 |------|-------------|
 | `--api-addr HOST:PORT` | Connect to a remote daemon (e.g. Docker) over TCP instead of the local Unix socket |
+
+## Doctor Flags
+
+| Flag | Description |
+|------|-------------|
+| `--timeout DURATION` | Timeout per provider check (default `5s`) |
+| `--retries N` | Retries for connection errors (default `1`, use `0` to disable) |
+| `--report` | Generate a sanitized markdown report for GitHub issues |
+| `--config PATH` | Path to configuration file |
 
 ## ACP Wrap Flags
 
@@ -97,6 +110,11 @@ crust list-rules --json
 # Remote dashboard (daemon running in Docker)
 crust status --live --api-addr localhost:9090
 crust list-rules --api-addr localhost:9090
+
+# Diagnostics — check all provider endpoints (no daemon needed)
+crust doctor
+crust doctor --timeout 3s --retries 0
+crust doctor --report              # sanitized report for GitHub issues
 
 # ACP proxy: wrap Codex for JetBrains/Zed
 crust acp-wrap -- codex acp

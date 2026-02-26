@@ -152,7 +152,7 @@ func TestRenderPlain(t *testing.T) {
 				RuleCount: 14, LogFile: "/tmp/crust.log",
 				Stats: SecurityStats{TotalToolCalls: 100, BlockedCalls: 10, AllowedCalls: 90},
 			},
-			[]string{"PID 1234", "healthy", "enabled", "14 loaded", "100 total", "10 blocked", "/tmp/crust.log"},
+			[]string{"PID 1234", "healthy", "enabled", "14 loaded", "10 tool calls", "/tmp/crust.log"},
 		},
 		{
 			"not running",

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -52,8 +51,7 @@ type model struct {
 	apiBase      string
 	proxyBaseURL string
 
-	blockBar progress.Model
-	spinner  spinner.Model
+	spinner spinner.Model
 
 	// shimmer triggers when blocked count increases
 	shimmer     tui.ShimmerState
@@ -74,9 +72,6 @@ type model struct {
 }
 
 func newModel(mgmtClient *http.Client, apiBase string, proxyBaseURL string, pid int) model {
-	blockBar := progress.New(progress.WithGradient("#F5A623", "#E05A3A"), progress.WithoutPercentage(), progress.WithWidth(20))
-	blockBar.EmptyColor = "#3D3228"
-
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(tui.ColorSuccess)
@@ -89,7 +84,6 @@ func newModel(mgmtClient *http.Client, apiBase string, proxyBaseURL string, pid 
 		apiBase:      apiBase,
 		proxyBaseURL: proxyBaseURL,
 		data:         StatusData{Running: true, PID: pid},
-		blockBar:     blockBar,
 		spinner:      s,
 		shimmer:      tui.NewShimmer(shimCfg),
 		width:        60,
@@ -237,11 +231,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 
-	case progress.FrameMsg:
-		pm, cmd := m.blockBar.Update(msg)
-		m.blockBar = pm.(progress.Model)
-		return m, cmd
-
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -374,17 +363,11 @@ func (m model) renderOverview() string {
 	// Metrics — aggregate across all sessions since startup
 	metricsTitle := tui.Separator("Security Metrics  (all sessions, since startup)")
 
-	total := d.Stats.TotalToolCalls
 	blocked := d.Stats.BlockedCalls
-	var blockPct float64
-	if total > 0 {
-		blockPct = float64(blocked) / float64(total) * 100
-	}
 
-	toolCalls := fmt.Sprintf("  %s  %s", tui.Faint("Tool Calls"), formatCount(total))
 	var blockedStr string
 	if m.shimmer.Active {
-		label := fmt.Sprintf("  %s  %s (%.1f%%)", tui.Faint("Blocked"), formatCount(blocked), blockPct)
+		label := fmt.Sprintf("  %s  %s", tui.Faint("Blocked"), formatCount(blocked))
 		runes := []rune(label)
 		var bb strings.Builder
 		for i, r := range runes {
@@ -394,23 +377,15 @@ func (m model) renderOverview() string {
 		}
 		blockedStr = bb.String()
 	} else {
-		blockedStr = fmt.Sprintf("  %s  %s (%.1f%%)", tui.Faint("Blocked"), formatCount(blocked), blockPct)
+		blockedStr = fmt.Sprintf("  %s  %s", tui.Faint("Blocked"), formatCount(blocked))
 	}
-
-	var barPct float64
-	if total > 0 {
-		barPct = float64(blocked) / float64(total)
-	}
-	blockBarView := fmt.Sprintf("  %s  %s  %.1f%%", tui.Faint("Block Rate"), m.blockBar.ViewAs(barPct), blockPct)
 
 	logStr := fmt.Sprintf("  %s  %s", tui.Faint("Logs"), tui.Hyperlink("file://"+d.LogFile, d.LogFile))
 
 	var sb strings.Builder
 	sb.WriteString(info + "\n\n")
 	sb.WriteString(metricsTitle + "\n\n")
-	sb.WriteString(toolCalls + "\n")
 	sb.WriteString(blockedStr + "\n\n")
-	sb.WriteString(blockBarView + "\n\n")
 	sb.WriteString(logStr)
 	return sb.String()
 }
@@ -614,12 +589,9 @@ func RenderStatic(data StatusData) string {
 		}
 		fmt.Fprintf(&sb, "  %s  %d loaded\n", tui.Faint("Rules"), data.RuleCount)
 
-		if data.Stats.TotalToolCalls > 0 {
-			blocked := data.Stats.BlockedCalls
-			total := data.Stats.TotalToolCalls
-			pct := float64(blocked) / float64(total) * 100
-			fmt.Fprintf(&sb, "  %s  %s total, %s blocked (%.1f%%)\n",
-				tui.Faint("Calls"), formatCount(total), formatCount(blocked), pct)
+		if data.Stats.BlockedCalls > 0 {
+			fmt.Fprintf(&sb, "  %s  %s blocked\n",
+				tui.Faint("Calls"), formatCount(data.Stats.BlockedCalls))
 		}
 
 		fmt.Fprintf(&sb, "  %s  %s",

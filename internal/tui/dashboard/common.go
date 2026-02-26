@@ -156,10 +156,8 @@ func RenderPlain(data StatusData) string {
 			sb.WriteString("[crust] Security: disabled\n")
 		}
 		fmt.Fprintf(&sb, "[crust] Rules:    %d loaded\n", data.RuleCount)
-		if data.Stats.TotalToolCalls > 0 {
-			pct := float64(data.Stats.BlockedCalls) / float64(data.Stats.TotalToolCalls) * 100
-			fmt.Fprintf(&sb, "[crust] Calls:    %d total, %d blocked (%.1f%%)\n",
-				data.Stats.TotalToolCalls, data.Stats.BlockedCalls, pct)
+		if data.Stats.BlockedCalls > 0 {
+			fmt.Fprintf(&sb, "[crust] Blocked:  %d tool calls\n", data.Stats.BlockedCalls)
 		}
 		sb.WriteString("[crust] Logs:     " + data.LogFile)
 	} else {

@@ -100,6 +100,7 @@ Crust auto-detects the provider from the model name and passes through your auth
 ```bash
 crust status     # Check if running
 crust logs -f    # Follow logs
+crust doctor     # Diagnose provider endpoints
 crust stop       # Stop crust
 ```
 
