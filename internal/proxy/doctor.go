@@ -13,6 +13,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BakeLens/crust/internal/config"
@@ -71,19 +72,17 @@ type providerEntry struct {
 	isUser bool
 }
 
-// RunDoctor checks all providers (builtin + user) and returns results.
-// CONN errors are retried up to opts.Retries times (default 1) with a
-// short backoff, since transient network issues are common.
+// RunDoctor checks all providers (builtin + user) concurrently and returns
+// results sorted by provider name. CONN errors are retried up to
+// opts.Retries times with a short backoff.
 func RunDoctor(opts DoctorOptions) []DoctorResult {
 	providers := mergeProviders(opts.UserProviders)
 	retries := opts.Retries
-	if retries <= 0 {
-		retries = 1
-	}
 
 	client := &http.Client{
 		Timeout: opts.Timeout,
 		Transport: &http.Transport{
+			Proxy:               http.ProxyFromEnvironment,
 			TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
 			TLSHandshakeTimeout: opts.Timeout,
 			DialContext:         (&net.Dialer{Timeout: opts.Timeout}).DialContext,
@@ -91,18 +90,24 @@ func RunDoctor(opts DoctorOptions) []DoctorResult {
 	}
 	defer client.CloseIdleConnections()
 
-	results := make([]DoctorResult, 0, len(providers))
-	for _, entry := range providers {
-		r := checkProvider(client, entry)
-		for attempt := range retries {
-			if r.Status != StatusConnError {
-				break
+	results := make([]DoctorResult, len(providers))
+	var wg sync.WaitGroup
+	for i, entry := range providers {
+		wg.Add(1)
+		go func(i int, entry providerEntry) {
+			defer wg.Done()
+			r := checkProvider(client, entry)
+			for attempt := range retries {
+				if r.Status != StatusConnError {
+					break
+				}
+				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+				r = checkProvider(client, entry)
 			}
-			time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
-			r = checkProvider(client, entry)
-		}
-		results = append(results, r)
+			results[i] = r
+		}(i, entry)
 	}
+	wg.Wait()
 	return results
 }
 
@@ -203,31 +208,32 @@ func checkProvider(client *http.Client, entry providerEntry) DoctorResult {
 	defer resp.Body.Close()
 
 	result.StatusCode = resp.StatusCode
-	switch {
-	case resp.StatusCode == http.StatusOK:
+	switch resp.StatusCode {
+	case http.StatusOK:
 		result.Status = StatusOK
 		result.Diagnosis = "endpoint OK, key valid"
 		if !result.HasAPIKey {
 			result.Diagnosis = "endpoint OK, no API key configured"
 		}
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+	case http.StatusUnauthorized, http.StatusForbidden:
 		result.Status = StatusAuthError
 		if result.HasAPIKey {
 			result.Diagnosis = "endpoint OK, key invalid or expired"
 		} else {
 			result.Diagnosis = "endpoint OK, no API key configured"
 		}
-	case resp.StatusCode == http.StatusNotFound:
+	case http.StatusNotFound:
 		result.Status = StatusPathError
 		result.Diagnosis = "endpoint NOT found (path may be wrong)"
-	case resp.StatusCode == http.StatusMethodNotAllowed:
+	case http.StatusMethodNotAllowed:
 		// 405 means the path exists but doesn't accept the method — path is correct
 		result.Status = StatusOK
 		result.Diagnosis = "endpoint exists (method not allowed, path OK)"
-	case resp.StatusCode == http.StatusBadRequest && isAnthropic:
-		// 400 from Anthropic POST /v1/messages with empty body = endpoint alive
+	case http.StatusBadRequest:
+		// 400 = endpoint alive but rejected the probe (e.g. Anthropic empty body,
+		// Gemini without API key). Path is correct; treat as OK.
 		result.Status = StatusOK
-		result.Diagnosis = "endpoint OK (empty request rejected, path OK)"
+		result.Diagnosis = "endpoint OK (bad request, path OK)"
 		if !result.HasAPIKey {
 			result.Diagnosis = "endpoint OK, no API key configured"
 		}
