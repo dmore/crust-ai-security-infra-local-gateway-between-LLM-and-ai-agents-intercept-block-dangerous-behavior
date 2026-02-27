@@ -19,11 +19,13 @@ import (
 	"github.com/BakeLens/crust/internal/earlyinit" // side-effect import: init() runs before bubbletea's via dependency order + lexicographic tie-breaking
 
 	"github.com/BakeLens/crust/internal/acpwrap"
+	"github.com/BakeLens/crust/internal/autowrap"
 	"github.com/BakeLens/crust/internal/cli"
 	"github.com/BakeLens/crust/internal/completion"
 	"github.com/BakeLens/crust/internal/config"
 	"github.com/BakeLens/crust/internal/daemon"
 	"github.com/BakeLens/crust/internal/logger"
+	"github.com/BakeLens/crust/internal/mcpgateway"
 	"github.com/BakeLens/crust/internal/proxy"
 	"github.com/BakeLens/crust/internal/rules"
 	"github.com/BakeLens/crust/internal/security"
@@ -95,6 +97,12 @@ func main() {
 			return
 		case "acp-wrap":
 			runAcpWrap(os.Args[2:])
+			return
+		case "mcp-gateway":
+			runMcpGateway(os.Args[2:])
+			return
+		case "wrap":
+			runWrap(os.Args[2:])
 			return
 		case "uninstall":
 			runUninstall()
@@ -904,21 +912,30 @@ func runReloadRules(_ []string) {
 }
 
 // runAcpWrap handles the acp-wrap subcommand
-func runAcpWrap(args []string) {
-	wrapFlags := flag.NewFlagSet("acp-wrap", flag.ExitOnError)
-	configPath := wrapFlags.String("config", config.DefaultConfigPath(), "Path to configuration file")
-	logLevel := wrapFlags.String("log-level", "warn", "Log level: trace, debug, info, warn, error")
-	rulesDir := wrapFlags.String("rules-dir", "", "Override rules directory")
-	disableBuiltin := wrapFlags.Bool("disable-builtin", false, "Disable builtin security rules")
-	_ = wrapFlags.Parse(args)
+// proxyRunConfig describes a proxy subcommand entry point.
+type proxyRunConfig struct {
+	name  string // subcommand name (e.g., "acp-wrap")
+	usage string // usage line (e.g., "acp-wrap [flags] -- <agent-command> [args...]")
+	run   func(engine *rules.Engine, cmd []string) int
+}
 
-	agentCmd := wrapFlags.Args()
-	if len(agentCmd) == 0 {
-		fmt.Fprintf(os.Stderr, "Usage: crust acp-wrap [flags] -- <agent-command> [args...]\n")
+// runProxyCommand implements the shared flag parsing, config loading, engine
+// init, and subprocess launch for all proxy subcommands (acp-wrap, mcp-gateway, wrap).
+func runProxyCommand(pcfg proxyRunConfig, args []string) {
+	fs := flag.NewFlagSet(pcfg.name, flag.ExitOnError)
+	configPath := fs.String("config", config.DefaultConfigPath(), "Path to configuration file")
+	logLevel := fs.String("log-level", "warn", "Log level: trace, debug, info, warn, error")
+	rulesDir := fs.String("rules-dir", "", "Override rules directory")
+	disableBuiltin := fs.Bool("disable-builtin", false, "Disable builtin security rules")
+	_ = fs.Parse(args)
+
+	subCmd := fs.Args()
+	if len(subCmd) == 0 {
+		fmt.Fprintf(os.Stderr, "Usage: crust %s\n", pcfg.usage)
 		os.Exit(1)
 	}
 
-	// Logger to stderr only — stdout is the ACP pipe
+	// Logger to stderr only — stdout is the JSON-RPC pipe
 	logger.SetColored(false)
 	if *logLevel != "" {
 		logger.SetGlobalLevelFromString(*logLevel)
@@ -937,9 +954,8 @@ func runAcpWrap(args []string) {
 		dir = rules.DefaultUserRulesDir()
 	}
 
-	// Ensure user rules directory exists so the engine can load
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		fmt.Fprintf(os.Stderr, "crust acp-wrap: failed to create rules dir: %v\n", err)
+		fmt.Fprintf(os.Stderr, "crust %s: failed to create rules dir: %v\n", pcfg.name, err)
 		os.Exit(1)
 	}
 
@@ -949,11 +965,35 @@ func runAcpWrap(args []string) {
 		SubprocessIsolation: true,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "crust acp-wrap: failed to init rules: %v\n", err)
+		fmt.Fprintf(os.Stderr, "crust %s: failed to init rules: %v\n", pcfg.name, err)
 		os.Exit(1)
 	}
 
-	os.Exit(acpwrap.Run(engine, agentCmd))
+	os.Exit(pcfg.run(engine, subCmd))
+}
+
+func runAcpWrap(args []string) {
+	runProxyCommand(proxyRunConfig{
+		name:  "acp-wrap",
+		usage: "acp-wrap [flags] -- <agent-command> [args...]",
+		run:   acpwrap.Run,
+	}, args)
+}
+
+func runMcpGateway(args []string) {
+	runProxyCommand(proxyRunConfig{
+		name:  "mcp-gateway",
+		usage: "mcp-gateway [flags] -- <mcp-server-command> [args...]",
+		run:   mcpgateway.Run,
+	}, args)
+}
+
+func runWrap(args []string) {
+	runProxyCommand(proxyRunConfig{
+		name:  "wrap",
+		usage: "wrap [flags] -- <command> [args...]",
+		run:   autowrap.Run,
+	}, args)
 }
 
 // runUninstall handles the uninstall subcommand

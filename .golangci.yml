@@ -164,6 +164,11 @@ linters:
         linters:
           - revive
         text: "var-naming: avoid meaningless package names"
+      # "jsonrpc" conflicts with net/rpc/jsonrpc but is the clearest name for this package
+      - path: internal/jsonrpc/
+        linters:
+          - revive
+        text: "var-naming: avoid package names that conflict"
 
 issues:
   max-issues-per-linter: 50
