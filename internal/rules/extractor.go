@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"maps"
@@ -103,8 +104,9 @@ var knownCommandFields = []string{
 }
 
 // fieldStrings extracts all string values from a field value.
-// Handles string, []any (from JSON arrays or case-collision merging),
-// and silently ignores non-string types (numbers, objects, bools).
+// Handles string and []any (from JSON arrays or case-collision merging).
+// Maps and other non-string types return nil — deeply nested arguments
+// are rejected at the Extract() level via jsonDepth, not silently traversed.
 // This is the single point of type normalization — all extraction
 // functions use this instead of inline type assertions.
 func fieldStrings(val any) []string {
@@ -123,6 +125,31 @@ func fieldStrings(val any) []string {
 		return result
 	}
 	return nil
+}
+
+// jsonDepth returns the maximum nesting depth of a parsed JSON value.
+// Strings/numbers/bools/nil = 0, flat object/array = 1, nested = 2+.
+func jsonDepth(val any) int {
+	switch v := val.(type) {
+	case map[string]any:
+		deepest := 0
+		for _, child := range v {
+			if d := jsonDepth(child); d > deepest {
+				deepest = d
+			}
+		}
+		return 1 + deepest
+	case []any:
+		deepest := 0
+		for _, child := range v {
+			if d := jsonDepth(child); d > deepest {
+				deepest = d
+			}
+		}
+		return 1 + deepest
+	default:
+		return 0
+	}
 }
 
 // Extractor extracts paths and operations from tool calls
@@ -755,6 +782,19 @@ func (e *Extractor) Extract(toolName string, args json.RawMessage) ExtractedInfo
 	if err := json.Unmarshal(args, &info.RawArgs); err != nil {
 		info.Content = string(args)
 		return info
+	}
+
+	// SECURITY: Reject excessively nested arguments. Legitimate tool calls use
+	// flat or single-level nesting (depth ≤ 2). Deep nesting is a sign of
+	// evasion — hiding security-relevant fields inside nested objects to bypass
+	// field-name extraction. Mark as evasive (hard block) rather than recursing.
+	const maxArgDepth = 2
+	for k, v := range info.RawArgs {
+		if jsonDepth(v) > maxArgDepth {
+			info.Evasive = true
+			info.EvasiveReason = fmt.Sprintf("argument field %q has excessive nesting depth (possible evasion)", k)
+			break
+		}
 	}
 
 	// SECURITY: Re-marshal decoded args for content matching.

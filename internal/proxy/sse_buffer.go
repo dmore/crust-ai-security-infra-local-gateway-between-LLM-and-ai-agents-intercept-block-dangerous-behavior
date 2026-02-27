@@ -6,15 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/BakeLens/crust/internal/rules"
 	"github.com/BakeLens/crust/internal/security"
+	"github.com/BakeLens/crust/internal/shellutil"
 	"github.com/BakeLens/crust/internal/telemetry"
 	"github.com/BakeLens/crust/internal/types"
-	"mvdan.cc/sh/v3/syntax"
 )
 
 const blockedToolSuffix = " Please inform the user and try a different approach."
@@ -93,15 +92,6 @@ func NewBufferedSSEWriter(w http.ResponseWriter, maxSize int, timeout time.Durat
 // shellToolNames lists tool names that can execute shell commands (in priority order)
 var shellToolNames = []string{"Bash", "bash", "Shell", "shell", "Execute", "execute", "Exec", "exec", "RunCommand", "run_command", "Terminal", "terminal", "Cmd", "cmd"}
 
-// shellQuote quotes a string for shell using the shell parser's own Quote function.
-func shellQuote(s string) string {
-	q, err := syntax.Quote(s, syntax.LangBash)
-	if err != nil {
-		return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-	}
-	return q
-}
-
 // buildBlockedReplacement constructs the replacement command input for a blocked tool call.
 func buildBlockedReplacement(toolName string, matchResult rules.MatchResult) map[string]string {
 	msg := fmt.Sprintf("[Crust] Tool '%s' blocked.", toolName)
@@ -109,8 +99,12 @@ func buildBlockedReplacement(toolName string, matchResult rules.MatchResult) map
 		msg = fmt.Sprintf("[Crust] Tool '%s' blocked: %s.", toolName, matchResult.Message)
 	}
 	msg += blockedToolSuffix
+	cmd, err := shellutil.Command("echo", msg)
+	if err != nil {
+		cmd = "echo '[Crust] Tool blocked.'"
+	}
 	return map[string]string{
-		"command":     "echo " + shellQuote(msg),
+		"command":     cmd,
 		"description": "Security: blocked tool call",
 	}
 }

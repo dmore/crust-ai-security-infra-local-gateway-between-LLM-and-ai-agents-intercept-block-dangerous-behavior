@@ -5,10 +5,9 @@ package acpwrap
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/BakeLens/crust/internal/rules"
-	"mvdan.cc/sh/v3/syntax"
+	"github.com/BakeLens/crust/internal/shellutil"
 )
 
 // ACP parameter types
@@ -30,16 +29,6 @@ type terminalCreateParams struct {
 	Args      []string          `json:"args,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
 	Cwd       string            `json:"cwd,omitempty"`
-}
-
-// shellQuote quotes a shell argument using the shell parser's own Quote function.
-// Falls back to single-quoting on error (e.g., null bytes).
-func shellQuote(s string) string {
-	q, err := syntax.Quote(s, syntax.LangBash)
-	if err != nil {
-		return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-	}
-	return q
 }
 
 // ACPMethodToToolCall converts an ACP JSON-RPC method + params into a rules.ToolCall.
@@ -91,13 +80,9 @@ func ACPMethodToToolCall(method string, params json.RawMessage) (*rules.ToolCall
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, fmt.Errorf("malformed %s params: %w", method, err)
 		}
-		fullCmd := p.Command
-		if len(p.Args) > 0 {
-			quoted := make([]string, len(p.Args))
-			for i, a := range p.Args {
-				quoted[i] = shellQuote(a)
-			}
-			fullCmd += " " + strings.Join(quoted, " ")
+		fullCmd, err := shellutil.Command(append([]string{p.Command}, p.Args...)...)
+		if err != nil {
+			return nil, fmt.Errorf("cannot construct command: %w", err)
 		}
 		args, err := json.Marshal(map[string]string{"command": fullCmd})
 		if err != nil {
