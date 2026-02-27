@@ -26,6 +26,19 @@ type resourcesReadParams struct {
 	URI string `json:"uri"`
 }
 
+// samplingCreateMessageParams represents the params of a MCP sampling/createMessage request.
+// The server asks the client's LLM to process messages (potentially instructing tool use).
+type samplingCreateMessageParams struct {
+	Messages  json.RawMessage `json:"messages"`
+	MaxTokens int             `json:"maxTokens"`
+}
+
+// elicitationCreateParams represents the params of a MCP elicitation/create request.
+// The server presents a form or URL to the user (phishing vector).
+type elicitationCreateParams struct {
+	Message string `json:"message"`
+}
+
 // MCPMethodToToolCall converts an MCP JSON-RPC method + params into a rules.ToolCall.
 //
 // Returns:
@@ -36,7 +49,7 @@ func MCPMethodToToolCall(method string, params json.RawMessage) (*rules.ToolCall
 	// Reject nil/null params on security-relevant methods (json.Unmarshal silently
 	// zero-initializes the struct, which would produce an empty name and bypass rules).
 	switch method {
-	case "tools/call", "resources/read":
+	case "tools/call", "resources/read", "sampling/createMessage", "elicitation/create":
 		if len(params) == 0 || string(params) == "null" {
 			return nil, fmt.Errorf("nil params for security method %s", method)
 		}
@@ -94,6 +107,26 @@ func MCPMethodToToolCall(method string, params json.RawMessage) (*rules.ToolCall
 			}
 			return &rules.ToolCall{Name: "mcp_resource_read", Arguments: args}, nil
 		}
+
+	case "sampling/createMessage":
+		var p samplingCreateMessageParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, fmt.Errorf("malformed %s params: %w", method, err)
+		}
+		// Pass full params as arguments so DLP and content-based rules
+		// can inspect the embedded messages and system prompt.
+		return &rules.ToolCall{Name: "mcp_sampling", Arguments: params}, nil
+
+	case "elicitation/create":
+		var p elicitationCreateParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, fmt.Errorf("malformed %s params: %w", method, err)
+		}
+		if p.Message == "" {
+			return nil, fmt.Errorf("empty message in %s", method)
+		}
+		// Pass full params so rule engine can inspect the message and schema.
+		return &rules.ToolCall{Name: "mcp_elicitation", Arguments: params}, nil
 
 	default:
 		return nil, nil

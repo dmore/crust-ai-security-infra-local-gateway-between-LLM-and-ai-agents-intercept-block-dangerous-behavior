@@ -382,6 +382,51 @@ func TestPipeInbound_MultipleMessages(t *testing.T) {
 	}
 }
 
+// --- Batch bypass ---
+
+func TestPipeInbound_BatchBlocksEnvRead(t *testing.T) {
+	batch := `[{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_file","arguments":{"path":"/app/.env"}}},{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"capabilities":{}}}]` + "\n"
+	fwd, errOut := runInboundPipe(t, batch)
+	if strings.Contains(fwd, ".env") {
+		t.Errorf("batch element reading .env should be blocked, got forwarded: %s", fwd)
+	}
+	if !strings.Contains(fwd, "initialize") {
+		t.Errorf("allowed batch element should be forwarded, got: %s", fwd)
+	}
+	if errOut == "" {
+		t.Error("expected error response for blocked batch element")
+	}
+}
+
+func TestPipeOutbound_BatchResponseDLP(t *testing.T) {
+	batch := `[{"jsonrpc":"2.0","id":1,"result":{"key":"AKIAIOSFODNN7EXAMPLE"}},{"jsonrpc":"2.0","id":2,"result":{"data":"clean"}}]` + "\n"
+	fwd, _ := runOutboundPipe(t, batch)
+	if strings.Contains(fwd, "AKIA") {
+		t.Errorf("batch response with AWS key should be blocked by DLP, got: %s", fwd)
+	}
+	if !strings.Contains(fwd, "clean") {
+		t.Errorf("clean batch element should be forwarded, got: %s", fwd)
+	}
+}
+
+// --- Notification params DLP ---
+
+func TestPipeOutbound_NotificationDLP_BlocksSecretsInParams(t *testing.T) {
+	msg := `{"jsonrpc":"2.0","method":"notifications/progress","params":{"token":"AKIAIOSFODNN7EXAMPLE"}}` + "\n"
+	fwd, _ := runOutboundPipe(t, msg)
+	if strings.Contains(fwd, "AKIA") {
+		t.Errorf("notification with AWS key in params should be blocked by DLP, got: %s", fwd)
+	}
+}
+
+func TestPipeOutbound_NotificationDLP_PassesCleanParams(t *testing.T) {
+	msg := `{"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":50}}` + "\n"
+	fwd, _ := runOutboundPipe(t, msg)
+	if fwd != msg {
+		t.Errorf("clean notification should pass through\ngot:  %q\nwant: %q", fwd, msg)
+	}
+}
+
 func TestPipeOutbound_MultipleMessages(t *testing.T) {
 	msgs := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"fs/read_text_file","params":{"sessionId":"s1","path":"/app/.env"}}`,

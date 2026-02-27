@@ -353,7 +353,107 @@ func TestForwardSignals_StopSignals(t *testing.T) {
 	}
 }
 
-// --- IsRequest ---
+// --- Batch handling ---
+
+func TestPipeInspect_BatchBlocksSecurityMessages(t *testing.T) {
+	// Before the fix, arrays fail to unmarshal into Message and are forwarded unexamined.
+	batch := `[{"jsonrpc":"2.0","id":1,"method":"security/call","params":{}}]` + "\n"
+	fwd, errOut := runInspect(t, batch, blockAllConverter)
+	if strings.Contains(fwd, "security/call") {
+		t.Errorf("batch element should be blocked, but was forwarded: %s", fwd)
+	}
+	if errOut == "" {
+		t.Error("expected error response for blocked batch element")
+	}
+}
+
+func TestPipeInspect_BatchMixed(t *testing.T) {
+	batch := `[{"jsonrpc":"2.0","id":1,"method":"security/call","params":{}},{"jsonrpc":"2.0","id":2,"method":"other/call","params":{}}]` + "\n"
+	fwd, errOut := runInspect(t, batch, blockAllConverter)
+	if !strings.Contains(fwd, "other/call") {
+		t.Errorf("allowed batch element should be forwarded, got: %s", fwd)
+	}
+	if strings.Contains(fwd, "security/call") {
+		t.Errorf("blocked batch element should not be forwarded")
+	}
+	if errOut == "" {
+		t.Error("expected error response for blocked batch element")
+	}
+}
+
+func TestPipeInspect_BatchEmptyArray(t *testing.T) {
+	batch := `[]` + "\n"
+	fwd, errOut := runInspect(t, batch, blockAllConverter)
+	if fwd != batch {
+		t.Errorf("empty batch should pass through, got: %q", fwd)
+	}
+	if errOut != "" {
+		t.Errorf("unexpected error: %s", errOut)
+	}
+}
+
+func TestPipeInspect_BatchInvalidFallthrough(t *testing.T) {
+	msg := `[broken json` + "\n"
+	fwd, errOut := runInspect(t, msg, blockAllConverter)
+	if fwd != msg {
+		t.Errorf("invalid batch should pass through, got: %q", fwd)
+	}
+	if errOut != "" {
+		t.Errorf("unexpected error: %s", errOut)
+	}
+}
+
+func TestPipeInspect_BatchResponseDLP(t *testing.T) {
+	// Batch containing a response with DLP-triggering content
+	batch := `[{"jsonrpc":"2.0","id":1,"result":{"key":"AKIAIOSFODNN7EXAMPLE"}}]` + "\n"
+	fwd, _ := runInspect(t, batch, blockAllConverter)
+	if strings.Contains(fwd, "AKIA") {
+		t.Errorf("response with AWS key in batch should be blocked by DLP, got: %s", fwd)
+	}
+}
+
+// --- Notification params DLP ---
+
+func TestPipeInspect_NotificationParamsDLP(t *testing.T) {
+	msg := `{"jsonrpc":"2.0","method":"update","params":{"token":"ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklm"}}` + "\n"
+	fwd, _ := runInspect(t, msg, blockAllConverter)
+	if strings.Contains(fwd, "ghp_") {
+		t.Errorf("notification with GitHub token in params should be blocked by DLP, got: %s", fwd)
+	}
+}
+
+func TestPipeInspect_NotificationCleanParamsPassthrough(t *testing.T) {
+	msg := `{"jsonrpc":"2.0","method":"update","params":{"progress":50}}` + "\n"
+	fwd, errOut := runInspect(t, msg, blockAllConverter)
+	if fwd != msg {
+		t.Errorf("clean notification should pass through, got: %q", fwd)
+	}
+	if errOut != "" {
+		t.Errorf("unexpected error: %s", errOut)
+	}
+}
+
+// --- IsRequest / IsNotification ---
+
+func TestMessage_IsNotification(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  Message
+		want bool
+	}{
+		{"notification", Message{Method: "foo"}, true},
+		{"request", Message{Method: "foo", ID: json.RawMessage(`1`)}, false},
+		{"response", Message{ID: json.RawMessage(`1`), Result: json.RawMessage(`{}`)}, false},
+		{"empty", Message{}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.msg.IsNotification(); got != tt.want {
+				t.Errorf("IsNotification() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestMessage_IsRequest(t *testing.T) {
 	tests := []struct {

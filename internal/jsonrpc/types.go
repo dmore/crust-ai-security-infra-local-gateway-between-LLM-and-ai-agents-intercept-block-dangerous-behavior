@@ -31,6 +31,11 @@ func (m *Message) IsRequest() bool {
 	return m.Method != "" && len(m.ID) > 0
 }
 
+// IsNotification returns true if this is a JSON-RPC notification (has method but no id).
+func (m *Message) IsNotification() bool {
+	return m.Method != "" && len(m.ID) == 0
+}
+
 // ErrorResponse is a JSON-RPC 2.0 error response.
 type ErrorResponse struct {
 	JSONRPC string          `json:"jsonrpc"`

@@ -89,6 +89,53 @@ func TestPipeClientToServer_PassesEdgeCases(t *testing.T) {
 	}
 }
 
+// --- Batch bypass ---
+
+func TestPipeClientToServer_BatchBlocksEnvRead(t *testing.T) {
+	batch := `[{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}},{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"file:///app/.env"}}]`
+	fwd, errOut := runPipe(t, batch+"\n")
+
+	// tools/list should be forwarded (non-security method).
+	if !strings.Contains(fwd, "tools/list") {
+		t.Error("tools/list should be forwarded")
+	}
+	// .env read should be blocked.
+	if strings.Contains(fwd, ".env") {
+		t.Error(".env read should NOT be forwarded")
+	}
+	if errOut == "" {
+		t.Error("expected error response for blocked .env read")
+	}
+	if !strings.Contains(errOut, "[Crust]") {
+		t.Errorf("error response missing [Crust]: %s", errOut)
+	}
+}
+
+func TestPipeClientToServer_BatchAllPassthrough(t *testing.T) {
+	batch := `[{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}},{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}]`
+	fwd, errOut := runPipe(t, batch+"\n")
+	if !strings.Contains(fwd, "tools/list") {
+		t.Error("tools/list should be forwarded")
+	}
+	if !strings.Contains(fwd, "initialize") {
+		t.Error("initialize should be forwarded")
+	}
+	if errOut != "" {
+		t.Errorf("expected no errors, got: %s", errOut)
+	}
+}
+
+func TestPipeClientToServer_BatchInvalidFallthrough(t *testing.T) {
+	input := `[broken json`
+	fwd, errOut := runPipe(t, input+"\n")
+	if !strings.Contains(fwd, input) {
+		t.Error("invalid batch should be forwarded as-is")
+	}
+	if errOut != "" {
+		t.Errorf("expected no errors, got: %s", errOut)
+	}
+}
+
 // --- resources/read error response shape ---
 
 func TestPipeClientToServer_ResourceReadErrorShape(t *testing.T) {

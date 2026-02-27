@@ -104,8 +104,65 @@ func TestMcpMethodToToolCall_Unknown(t *testing.T) {
 	}
 }
 
+func TestMcpMethodToToolCall_SamplingCreateMessage(t *testing.T) {
+	params := `{"messages":[{"role":"user","content":{"type":"text","text":"hello"}}],"maxTokens":100}`
+	tc, err := MCPMethodToToolCall("sampling/createMessage", json.RawMessage(params))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tc == nil {
+		t.Fatal("expected non-nil ToolCall")
+	}
+	if tc.Name != "mcp_sampling" {
+		t.Errorf("name = %s, want mcp_sampling", tc.Name)
+	}
+	// Full params should be passed as Arguments for DLP inspection.
+	if string(tc.Arguments) != params {
+		t.Errorf("arguments = %s, want %s", string(tc.Arguments), params)
+	}
+}
+
+func TestMcpMethodToToolCall_ElicitationCreate(t *testing.T) {
+	params := `{"message":"Please enter your API key","schema":{"type":"object"}}`
+	tc, err := MCPMethodToToolCall("elicitation/create", json.RawMessage(params))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tc == nil {
+		t.Fatal("expected non-nil ToolCall")
+	}
+	if tc.Name != "mcp_elicitation" {
+		t.Errorf("name = %s, want mcp_elicitation", tc.Name)
+	}
+	if string(tc.Arguments) != params {
+		t.Errorf("arguments = %s, want %s", string(tc.Arguments), params)
+	}
+}
+
+func TestMcpMethodToToolCall_SamplingNilParams(t *testing.T) {
+	for _, input := range []json.RawMessage{nil, json.RawMessage(`null`), json.RawMessage(``)} {
+		tc, err := MCPMethodToToolCall("sampling/createMessage", input)
+		if tc != nil {
+			t.Errorf("expected nil ToolCall for nil/null params, got %+v", tc)
+		}
+		if err == nil {
+			t.Error("expected error for nil/null params on security method")
+		}
+	}
+}
+
+func TestMcpMethodToToolCall_ElicitationEmptyMessage(t *testing.T) {
+	tc, err := MCPMethodToToolCall("elicitation/create", json.RawMessage(`{"message":""}`))
+	if tc != nil {
+		t.Error("expected nil ToolCall for empty message")
+	}
+	if err == nil {
+		t.Error("expected error for empty message in elicitation/create")
+	}
+}
+
 func TestMcpMethodToToolCall_MalformedParams(t *testing.T) {
-	methods := []string{"tools/call", "resources/read"}
+	methods := []string{"tools/call", "resources/read", "sampling/createMessage", "elicitation/create"}
 	badInputs := []json.RawMessage{
 		json.RawMessage(`{broken`),
 		json.RawMessage(`"just a string"`),
