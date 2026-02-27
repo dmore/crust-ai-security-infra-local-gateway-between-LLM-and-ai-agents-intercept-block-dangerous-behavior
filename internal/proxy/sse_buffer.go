@@ -14,6 +14,7 @@ import (
 	"github.com/BakeLens/crust/internal/security"
 	"github.com/BakeLens/crust/internal/telemetry"
 	"github.com/BakeLens/crust/internal/types"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 const blockedToolSuffix = " Please inform the user and try a different approach."
@@ -92,9 +93,13 @@ func NewBufferedSSEWriter(w http.ResponseWriter, maxSize int, timeout time.Durat
 // shellToolNames lists tool names that can execute shell commands (in priority order)
 var shellToolNames = []string{"Bash", "bash", "Shell", "shell", "Execute", "execute", "Exec", "exec", "RunCommand", "run_command", "Terminal", "terminal", "Cmd", "cmd"}
 
-// shellQuote wraps s in single quotes with proper escaping for shell.
+// shellQuote quotes a string for shell using the shell parser's own Quote function.
 func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+	q, err := syntax.Quote(s, syntax.LangBash)
+	if err != nil {
+		return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+	}
+	return q
 }
 
 // buildBlockedReplacement constructs the replacement command input for a blocked tool call.

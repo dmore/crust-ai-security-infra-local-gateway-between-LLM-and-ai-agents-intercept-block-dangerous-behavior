@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"unicode"
 
 	"github.com/BakeLens/crust/internal/rules"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 // ACP parameter types
@@ -32,20 +32,14 @@ type terminalCreateParams struct {
 	Cwd       string            `json:"cwd,omitempty"`
 }
 
-// shellSafe is the set of characters that don't need quoting in shell arguments.
-const shellSafe = "-_./:=+,"
-
-// shellQuote quotes a shell argument if it contains special characters.
+// shellQuote quotes a shell argument using the shell parser's own Quote function.
+// Falls back to single-quoting on error (e.g., null bytes).
 func shellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	if strings.ContainsFunc(s, func(c rune) bool {
-		return !unicode.IsLetter(c) && !unicode.IsDigit(c) && !strings.ContainsRune(shellSafe, c)
-	}) {
+	q, err := syntax.Quote(s, syntax.LangBash)
+	if err != nil {
 		return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 	}
-	return s
+	return q
 }
 
 // ACPMethodToToolCall converts an ACP JSON-RPC method + params into a rules.ToolCall.

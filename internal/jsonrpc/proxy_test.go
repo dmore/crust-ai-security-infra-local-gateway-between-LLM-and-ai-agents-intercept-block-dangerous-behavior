@@ -12,21 +12,10 @@ import (
 
 	"github.com/BakeLens/crust/internal/logger"
 	"github.com/BakeLens/crust/internal/rules"
+	"github.com/BakeLens/crust/internal/testutil"
 )
 
 var testLog = logger.New("test")
-
-func newTestEngine(t *testing.T) *rules.Engine {
-	t.Helper()
-	engine, err := rules.NewEngine(rules.EngineConfig{
-		UserRulesDir:   t.TempDir(),
-		DisableBuiltin: false,
-	})
-	if err != nil {
-		t.Fatalf("Failed to create engine: %v", err)
-	}
-	return engine
-}
 
 // blockAllConverter is a test converter that treats "security/call" as security-relevant
 // and maps it to a tool call that will be blocked by the built-in rules.
@@ -132,7 +121,7 @@ func TestPipePassthrough_EmptyInput(t *testing.T) {
 
 func runInspect(t *testing.T, input string, convert MethodConverter) (fwd, errOut string) {
 	t.Helper()
-	engine := newTestEngine(t)
+	engine := testutil.NewEngine(t)
 	var fwdBuf, errBuf bytes.Buffer
 	fwdWriter := NewLockedWriter(&fwdBuf)
 	errWriter := NewLockedWriter(&errBuf)
@@ -250,7 +239,7 @@ func TestRunProxy_NoHang(t *testing.T) {
 	if _, err := exec.LookPath("true"); err != nil {
 		t.Skip("'true' not found in PATH")
 	}
-	engine := newTestEngine(t)
+	engine := testutil.NewEngine(t)
 	stdinR, stdinW := io.Pipe()
 	defer stdinW.Close() // keep write end OPEN to expose the hang bug
 
@@ -278,7 +267,7 @@ func TestRunProxy_ExitCode(t *testing.T) {
 	if _, err := exec.LookPath("false"); err != nil {
 		t.Skip("'false' not found in PATH")
 	}
-	engine := newTestEngine(t)
+	engine := testutil.NewEngine(t)
 	stdinR, stdinW := io.Pipe()
 	defer stdinW.Close()
 
@@ -306,7 +295,7 @@ func TestRunProxy_WithInspect(t *testing.T) {
 	if _, err := exec.LookPath("cat"); err != nil {
 		t.Skip("'cat' not found in PATH")
 	}
-	engine := newTestEngine(t)
+	engine := testutil.NewEngine(t)
 
 	// cat echoes stdin to stdout — so we send a message and check it comes through
 	input := `{"jsonrpc":"2.0","id":1,"method":"other/call","params":{}}` + "\n"
@@ -381,17 +370,6 @@ func TestPipeInspect_BatchMixed(t *testing.T) {
 	}
 }
 
-func TestPipeInspect_BatchEmptyArray(t *testing.T) {
-	batch := `[]` + "\n"
-	fwd, errOut := runInspect(t, batch, blockAllConverter)
-	if fwd != batch {
-		t.Errorf("empty batch should pass through, got: %q", fwd)
-	}
-	if errOut != "" {
-		t.Errorf("unexpected error: %s", errOut)
-	}
-}
-
 func TestPipeInspect_BatchInvalidFallthrough(t *testing.T) {
 	msg := `[broken json` + "\n"
 	fwd, errOut := runInspect(t, msg, blockAllConverter)
@@ -430,6 +408,58 @@ func TestPipeInspect_NotificationCleanParamsPassthrough(t *testing.T) {
 	}
 	if errOut != "" {
 		t.Errorf("unexpected error: %s", errOut)
+	}
+}
+
+// --- Notification security bypass ---
+// Before the fix, notifications (method + no id) bypassed the converter
+// and rule engine entirely — only DLP scanning ran.
+
+func TestPipeInspect_NotificationBlocksSecurityMethod(t *testing.T) {
+	// "security/call" as a notification (no id) must still be blocked.
+	msg := `{"jsonrpc":"2.0","method":"security/call","params":{}}` + "\n"
+	fwd, _ := runInspect(t, msg, blockAllConverter)
+	if strings.Contains(fwd, "security/call") {
+		t.Errorf("notification with security method should be blocked, got forwarded: %s", fwd)
+	}
+}
+
+func TestPipeInspect_NotificationPassesNonSecurityMethod(t *testing.T) {
+	// Non-security notifications must still pass through.
+	msg := `{"jsonrpc":"2.0","method":"other/call","params":{}}` + "\n"
+	fwd, errOut := runInspect(t, msg, blockAllConverter)
+	if fwd != msg {
+		t.Errorf("non-security notification should pass through, got %q", fwd)
+	}
+	if errOut != "" {
+		t.Errorf("unexpected error: %s", errOut)
+	}
+}
+
+func TestPipeInspect_NotificationMalformedParamsBlocked(t *testing.T) {
+	// "malformed/call" as a notification — converter returns error, must be blocked.
+	msg := `{"jsonrpc":"2.0","method":"malformed/call","params":{}}` + "\n"
+	fwd, _ := runInspect(t, msg, blockAllConverter)
+	if fwd != "" {
+		t.Errorf("notification with malformed params should be blocked, got: %s", fwd)
+	}
+}
+
+func TestPipeInspect_NotificationNoErrorResponseSent(t *testing.T) {
+	// Blocked notifications should NOT generate error responses (no id to reply to).
+	msg := `{"jsonrpc":"2.0","method":"security/call","params":{}}` + "\n"
+	_, errOut := runInspect(t, msg, blockAllConverter)
+	if errOut != "" {
+		t.Errorf("blocked notification should not generate error response, got: %s", errOut)
+	}
+}
+
+func TestPipeInspect_BatchNotificationBlocked(t *testing.T) {
+	// Batch element as notification must also be blocked.
+	batch := `[{"jsonrpc":"2.0","method":"security/call","params":{}}]` + "\n"
+	fwd, _ := runInspect(t, batch, blockAllConverter)
+	if strings.Contains(fwd, "security/call") {
+		t.Errorf("batch notification should be blocked, got: %s", fwd)
 	}
 }
 

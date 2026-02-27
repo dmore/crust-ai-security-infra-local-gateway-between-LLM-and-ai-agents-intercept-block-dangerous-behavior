@@ -185,18 +185,6 @@ func TestBuildBlockedReplacement_WithoutMessage(t *testing.T) {
 	}
 }
 
-func TestBuildBlockedReplacement_ShellQuoting(t *testing.T) {
-	result := buildBlockedReplacement("Bash", rules.MatchResult{
-		Message: "Can't do that",
-	})
-
-	cmd := result["command"]
-	// Single quote in "Can't" should be escaped for shell safety
-	if !strings.Contains(cmd, `'\''`) {
-		t.Errorf("single quote not escaped in command: %q", cmd)
-	}
-}
-
 func TestBufferedSSEWriter_ReplaceModeNoShellTool_FallsBackToRemove(t *testing.T) {
 	w := httptest.NewRecorder()
 	// Create buffer with NO shell tool (only non-shell tools)

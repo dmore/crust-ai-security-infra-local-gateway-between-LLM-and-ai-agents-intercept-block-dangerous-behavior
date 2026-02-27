@@ -51,62 +51,70 @@ const (
 	resultWriteErr                       // write error; caller should abort
 )
 
+// scanDLP checks a JSON-RPC field for leaked secrets. Returns true if blocked.
+// If id is non-empty, sends a JSON-RPC error response to errWriter.
+// For notifications (no ID), the message is dropped silently.
+func scanDLP(log *logger.Logger, engine *rules.Engine, data json.RawMessage,
+	id json.RawMessage, errWriter *LockedWriter, protocol, logLabel string) bool {
+	if len(data) == 0 {
+		return false
+	}
+	dlpResult := engine.ScanDLP(string(data))
+	if dlpResult == nil {
+		return false
+	}
+	log.Warn("Blocked %s %s (DLP): rule=%s message=%s",
+		protocol, logLabel, dlpResult.RuleName, dlpResult.Message)
+	if len(id) > 0 {
+		SendBlockError(log, errWriter, id,
+			fmt.Sprintf("[Crust] Blocked by rule %q: %s", dlpResult.RuleName, dlpResult.Message))
+	}
+	return true
+}
+
+// forwardLine writes data to w and returns resultForwarded, or resultWriteErr on failure.
+func forwardLine(log *logger.Logger, w *LockedWriter, data []byte, label string) processResult {
+	if err := w.WriteLine(data); err != nil {
+		log.Debug("%s write error: %v", label, err)
+		return resultWriteErr
+	}
+	return resultForwarded
+}
+
 // processMessage inspects a single JSON-RPC message and either forwards or blocks it.
 // This is the core inspection logic, reused by both the main loop and batch handler.
 func processMessage(log *logger.Logger, engine *rules.Engine, line []byte, msg *Message,
 	fwdWriter, errWriter *LockedWriter, convert MethodConverter, protocol, label string) processResult {
 
-	if !msg.IsRequest() {
-		// Response DLP: scan Result, Error, and notification Params for leaked secrets.
-		// Errors go to fwdWriter (client) because the client is waiting for this response.
-		if len(msg.Result) > 0 {
-			if dlpResult := engine.ScanDLP(string(msg.Result)); dlpResult != nil {
-				log.Warn("Blocked %s response (DLP): rule=%s message=%s",
-					protocol, dlpResult.RuleName, dlpResult.Message)
-				SendBlockError(log, fwdWriter, msg.ID,
-					fmt.Sprintf("[Crust] Blocked by rule %q: %s", dlpResult.RuleName, dlpResult.Message))
-				return resultBlocked
-			}
+	// Response (no method): DLP-scan only.
+	if !msg.IsRequest() && !msg.IsNotification() {
+		if scanDLP(log, engine, msg.Result, msg.ID, fwdWriter, protocol, "response") ||
+			scanDLP(log, engine, msg.Error, msg.ID, fwdWriter, protocol, "error response") {
+			return resultBlocked
 		}
-		if len(msg.Error) > 0 {
-			if dlpResult := engine.ScanDLP(string(msg.Error)); dlpResult != nil {
-				log.Warn("Blocked %s error response (DLP): rule=%s message=%s",
-					protocol, dlpResult.RuleName, dlpResult.Message)
-				SendBlockError(log, fwdWriter, msg.ID,
-					fmt.Sprintf("[Crust] Blocked by rule %q: %s", dlpResult.RuleName, dlpResult.Message))
-				return resultBlocked
-			}
-		}
-		// Notification params DLP: notifications have Method+Params but no ID.
-		// A malicious server could embed secrets in notification params.
-		if msg.IsNotification() && len(msg.Params) > 0 {
-			if dlpResult := engine.ScanDLP(string(msg.Params)); dlpResult != nil {
-				log.Warn("Blocked %s notification (DLP): method=%s rule=%s message=%s",
-					protocol, msg.Method, dlpResult.RuleName, dlpResult.Message)
-				// Notifications have no ID — can't send an error response.
-				// Drop silently (don't forward).
-				return resultBlocked
-			}
-		}
-		if err := fwdWriter.WriteLine(line); err != nil {
-			log.Debug("%s write error: %v", label, err)
-			return resultWriteErr
-		}
-		return resultForwarded
+		return forwardLine(log, fwdWriter, line, label)
 	}
 
-	// Request: convert method and evaluate rules.
+	// Notification: DLP-scan params for leaked secrets, then fall through
+	// to converter + rule evaluation (notifications with security-relevant
+	// methods like tools/call must still be inspected).
+	if msg.IsNotification() {
+		if scanDLP(log, engine, msg.Params, nil, fwdWriter, protocol,
+			"notification method="+msg.Method) {
+			return resultBlocked
+		}
+	}
+
+	// Request or notification with a method: convert and evaluate rules.
 	toolCall, err := convert(msg.Method, msg.Params)
 	if toolCall == nil && err == nil {
-		if err := fwdWriter.WriteLine(line); err != nil {
-			log.Debug("%s write error: %v", label, err)
-			return resultWriteErr
-		}
-		return resultForwarded
+		return forwardLine(log, fwdWriter, line, label)
 	}
 	if err != nil {
 		log.Warn("Blocked %s %s: %v", protocol, msg.Method, err)
-		SendBlockError(log, errWriter, msg.ID, "[Crust] Blocked: malformed params for "+msg.Method)
+		if msg.IsRequest() {
+			SendBlockError(log, errWriter, msg.ID, "[Crust] Blocked: malformed params for "+msg.Method)
+		}
 		return resultBlocked
 	}
 
@@ -115,8 +123,10 @@ func processMessage(log *logger.Logger, engine *rules.Engine, line []byte, msg *
 	if result.Matched && result.Action == rules.ActionBlock {
 		log.Warn("Blocked %s %s (tool=%s): rule=%s message=%s",
 			protocol, msg.Method, toolCall.Name, result.RuleName, result.Message)
-		SendBlockError(log, errWriter, msg.ID,
-			fmt.Sprintf("[Crust] Blocked by rule %q: %s", result.RuleName, result.Message))
+		if msg.IsRequest() {
+			SendBlockError(log, errWriter, msg.ID,
+				fmt.Sprintf("[Crust] Blocked by rule %q: %s", result.RuleName, result.Message))
+		}
 		return resultBlocked
 	}
 
@@ -125,11 +135,7 @@ func processMessage(log *logger.Logger, engine *rules.Engine, line []byte, msg *
 			protocol, msg.Method, toolCall.Name, result.RuleName)
 	}
 
-	if err := fwdWriter.WriteLine(line); err != nil {
-		log.Debug("%s write error: %v", label, err)
-		return resultWriteErr
-	}
-	return resultForwarded
+	return forwardLine(log, fwdWriter, line, label)
 }
 
 // processBatch handles a JSON-RPC batch array by inspecting each element
@@ -142,19 +148,11 @@ func processBatch(log *logger.Logger, engine *rules.Engine, line []byte,
 	if err := json.Unmarshal(line, &batch); err != nil {
 		// Not a valid JSON array — forward as-is (same as invalid JSON)
 		log.Debug("%s batch parse error: %v", label, err)
-		if err := fwdWriter.WriteLine(line); err != nil {
-			log.Debug("%s write error: %v", label, err)
-			return resultWriteErr
-		}
-		return resultForwarded
+		return forwardLine(log, fwdWriter, line, label)
 	}
 
 	if len(batch) == 0 {
-		if err := fwdWriter.WriteLine(line); err != nil {
-			log.Debug("%s write error: %v", label, err)
-			return resultWriteErr
-		}
-		return resultForwarded
+		return forwardLine(log, fwdWriter, line, label)
 	}
 
 	log.Debug("%s processing batch of %d messages", label, len(batch))
@@ -163,8 +161,7 @@ func processBatch(log *logger.Logger, engine *rules.Engine, line []byte,
 		var msg Message
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			// Element is not valid JSON-RPC — forward individually
-			if err := fwdWriter.WriteLine(raw); err != nil {
-				log.Debug("%s write error: %v", label, err)
+			if forwardLine(log, fwdWriter, raw, label) == resultWriteErr {
 				return resultWriteErr
 			}
 			continue

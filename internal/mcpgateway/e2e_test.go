@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/BakeLens/crust/internal/jsonrpc"
+	"github.com/BakeLens/crust/internal/testutil"
 )
 
 // skipE2E skips if -short or npx not available.
@@ -73,7 +74,7 @@ type e2eResponse struct {
 // all JSON-RPC responses received by the client.
 func runMCPE2E(t *testing.T, dir string, messages []string) []e2eResponse {
 	t.Helper()
-	engine := newTestEngine(t)
+	engine := testutil.NewEngine(t)
 	input := strings.Join(messages, "\n") + "\n"
 	stdinR := io.NopCloser(strings.NewReader(input))
 	var stdout strings.Builder
