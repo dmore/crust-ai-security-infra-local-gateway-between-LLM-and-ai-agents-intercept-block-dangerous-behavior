@@ -77,12 +77,21 @@ func PipeInspect(log *logger.Logger, engine *rules.Engine, src io.Reader,
 		}
 
 		if !msg.IsRequest() {
-			// Response DLP: scan successful responses for leaked secrets.
+			// Response DLP: scan responses for leaked secrets.
 			// Errors go to fwdWriter (client) because the client is waiting
 			// for this response — the server doesn't need to know.
 			if len(msg.Result) > 0 {
 				if dlpResult := engine.ScanDLP(string(msg.Result)); dlpResult != nil {
 					log.Warn("Blocked %s response (DLP): rule=%s message=%s",
+						protocol, dlpResult.RuleName, dlpResult.Message)
+					SendBlockError(log, fwdWriter, msg.ID,
+						fmt.Sprintf("[Crust] Blocked by rule %q: %s", dlpResult.RuleName, dlpResult.Message))
+					continue
+				}
+			}
+			if len(msg.Error) > 0 {
+				if dlpResult := engine.ScanDLP(string(msg.Error)); dlpResult != nil {
+					log.Warn("Blocked %s error response (DLP): rule=%s message=%s",
 						protocol, dlpResult.RuleName, dlpResult.Message)
 					SendBlockError(log, fwdWriter, msg.ID,
 						fmt.Sprintf("[Crust] Blocked by rule %q: %s", dlpResult.RuleName, dlpResult.Message))

@@ -236,6 +236,40 @@ func TestPipeOutbound_ResponseDLP_PassesClean(t *testing.T) {
 	}
 }
 
+func TestPipeOutbound_ResponseDLP_BlocksErrorFieldSecrets(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  string
+	}{
+		{"aws_key_in_error", `{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"failed to read config: AKIAIOSFODNN7EXAMPLE"}}`},
+		{"github_token_in_error", `{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"auth failed: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklm"}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fwd, _ := runOutboundPipe(t, tt.msg+"\n")
+			if strings.Contains(fwd, "AKIA") || strings.Contains(fwd, "ghp_") {
+				t.Errorf("error response with secret should be blocked by DLP, got forwarded: %s", fwd)
+			}
+			// fwd should contain a replacement JSON-RPC error from Crust
+			var resp jsonrpc.ErrorResponse
+			if err := json.Unmarshal(bytes.TrimSpace([]byte(fwd)), &resp); err != nil {
+				t.Fatalf("expected JSON-RPC error in fwd, got: %q", fwd)
+			}
+			if resp.Error.Code != jsonrpc.BlockedError {
+				t.Errorf("error code = %d, want %d", resp.Error.Code, jsonrpc.BlockedError)
+			}
+		})
+	}
+}
+
+func TestPipeOutbound_ResponseDLP_PassesCleanError(t *testing.T) {
+	msg := `{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"file not found"}}`
+	fwd, _ := runOutboundPipe(t, msg+"\n")
+	if fwd != msg+"\n" {
+		t.Errorf("clean error response should pass through\ngot:  %q\nwant: %q", fwd, msg+"\n")
+	}
+}
+
 func TestPipeOutbound_ResponseDLP_ErrorResponseShape(t *testing.T) {
 	msg := `{"jsonrpc":"2.0","id":1,"result":{"content":"key=AKIAIOSFODNN7EXAMPLE"}}`
 	fwd, _ := runOutboundPipe(t, msg+"\n")
