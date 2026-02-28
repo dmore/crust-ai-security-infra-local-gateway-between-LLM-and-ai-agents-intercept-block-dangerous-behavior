@@ -37,7 +37,7 @@ func TestEvasiveMarkingOnSecondaryFields(t *testing.T) {
 			name:        "text starting with shell keyword if",
 			toolName:    "helper",
 			args:        map[string]any{"script": "if you want to delete, use rm"},
-			wantEvasive: true, // incomplete if/then block fails parser — expected
+			wantEvasive: false, // unparseable commands are NOT evasive — OS sandboxing is the enforcement layer
 		},
 		{
 			name:        "safe command + text starting with if keyword",

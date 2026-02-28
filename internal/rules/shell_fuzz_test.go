@@ -310,11 +310,8 @@ func TestShellFuzz_PathExtraction(t *testing.T) {
 }
 
 // TestShellFuzz_EvasionDetection tests the Extract-level evasion flags.
-//
-// NOTE: The PreFilter (eval, base64, hex, IFS, nc -e, etc.) runs in the
-// engine pipeline (Engine.Evaluate), NOT in Extract. Extract only flags
-// Evasive for: (1) unparseable commands, (2) glob patterns in command names.
-// PreFilter detection is tested in TestPreFilter* and TestOpenClawAttackDemo.
+// Extract flags Evasive for: glob patterns in command names, fork bombs,
+// and suspicious input (fullwidth chars, null bytes, etc.).
 func TestShellFuzz_EvasionDetection(t *testing.T) {
 	ext := NewExtractor()
 
@@ -325,8 +322,6 @@ func TestShellFuzz_EvasionDetection(t *testing.T) {
 		}{
 			// Glob in command name — Extract-level detection
 			{"glob_cmd", "/???/??t /etc/passwd"},
-			// NOTE: /usr/*/python3 won't trigger because resolveCommand strips path prefix.
-			// Glob in path-prefix is a known gap (engine path-matching covers it).
 			{"glob_question", "ca? /etc/passwd"},
 		}
 
