@@ -11,17 +11,23 @@ Agent Request ──▶ [Layer 0: History Scan] ──▶ LLM ──▶ [Layer 1
                    (14-30μs)                             (14-30μs)
                "Bad agent detected"                   "Action blocked"
 
-Layer 1 Rule Evaluation Order:
-  1. Sanitize tool name → strip null bytes and control chars
-  2. Extract paths, commands, content from tool arguments
-  3. Normalize Unicode → NFKC, strip invisible chars and confusables (all text fields)
-  4. Block null bytes in write content
-  5. Detect obfuscation (base64, hex, IFS) and shell evasion
-  6. Self-protection → block management API/socket access
-  7. DLP Secret Detection → blocks real API keys/tokens (hardcoded + gitleaks)
-  8. Path normalization → expand ~, env vars, globs, resolve symlinks
-  9. Operation-based Rules → path/command/host matching for known tools
-  10. Fallback Rules (content-only) → raw JSON matching, works for ANY tool
+Layer 1 Rule Evaluation (16 steps):
+  1.  Sanitize tool name → strip null bytes, control chars
+  2.  Extract paths, commands, content from tool arguments
+  3.  Normalize Unicode → NFKC, strip invisible chars and confusables
+  4.  Block null bytes in write content
+  5.  Detect encoding obfuscation (base64, hex)
+  6.  Block evasive commands (fork bombs, unparseable shell)
+  7.  Self-protection → block management API access (hardcoded)
+  8.  Block management API via Unix socket / named pipe
+  9.  DLP Secret Detection → block real API keys/tokens
+  10. Filter bare shell globs (not real paths)
+  11. Normalize paths → expand ~, env vars
+  12. Expand globs against real filesystem
+  13. Block /proc access (hardcoded)
+  14. Resolve symlinks → match both original and resolved
+  15. Operation-based rules → path/command/host matching
+  16. Fallback rules (content-only) → raw JSON matching for ANY tool
 ```
 
 **Layer 0 (Request History):** Scans tool_calls in conversation history. Catches "bad agent" patterns where malicious actions already occurred in past turns.
@@ -81,6 +87,10 @@ Layer 1 Rule Evaluation Order:
 | LLM generates `cat .env` | - | ✅ Blocked | - | - |
 | LLM generates `rm -rf /etc` | - | ✅ Blocked | - | - |
 | `$(cat .env)` obfuscation | - | ✅ Blocked | - | - |
+| `eval "cat .env"` wrapping | - | ✅ Blocked (recursive parse) | - | - |
+| Fork bomb `f(){ f|f& }; f` | - | ✅ Blocked (AST) | - | - |
+| `echo payload \| base64 -d \| sh` | - | ✅ Blocked (pre-filter) | - | - |
+| Hex-encoded command `$'\x63\x61\x74'` | - | ✅ Blocked (pre-filter) | - | - |
 | Symlink bypass | - | ✅ Blocked (composite) | - | - |
 | Leaking real API keys/tokens | - | ✅ Blocked (DLP) | ✅ Blocked (DLP) | ✅ Blocked (DLP) |
 | MCP client reads `.env` | - | - | ✅ Blocked (inbound) | - |
@@ -94,9 +104,41 @@ Layer 1 Rule Evaluation Order:
 
 ---
 
+## Shell Command Analysis
+
+The rule engine uses a hybrid interpreter+AST approach to extract paths and operations from shell commands (Bash tool calls, `sh -c` wrappers, etc.).
+
+**Interpreter mode:** A sandboxed shell interpreter expands variables, command substitutions, and tilde/glob patterns in dry-run mode. This produces fully expanded paths — `DIR=/tmp; ls $DIR` yields `/tmp`, not `$DIR`.
+
+**AST fallback:** When a statement contains constructs unsafe for interpretation (process substitution `<()`, background `&`, heredocs, coprocs, fd redirects), the parser falls back to AST extraction which reads literal text from the syntax tree.
+
+**Hybrid mode:** When a script mixes safe and unsafe statements, the engine runs the interpreter on safe statements (preserving variable expansion) and uses AST fallback only for unsafe ones. Inner commands of process substitutions and coprocs are recursively interpreted when possible.
+
+```text
+DIR=/tmp; diff <(ls $DIR) <(ls $DIR/sub)
+
+Without hybrid:  diff, ls (literal — $DIR unexpanded)
+With hybrid:     diff, ls /tmp, ls /tmp/sub (fully expanded)
+```
+
+### Evasion Detection
+
+The shell parser detects several evasion techniques at the AST level:
+
+| Technique | Detection |
+|-----------|-----------|
+| **Fork bombs** | AST walk detects self-recursive `FuncDecl` (e.g., `bomb(){ bomb\|bomb& }; bomb`) |
+| **Eval wrapping** | `eval` args are joined and recursively parsed as shell code (like `sh -c`) |
+| **Base64 encoding** | Pre-filter regex catches `base64 -d` / `base64 --decode` patterns |
+| **Hex encoding** | Pre-filter catches 3+ consecutive `\xNN` escape sequences |
+
+The pre-filter runs before the shell parser (step 5) and catches encoding-based obfuscation where the actual command is hidden in encoded form — invisible to the parser at parse time. Other evasion techniques (fork bombs, eval) are detected at the AST level (step 6) after parsing.
+
+---
+
 ## DLP Secret Detection
 
-Step 7 of the evaluation pipeline runs hardcoded DLP (Data Loss Prevention) patterns against all operations. These patterns detect real API keys and tokens by their format, regardless of file path or tool name.
+Step 9 of the evaluation pipeline runs hardcoded DLP (Data Loss Prevention) patterns against all operations. These patterns detect real API keys and tokens by their format, regardless of file path or tool name.
 
 In stdio proxy modes (MCP Gateway, ACP Wrap, Auto-detect), DLP also scans **server/agent responses** before they reach the client. This catches secrets leaked by the subprocess — for example, an MCP server returning file content that contains an AWS access key. The response is replaced with a JSON-RPC error so the secret never reaches the client.
 
