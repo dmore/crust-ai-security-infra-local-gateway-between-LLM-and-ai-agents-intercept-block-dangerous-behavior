@@ -127,7 +127,7 @@ Supports JetBrains IDEs and other ACP-compatible editors. See the [ACP setup gui
 
 ## Built-in Protection
 
-Crust ships with **14 security rules** and **19 DLP token-detection patterns** out of the box:
+Crust ships with **14 security rules** and **34 DLP token-detection patterns** out of the box:
 
 | Category | What's Protected |
 |----------|-----------------|
@@ -138,7 +138,7 @@ Crust ships with **14 security rules** and **19 DLP token-detection patterns** o
 | **Package Tokens** | npm, pip, Cargo, Composer, NuGet, Gem auth tokens |
 | **Git Credentials** | `.git-credentials`, `.config/git/credentials` |
 | **Persistence** | Shell RC files, `authorized_keys` |
-| **DLP Token Detection** | Content-based scanning for real API keys and tokens (AWS, GitHub, Stripe, OpenAI, Anthropic, and [14 more](docs/how-it-works.md#dlp-secret-detection)) |
+| **DLP Token Detection** | Content-based scanning for real API keys and tokens (AWS, GitHub, Stripe, OpenAI, Anthropic, and [23 more](docs/how-it-works.md#dlp-secret-detection)) |
 | **Key Exfiltration** | Content-based PEM private key detection |
 | **Self-Protection** | Agents cannot read, modify, or disable Crust itself |
 | **Dangerous Commands** | `eval`/`exec` with dynamic code execution |

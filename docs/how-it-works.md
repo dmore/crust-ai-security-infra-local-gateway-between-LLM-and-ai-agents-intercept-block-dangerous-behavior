@@ -152,17 +152,30 @@ In stdio proxy modes (MCP Gateway, ACP Wrap, Auto-detect), DLP also scans **serv
 | Google | API keys (`AIza...`) |
 | SendGrid | API keys (`SG....`) |
 | Heroku | API keys (`heroku_...`) |
-| OpenAI | Project keys (`sk-proj-...`) |
+| OpenAI | Project keys, admin keys (`sk-proj-...`, `sk-admin-...`) |
 | Anthropic | API keys (`sk-ant-api03-...`) |
 | Shopify | Shared secrets, access tokens (`shpss_...`, `shpat_...`) |
 | Databricks | Access tokens (`dapi...`) |
 | PyPI | Upload tokens (`pypi-...`) |
 | npm | Auth tokens (`npm_...`) |
 | age | Secret keys (`AGE-SECRET-KEY-...`) |
+| Private keys | PEM format (RSA, EC, DSA, OpenSSH, Ed25519) |
+| HuggingFace | API tokens (`hf_...`) |
+| Groq | API keys (`gsk_...`) |
+| Vercel | Tokens (`vercel_...`) |
+| Supabase | Service keys (`sbp_...`) |
+| DigitalOcean | PATs, OAuth tokens (`dop_v1_...`, `doo_v1_...`) |
+| HashiCorp Vault | Tokens (`hvs....`) |
+| Linear | API keys (`lin_api_...`) |
+| Postman | API keys (`PMAK-...`) |
+| Replicate | API tokens (`r8_...`) |
+| Twilio | API keys (`SK...`) |
+| Doppler | Tokens (`dp.st....`) |
+| Firebase | Cloud Messaging keys (`AAAA...:...`) |
 
-Patterns are sourced from [gitleaks v8.24](https://github.com/gitleaks/gitleaks), curated for blocking (not warning). See `internal/rules/dlp.go` for the full list.
+Tier 1 patterns (34 hardcoded) are sourced from [gitleaks v8.24](https://github.com/gitleaks/gitleaks) and extended for newer services. See `internal/rules/dlp.go` for the full list.
 
-In addition, [gitleaks](https://github.com/gitleaks/gitleaks) is used as a secondary scanner if installed, providing coverage for additional token formats beyond the hardcoded set.
+Tier 2: [gitleaks](https://github.com/gitleaks/gitleaks) is used as a secondary scanner, providing 200+ additional token formats. Install with `brew install gitleaks` or `go install github.com/gitleaks/gitleaks/v8@latest`.
 
 ---
 

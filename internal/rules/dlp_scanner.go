@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// DLPScanner provides optional Tier 2 secret detection via an external
-// gitleaks binary. Disabled gracefully when gitleaks is not installed.
+// DLPScanner provides Tier 2 secret detection via an external gitleaks binary.
+// Recommended dependency — logs a warning with install instructions if missing.
 type DLPScanner struct {
 	binaryPath string
 	available  bool
@@ -37,7 +37,8 @@ func NewDLPScanner() *DLPScanner {
 
 	path, err := exec.LookPath("gitleaks")
 	if err != nil {
-		log.Info("DLP Tier 2 disabled: gitleaks not found in PATH")
+		log.Warn("DLP Tier 2 disabled: gitleaks not found — install for full secret detection (200+ patterns)")
+		log.Warn("  brew install gitleaks  OR  go install github.com/gitleaks/gitleaks/v8@latest")
 		return s
 	}
 

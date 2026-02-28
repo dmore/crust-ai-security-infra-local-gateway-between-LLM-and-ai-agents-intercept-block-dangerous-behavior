@@ -3,8 +3,10 @@ package rules
 import "regexp"
 
 // Hardcoded DLP (Data Loss Prevention) token detection patterns.
-// Compiled at init, checked on all operations.
-// Sourced from gitleaks v8.24, curated for blocking (not warning).
+// Compiled at init, checked on all operations (Tier 1).
+// Core patterns sourced from gitleaks v8.24, extended for newer AI/cloud services.
+// Curated for blocking (not warning) — each pattern must have a distinctive prefix
+// to avoid false positives.
 
 type dlpPattern struct {
 	name    string
@@ -138,6 +140,110 @@ var dlpPatterns = []dlpPattern{
 		name:    "builtin:dlp-age-secret-key",
 		re:      regexp.MustCompile(`AGE-SECRET-KEY-[A-Z0-9]{59}`),
 		message: "Cannot write age secret key — potential credential leak",
+	},
+
+	// Private keys (PEM format) — fires on ALL operations, not just writes.
+	// Catches RSA, EC, DSA, OpenSSH, Ed25519, and generic PRIVATE KEY headers.
+	{
+		name:    "builtin:dlp-private-key",
+		re:      regexp.MustCompile(`-----BEGIN[A-Z ]* PRIVATE KEY-----`),
+		message: "Cannot expose private key — potential credential leak",
+	},
+
+	// HuggingFace
+	{
+		name:    "builtin:dlp-huggingface-token",
+		re:      regexp.MustCompile(`hf_[A-Za-z0-9]{34,}`),
+		message: "Cannot write HuggingFace token — potential credential leak",
+	},
+
+	// Groq
+	{
+		name:    "builtin:dlp-groq-api-key",
+		re:      regexp.MustCompile(`gsk_[A-Za-z0-9]{48,}`),
+		message: "Cannot write Groq API key — potential credential leak",
+	},
+
+	// Vercel
+	{
+		name:    "builtin:dlp-vercel-token",
+		re:      regexp.MustCompile(`vercel_[A-Za-z0-9]{20,}`),
+		message: "Cannot write Vercel token — potential credential leak",
+	},
+
+	// Supabase
+	{
+		name:    "builtin:dlp-supabase-key",
+		re:      regexp.MustCompile(`sbp_[a-f0-9]{40,}`),
+		message: "Cannot write Supabase key — potential credential leak",
+	},
+
+	// DigitalOcean
+	{
+		name:    "builtin:dlp-digitalocean-pat",
+		re:      regexp.MustCompile(`dop_v1_[a-f0-9]{64}`),
+		message: "Cannot write DigitalOcean token — potential credential leak",
+	},
+	{
+		name:    "builtin:dlp-digitalocean-oauth",
+		re:      regexp.MustCompile(`doo_v1_[a-f0-9]{64}`),
+		message: "Cannot write DigitalOcean OAuth token — potential credential leak",
+	},
+
+	// HashiCorp Vault
+	{
+		name:    "builtin:dlp-hashicorp-vault",
+		re:      regexp.MustCompile(`hvs\.[A-Za-z0-9_\-]{24,}`),
+		message: "Cannot write HashiCorp Vault token — potential credential leak",
+	},
+
+	// Linear
+	{
+		name:    "builtin:dlp-linear-api-key",
+		re:      regexp.MustCompile(`lin_api_[A-Za-z0-9]{40,}`),
+		message: "Cannot write Linear API key — potential credential leak",
+	},
+
+	// Postman
+	{
+		name:    "builtin:dlp-postman-api-key",
+		re:      regexp.MustCompile(`PMAK-[A-Za-z0-9]{24,}`),
+		message: "Cannot write Postman API key — potential credential leak",
+	},
+
+	// Replicate
+	{
+		name:    "builtin:dlp-replicate-api-token",
+		re:      regexp.MustCompile(`r8_[A-Za-z0-9]{36,}`),
+		message: "Cannot write Replicate API token — potential credential leak",
+	},
+
+	// Twilio
+	{
+		name:    "builtin:dlp-twilio-api-key",
+		re:      regexp.MustCompile(`SK[a-f0-9]{32}`),
+		message: "Cannot write Twilio API key — potential credential leak",
+	},
+
+	// Doppler
+	{
+		name:    "builtin:dlp-doppler-token",
+		re:      regexp.MustCompile(`dp\.st\.[a-zA-Z0-9_\-]{40,}`),
+		message: "Cannot write Doppler token — potential credential leak",
+	},
+
+	// OpenAI admin key
+	{
+		name:    "builtin:dlp-openai-admin-key",
+		re:      regexp.MustCompile(`sk-admin-[A-Za-z0-9_\-]{40,}`),
+		message: "Cannot write OpenAI admin key — potential credential leak",
+	},
+
+	// Firebase Cloud Messaging
+	{
+		name:    "builtin:dlp-firebase-key",
+		re:      regexp.MustCompile(`AAAA[A-Za-z0-9_\-]{7}:[A-Za-z0-9_\-]{140,}`),
+		message: "Cannot write Firebase key — potential credential leak",
 	},
 
 	// Add new patterns above this line.
