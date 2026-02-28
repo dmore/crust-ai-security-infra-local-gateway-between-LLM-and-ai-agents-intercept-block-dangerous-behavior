@@ -365,7 +365,7 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 		}
 	}
 
-	// Step 5: PreFilter — detect obfuscation (base64, hex, IFS, curl/nc).
+	// Step 5: PreFilter — detect obfuscation (base64, hex encoding).
 	if info.Command != "" {
 		if match := e.preFilter.Check(info.Command); match != nil {
 			return MatchResult{

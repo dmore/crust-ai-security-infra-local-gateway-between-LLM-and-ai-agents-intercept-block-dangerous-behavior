@@ -44,10 +44,13 @@ func TestShellWorkerSubprocess(t *testing.T) {
 		t.Error("expected paths from pipeline extraction, got none")
 	}
 
-	// Process substitution should be flagged as evasive
+	// Process substitution: AST fallback extracts commands and paths
 	info3 := ext.Extract("Bash", json.RawMessage(`{"command":"diff <(cat /etc/passwd) <(cat /etc/shadow)"}`))
-	if !info3.Evasive {
-		t.Error("expected process substitution to be flagged as evasive")
+	if info3.Evasive {
+		t.Errorf("process substitution should not be evasive, got reason: %s", info3.EvasiveReason)
+	}
+	if !slices.Contains(info3.Paths, "/etc/passwd") || !slices.Contains(info3.Paths, "/etc/shadow") {
+		t.Errorf("expected /etc/passwd and /etc/shadow in paths, got %v", info3.Paths)
 	}
 }
 
@@ -63,10 +66,13 @@ func TestShellWorkerCrashRecovery(t *testing.T) {
 	}
 	defer ext.Close()
 
-	// Coproc should be handled (either by astHasUnsafe pre-check or worker crash)
+	// Coproc: AST fallback extracts the inner command and paths
 	info := ext.Extract("Bash", json.RawMessage(`{"command":"coproc cat /etc/shadow"}`))
-	if !info.Evasive {
-		t.Error("expected coproc to be flagged as evasive")
+	if info.Evasive {
+		t.Errorf("coproc should not be evasive, got reason: %s", info.EvasiveReason)
+	}
+	if !slices.Contains(info.Paths, "/etc/shadow") {
+		t.Errorf("expected /etc/shadow in paths, got %v", info.Paths)
 	}
 
 	// After a potential crash, the next command should still work

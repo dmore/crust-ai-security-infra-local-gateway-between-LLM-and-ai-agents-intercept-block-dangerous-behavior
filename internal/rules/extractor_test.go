@@ -1545,6 +1545,68 @@ func TestFieldStrings(t *testing.T) {
 	}
 }
 
+// TestExtract_DeepNestingEvasive verifies that deeply nested arguments are
+// rejected as evasive rather than silently dropping nested values.
+func TestExtract_DeepNestingEvasive(t *testing.T) {
+	extractor := NewExtractor()
+
+	tests := []struct {
+		name    string
+		args    string
+		evasive bool
+	}{
+		{
+			"flat args ok",
+			`{"command":"ls"}`,
+			false,
+		},
+		{
+			"single nesting ok",
+			`{"config":{"key":"value"}}`,
+			false,
+		},
+		{
+			"double nesting ok",
+			`{"config":{"settings":{"key":"value"}}}`,
+			false,
+		},
+		{
+			"triple nesting evasive",
+			`{"data":{"level1":{"level2":{"level3":"evil"}}}}`,
+			true,
+		},
+		{
+			"nested command bypass evasive",
+			`{"command":{"a":{"b":{"c":"cat /etc/shadow"}}}}`,
+			true,
+		},
+		{
+			"nested path bypass evasive",
+			`{"path":{"a":{"b":{"c":"/etc/passwd"}}}}`,
+			true,
+		},
+		{
+			"array of strings ok",
+			`{"args":["a","b","c"]}`,
+			false,
+		},
+		{
+			"array with nested object evasive",
+			`{"args":[{"deep":{"hidden":"rm -rf /"}}]}`,
+			true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := extractor.Extract("CustomTool", json.RawMessage(tt.args))
+			if info.Evasive != tt.evasive {
+				t.Errorf("Evasive = %v, want %v (reason: %s)", info.Evasive, tt.evasive, info.EvasiveReason)
+			}
+		})
+	}
+}
+
 // TestExtract_AugmentGuardArrayCommand verifies that the augmentFromArgShape guard
 // correctly triggers extractBashCommand for []any command values (bug #1 fix).
 func TestExtract_AugmentGuardArrayCommand(t *testing.T) {

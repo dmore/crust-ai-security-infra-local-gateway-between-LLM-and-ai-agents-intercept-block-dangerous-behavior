@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 
@@ -58,14 +59,14 @@ func IsSuspiciousInput(s string) (suspicious bool, reasons []string) {
 	// Check for null bytes
 	if strings.ContainsRune(s, 0) {
 		suspicious = true
-		reasons = append(reasons, "contains null bytes")
+		reasons = append(reasons, "input contains hidden null characters")
 	}
 
 	// Check for fullwidth characters
 	for _, r := range s {
 		if r >= 0xFF01 && r <= 0xFF5E {
 			suspicious = true
-			reasons = append(reasons, "contains fullwidth characters")
+			reasons = append(reasons, "input uses lookalike fullwidth characters")
 			break
 		}
 	}
@@ -74,7 +75,7 @@ func IsSuspiciousInput(s string) (suspicious bool, reasons []string) {
 	for _, r := range s {
 		if _, ok := confusableMap[r]; ok {
 			suspicious = true
-			reasons = append(reasons, "contains cross-script confusable characters")
+			reasons = append(reasons, "input uses lookalike characters from another script")
 			break
 		}
 	}
@@ -82,20 +83,20 @@ func IsSuspiciousInput(s string) (suspicious bool, reasons []string) {
 	// Check for excessive path traversal
 	if strings.Count(s, "..") > 3 {
 		suspicious = true
-		reasons = append(reasons, "excessive path traversal")
+		reasons = append(reasons, "input navigates too many parent directories")
 	}
 
 	// Check for very long repeated patterns (potential ReDoS)
 	if len(s) > 10000 {
 		suspicious = true
-		reasons = append(reasons, "excessively long input")
+		reasons = append(reasons, fmt.Sprintf("input is unusually long (%d bytes)", len(s)))
 	}
 
 	// Check for control characters
 	for _, r := range s {
 		if unicode.IsControl(r) && r != '\t' && r != '\n' && r != '\r' {
 			suspicious = true
-			reasons = append(reasons, "contains control characters")
+			reasons = append(reasons, "input contains hidden control characters")
 			break
 		}
 	}
