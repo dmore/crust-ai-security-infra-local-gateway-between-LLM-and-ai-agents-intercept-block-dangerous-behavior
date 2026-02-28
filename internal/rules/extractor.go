@@ -232,6 +232,12 @@ func defaultCommandDB() map[string]CommandInfo {
 		"nano": {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
 		"view": {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
 
+		// Directory listing
+		"ls":  {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
+		"exa": {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
+		"eza": {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
+		"lsd": {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
+
 		// Binary inspection tools
 		"strings": {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3}},
 		"xxd":     {Operation: OpRead, PathArgIndex: []int{0}},
@@ -980,13 +986,15 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 			e.extractFromParsedCommandsDepth(info, parsed, 0, symtab)
 			anyParsed = true
 		} else if panicked || astHasSubst(file) {
-			// Either the interpreter panicked (e.g., unhandled CoprocClause)
-			// or it extracted zero commands from an AST with substitutions
-			// (e.g., ProcSubst where FIFOs can't be created in dry-run mode).
-			// Flag as evasive — we can't analyze what's inside.
-			info.Evasive = true
-			info.EvasiveReason = "command contains shell constructs that could not be analyzed"
-			anyParsed = true // Prevent double-flag from the anyFailed check below
+			// The interpreter couldn't run (panic, ProcSubst, heredoc, background, etc.)
+			// Fall back to static AST extraction: walk CallExpr nodes for command names,
+			// literal args, and redirect paths. Imperfect but sufficient since OS sandboxing
+			// provides the ultimate enforcement layer.
+			fallback := extractFromAST(file)
+			if len(fallback) > 0 {
+				e.extractFromParsedCommandsDepth(info, fallback, 0, symtab)
+			}
+			anyParsed = true
 		}
 	}
 
@@ -1265,7 +1273,7 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		// Flag as evasive and conservatively extract all non-flag args as paths
 		// (we can't know which are paths vs values). Also infer the worst-case
 		// operation from matching commands.
-		if strings.ContainsAny(cmdName, "*?[") {
+		if cmdName != "[" && strings.ContainsAny(cmdName, "*?[") {
 			info.Evasive = true
 			info.EvasiveReason = "command name contains glob pattern that prevents static analysis"
 			// Extract all non-flag positional args as paths
@@ -2144,12 +2152,182 @@ func astHasSubst(file *syntax.File) bool {
 	return found
 }
 
-// astHasUnsafe checks for AST nodes that the mvdan.cc/sh interpreter panics on.
+// collectInnerStmts extracts interpretable inner statements from unsafe AST
+// constructs. ProcSubst has Stmts []*Stmt (commands inside <(...) or >(...)),
+// and CoprocClause has Stmt *Stmt (the inner command). These inner commands
+// are often safe and can be run through the interpreter for variable expansion
+// even when the outer statement cannot.
+func collectInnerStmts(stmt *syntax.Stmt) []*syntax.Stmt {
+	var inner []*syntax.Stmt
+	syntax.Walk(stmt, func(node syntax.Node) bool {
+		switch n := node.(type) {
+		case *syntax.ProcSubst:
+			inner = append(inner, n.Stmts...)
+			return false
+		case *syntax.CoprocClause:
+			if n.Stmt != nil {
+				inner = append(inner, n.Stmt)
+			}
+			return false
+		}
+		return true
+	})
+	return inner
+}
+
+// defuseStmt creates a shallow copy of an unsafe statement with dangerous
+// features removed: Background cleared, unsafe redirects stripped. If the
+// resulting stmt passes nodeHasUnsafe (e.g., it still contains ProcSubst in
+// CallExpr args), returns nil — the caller should use AST fallback instead.
+func defuseStmt(stmt *syntax.Stmt) *syntax.Stmt {
+	defused := *stmt // shallow copy
+	defused.Background = false
+	defused.Coprocess = false
+
+	// Filter redirects to keep only safe ones.
+	var safeRedirs []*syntax.Redirect
+	for _, r := range stmt.Redirs {
+		if r.N != nil && r.N.Value != "" && r.N.Value != "0" && r.N.Value != "1" && r.N.Value != "2" {
+			continue
+		}
+		switch r.Op { //nolint:exhaustive // only keep known-safe redirect ops
+		case syntax.RdrOut, syntax.AppOut, syntax.RdrIn, syntax.WordHdoc:
+			safeRedirs = append(safeRedirs, r)
+		}
+	}
+	defused.Redirs = safeRedirs
+
+	// CoprocClause is the Cmd itself — can't defuse, need inner extraction.
+	if _, ok := defused.Cmd.(*syntax.CoprocClause); ok {
+		return nil
+	}
+
+	if nodeHasUnsafe(&defused) {
+		return nil // still has ProcSubst in args, ParamExp @op, etc.
+	}
+	return &defused
+}
+
+// extractFromAST walks the parsed AST and extracts commands from CallExpr nodes
+// without running the interpreter. This is the fallback when the interpreter
+// cannot handle certain constructs (process substitution, heredocs in pipes,
+// backgrounded commands, coproc). It extracts command names, literal arguments,
+// and redirect paths from statements.
+//
+// When skipInner is true, ProcSubst and CoprocClause subtrees are skipped
+// (the caller handles them separately via collectInnerStmts + interpretation).
+func extractFromAST(file *syntax.File, skipInner ...bool) []parsedCommand {
+	skip := len(skipInner) > 0 && skipInner[0]
+	var commands []parsedCommand
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if skip {
+			switch node.(type) {
+			case *syntax.ProcSubst, *syntax.CoprocClause:
+				return false
+			}
+		}
+		stmt, ok := node.(*syntax.Stmt)
+		if !ok {
+			return true
+		}
+
+		// Extract redirect paths from the statement.
+		var redirOut, redirIn []string
+		for _, r := range stmt.Redirs {
+			if r.Word == nil {
+				continue
+			}
+			p := wordToLiteral(r.Word)
+			if p == "" {
+				continue
+			}
+			switch r.Op { //nolint:exhaustive // only extract path-bearing redirect ops
+			case syntax.RdrOut, syntax.AppOut, syntax.RdrAll, syntax.AppAll:
+				redirOut = append(redirOut, p)
+			case syntax.RdrIn, syntax.WordHdoc:
+				redirIn = append(redirIn, p)
+			}
+		}
+
+		call, ok := stmt.Cmd.(*syntax.CallExpr)
+		if !ok || len(call.Args) == 0 {
+			return true // continue into nested structures (BinaryCmd, IfClause, etc.)
+		}
+
+		name := wordToLiteral(call.Args[0])
+		if name == "" {
+			return true
+		}
+
+		pc := parsedCommand{
+			Name:         name,
+			RedirPaths:   redirOut,
+			RedirInPaths: redirIn,
+		}
+		for _, w := range call.Args[1:] {
+			if s := wordToLiteral(w); s != "" {
+				pc.Args = append(pc.Args, s)
+			}
+			if wordHasExpansion(w) {
+				pc.HasSubst = true
+			}
+		}
+		commands = append(commands, pc)
+		return true // continue walking for nested commands
+	})
+	return commands
+}
+
+// wordToLiteral extracts the literal text content from a syntax.Word,
+// concatenating Lit, SglQuoted, and literal parts of DblQuoted nodes.
+// Returns "" if the word contains only non-literal parts (substitutions, etc.).
+func wordToLiteral(w *syntax.Word) string {
+	var buf strings.Builder
+	for _, part := range w.Parts {
+		switch p := part.(type) {
+		case *syntax.Lit:
+			buf.WriteString(p.Value)
+		case *syntax.SglQuoted:
+			buf.WriteString(p.Value)
+		case *syntax.DblQuoted:
+			for _, inner := range p.Parts {
+				if lit, ok := inner.(*syntax.Lit); ok {
+					buf.WriteString(lit.Value)
+				}
+			}
+		}
+	}
+	return buf.String()
+}
+
+// wordHasExpansion returns true if a Word contains any substitution or expansion
+// (command substitution, process substitution, parameter expansion, arithmetic).
+func wordHasExpansion(w *syntax.Word) bool {
+	for _, part := range w.Parts {
+		switch p := part.(type) {
+		case *syntax.CmdSubst, *syntax.ProcSubst, *syntax.ParamExp, *syntax.ArithmExp:
+			return true
+		case *syntax.DblQuoted:
+			for _, inner := range p.Parts {
+				switch inner.(type) {
+				case *syntax.CmdSubst, *syntax.ProcSubst, *syntax.ParamExp, *syntax.ArithmExp:
+					return true
+				}
+			}
+		case *syntax.BraceExp:
+			_ = p // brace expansion isn't a substitution but note it
+		}
+	}
+	return false
+}
+
+// nodeHasUnsafe checks for AST nodes that the mvdan.cc/sh interpreter panics on.
 // Panics in interpreter-spawned goroutines (e.g., backgrounded commands) are
 // unrecoverable, so we must skip the interpreter for these inputs.
-func astHasUnsafe(file *syntax.File) bool {
+// Accepts any syntax.Node (File, Stmt, etc.) for per-statement granularity.
+func nodeHasUnsafe(root syntax.Node) bool {
 	found := false
-	syntax.Walk(file, func(node syntax.Node) bool {
+	syntax.Walk(root, func(node syntax.Node) bool {
 		if found {
 			return false
 		}
@@ -2261,16 +2439,15 @@ func (e *Extractor) parseShellCommandsExpand(cmd string, parentSymtab map[string
 	return cmds, sym
 }
 
-// runShellFile runs a pre-parsed, simplified shell AST through interp.Runner
-// in dry-run mode. The Runner handles variable tracking, assignment expansion,
-// brace expansion, arithmetic, and quote removal natively.
+// runShellFile runs a pre-parsed, simplified shell AST through a hybrid
+// interpreter + AST extraction pipeline. It partitions statements into safe
+// (interpretable) and unsafe (AST-fallback) groups, runs the interpreter on
+// safe stmts for full variable expansion, and recursively interprets inner
+// commands from ProcSubst/CoprocClause for maximum coverage.
 //
 // parentSymtab is merged for propagation across recursive sh -c parses.
 // The Runner is seeded with e.env for real environment values (e.g., $HOME).
 func (e *Extractor) runShellFile(file *syntax.File, parentSymtab map[string]string) (cmds []parsedCommand, sym map[string]string, panicked bool) {
-	// Recover from panics in the shell interpreter. The mvdan.cc/sh runner
-	// panics on unhandled AST nodes (e.g., CoprocClause). Without recovery,
-	// an attacker could crash security analysis with "coproc cat /etc/shadow".
 	defer func() {
 		if r := recover(); r != nil {
 			panicked = true
@@ -2280,12 +2457,88 @@ func (e *Extractor) runShellFile(file *syntax.File, parentSymtab map[string]stri
 		}
 	}()
 
-	// Pre-check: skip the interpreter for AST nodes it can't handle.
-	// CoprocClause panics in mvdan.cc/sh v3.12.0, and if the coproc is
-	// backgrounded, the panic occurs in an unrecoverable goroutine.
-	if astHasUnsafe(file) {
-		return nil, maps.Clone(parentSymtab), true
+	// Partition statements into safe (interpretable) and unsafe (AST fallback).
+	var safeStmts, unsafeStmts []*syntax.Stmt
+	for _, stmt := range file.Stmts {
+		if nodeHasUnsafe(stmt) {
+			unsafeStmts = append(unsafeStmts, stmt)
+		} else {
+			safeStmts = append(safeStmts, stmt)
+		}
 	}
+
+	// Fast path: all safe — run entire file through interpreter (unchanged behavior).
+	if len(unsafeStmts) == 0 {
+		return e.runShellFileInterp(file, parentSymtab)
+	}
+
+	// --- Hybrid path: some or all stmts are unsafe ---
+
+	// Phase 1: Run safe stmts through interpreter for commands + symtab.
+	var safeCmds []parsedCommand
+	safeSymtab := make(map[string]string)
+	maps.Copy(safeSymtab, parentSymtab)
+	if len(safeStmts) > 0 {
+		safeFile := &syntax.File{Stmts: safeStmts}
+		var safePanicked bool
+		safeCmds, safeSymtab, safePanicked = e.runShellFileInterp(safeFile, parentSymtab)
+		if safePanicked {
+			return nil, maps.Clone(parentSymtab), true
+		}
+	}
+
+	var allCmds []parsedCommand
+	allCmds = append(allCmds, safeCmds...)
+
+	// Phase 2: For each unsafe stmt, try three strategies in order:
+	// (a) Defuse (strip background/unsafe redirects) and interpret the whole command
+	// (b) AST-extract the outer command + interpret inner ProcSubst/CoprocClause stmts
+	// (c) Pure AST fallback
+	for _, stmt := range unsafeStmts {
+		// Strategy (a): defuse and interpret — handles background, fd-dup, heredoc.
+		if defused := defuseStmt(stmt); defused != nil {
+			defusedFile := &syntax.File{Stmts: []*syntax.Stmt{defused}}
+			defusedCmds, defusedSym, defusedPanicked := e.runShellFileInterp(defusedFile, safeSymtab)
+			if !defusedPanicked && len(defusedCmds) > 0 {
+				allCmds = append(allCmds, defusedCmds...)
+				maps.Copy(safeSymtab, defusedSym)
+				continue
+			}
+		}
+
+		// Strategy (b): AST outer + interpret inner stmts.
+		singleFile := &syntax.File{Stmts: []*syntax.Stmt{stmt}}
+		allCmds = append(allCmds, extractFromAST(singleFile, true)...) // skipInner=true
+
+		for _, inner := range collectInnerStmts(stmt) {
+			innerFile := &syntax.File{Stmts: []*syntax.Stmt{inner}}
+			if !nodeHasUnsafe(inner) {
+				innerCmds, innerSym, innerPanicked := e.runShellFileInterp(innerFile, safeSymtab)
+				if !innerPanicked && len(innerCmds) > 0 {
+					allCmds = append(allCmds, innerCmds...)
+					maps.Copy(safeSymtab, innerSym)
+					continue
+				}
+			}
+			allCmds = append(allCmds, extractFromAST(innerFile)...)
+		}
+	}
+
+	return allCmds, safeSymtab, false
+}
+
+// runShellFileInterp runs a pre-checked shell AST through interp.Runner in
+// dry-run mode. The caller should ensure the file contains no unsafe nodes
+// (though a defer/recover still protects against unexpected panics).
+func (e *Extractor) runShellFileInterp(file *syntax.File, parentSymtab map[string]string) (cmds []parsedCommand, sym map[string]string, panicked bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			panicked = true
+			if sym == nil {
+				sym = maps.Clone(parentSymtab)
+			}
+		}
+	}()
 
 	hasSubst := astHasSubst(file)
 	env := buildRunnerEnv(e.env, parentSymtab)

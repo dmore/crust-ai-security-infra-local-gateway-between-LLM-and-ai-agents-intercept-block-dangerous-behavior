@@ -104,7 +104,7 @@ func (pf *PreFilter) ContainsObfuscation(cmd string) bool {
 // NOTE: command-substitution ($(), backticks) and process-substitution (<(), >())
 // are intentionally NOT included. The shell interpreter expands $() in dry-run
 // mode, so paths inside substitutions are correctly extracted and matched against
-// rules. Process substitution is already blocked by astHasUnsafe (ProcSubst case).
+// rules. Process substitution is handled by nodeHasUnsafe (ProcSubst case).
 // Blocking these at the PreFilter level caused false positives on normal agent
 // commands like "cd $(git rev-parse --show-toplevel)" and "diff <(sort a) <(sort b)".
 var defaultPreFilterPatterns = []PreFilterPatternDef{
