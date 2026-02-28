@@ -10,10 +10,13 @@ rules:
     severity: critical
 
   - name: protect-ssh-keys
-    block: "$HOME/.ssh/id_*"
-    except: "$HOME/.ssh/id_*.pub"
+    block:
+      - "$HOME/.ssh/id_*"
+      - "$HOME/.ssh/config"
+    except:
+      - "$HOME/.ssh/id_*.pub"
     actions: [read, write, delete, copy, move, network]
-    message: "Cannot access SSH private keys"
+    message: "Cannot access SSH private keys or config"
     severity: critical
 
   # ===========================================================================
@@ -37,7 +40,7 @@ rules:
     block:
       - "**/.crust/**"
       - "**/crust*.db"
-    actions: [read, write, delete]
+    actions: [read, write, delete, copy, move, network]
     message: "Cannot access Crust data"
     severity: critical
 
@@ -65,16 +68,14 @@ rules:
   # ===========================================================================
   - name: protect-cloud-credentials
     block:
-      # AWS
+      # AWS (credentials only — .aws/config has non-sensitive region/profile settings)
       - "$HOME/.aws/credentials"
-      - "$HOME/.aws/config"
       # Google Cloud
       - "$HOME/.config/gcloud/**"
       # Azure
       - "$HOME/.azure/**"
-      # Kubernetes
+      # Kubernetes (config only — .kube/cache has non-sensitive API discovery metadata)
       - "$HOME/.kube/config"
-      - "$HOME/.kube/cache/**"
       # Docker
       - "$HOME/.docker/config.json"
       # Terraform (home-scoped)
@@ -95,9 +96,7 @@ rules:
       - "$HOME/.gnupg/secring.gpg"
       - "$HOME/.gnupg/trustdb.gpg"
       - "$HOME/.gnupg/random_seed"
-    except:
-      - "$HOME/.gnupg/pubring.gpg"
-      - "$HOME/.gnupg/*.conf"
+    # No except needed — block list targets only private key material
     actions: [read, write, delete, copy, move, network]
     message: "Cannot access GPG private keys"
     severity: critical
@@ -130,7 +129,7 @@ rules:
       # Safari (macOS only)
       - "$HOME/Library/Safari/History.db"
       - "$HOME/Library/Cookies/Cookies.binarycookies"
-    actions: [read, copy]
+    actions: [read, write, delete, copy, move, network]
     message: "Cannot access browser sensitive data"
     severity: high
 
@@ -182,7 +181,9 @@ rules:
       - "$HOME/.zshrc"
       - "$HOME/.zprofile"
       - "$HOME/.zshenv"
+      - "$HOME/.zlogin"
       - "$HOME/.profile"
+      - "$HOME/.config/fish/config.fish"
     actions: [write, delete]
     message: "Cannot modify shell startup files - persistence vector"
     severity: critical
@@ -194,8 +195,9 @@ rules:
     block:
       - "$HOME/.ssh/authorized_keys"
       - "$HOME/.ssh/authorized_keys2"
+      - "$HOME/.ssh/known_hosts"
     actions: [write, delete]
-    message: "Cannot modify SSH authorized keys - persistence vector"
+    message: "Cannot modify SSH authorized keys or known hosts - persistence vector"
     severity: critical
 
   # ===========================================================================
