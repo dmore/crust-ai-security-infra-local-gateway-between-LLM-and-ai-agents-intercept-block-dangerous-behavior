@@ -140,10 +140,11 @@ Crust ships with **14 security rules** and **34 DLP token-detection patterns** o
 | **Persistence** | Shell RC files, `authorized_keys` |
 | **DLP Token Detection** | Content-based scanning for real API keys and tokens (AWS, GitHub, Stripe, OpenAI, Anthropic, and [23 more](docs/how-it-works.md#dlp-secret-detection)) |
 | **Key Exfiltration** | Content-based PEM private key detection |
+| **Crypto Wallets** | BIP39 mnemonics, xprv/WIF keys (checksum-validated), wallet directories for 16 chains |
 | **Self-Protection** | Agents cannot read, modify, or disable Crust itself |
 | **Dangerous Commands** | `eval`/`exec` with dynamic code execution |
 
-All rules are open source: [`internal/rules/builtin/security.yaml`](internal/rules/builtin/security.yaml) (path rules) and [`internal/rules/dlp.go`](internal/rules/dlp.go) (DLP patterns)
+All rules are open source: [`internal/rules/builtin/security.yaml`](internal/rules/builtin/security.yaml) (path rules), [`internal/rules/dlp.go`](internal/rules/dlp.go) (DLP patterns), and [`internal/rules/dlp_crypto.go`](internal/rules/dlp_crypto.go) (crypto key detection)
 
 ## Custom Rules
 
@@ -183,7 +184,7 @@ Crust inspects tool calls at multiple layers:
 2. **Layer 1 (Response Scan)**: Scans tool calls in the LLM's response before they execute — blocks new dangerous actions in real-time.
 3. **Stdio Proxy** ([MCP](docs/mcp.md) / [ACP](docs/acp.md)): Wraps MCP servers or ACP agents as a stdio proxy, intercepting security-relevant JSON-RPC messages in both directions — including DLP scanning of server responses for leaked secrets.
 
-All modes apply a [16-step evaluation pipeline](docs/how-it-works.md) — input sanitization, Unicode normalization, obfuscation detection, DLP secret scanning, path-based rules, and fallback content matching — each step in microseconds.
+All modes apply a [17-step evaluation pipeline](docs/how-it-works.md) — input sanitization, Unicode normalization, obfuscation detection, DLP secret scanning, path-based rules, and fallback content matching — each step in microseconds.
 
 All activity is logged locally to encrypted storage.
 
