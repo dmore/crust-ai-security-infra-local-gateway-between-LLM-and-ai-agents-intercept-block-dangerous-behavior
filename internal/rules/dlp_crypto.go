@@ -88,7 +88,7 @@ func extractLowerWords(s string) []string {
 	})
 	for _, f := range fields {
 		w := strings.ToLower(f)
-		if len(w) >= 2 && len(w) <= 8 { // BIP39 words are 3-8 chars, allow 2 for safety
+		if len(w) >= 3 && len(w) <= 8 { // BIP39 words are 3-8 chars
 			words = append(words, w)
 		}
 	}
@@ -164,7 +164,9 @@ func init() {
 		"cardano", "cosmos", "polkadot", // PoS chains
 		"avalanche", "tron", // Other popular
 	} {
-		cryptoWalletDirs = append(cryptoWalletDirs, btcutil.AppDataDir(chain, false))
+		if dir := btcutil.AppDataDir(chain, false); dir != "" {
+			cryptoWalletDirs = append(cryptoWalletDirs, dir)
+		}
 	}
 
 	// Solana (non-standard locations).

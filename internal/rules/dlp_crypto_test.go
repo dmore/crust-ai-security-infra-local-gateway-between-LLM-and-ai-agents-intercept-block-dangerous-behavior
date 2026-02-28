@@ -15,6 +15,12 @@ const testWIF = "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
 // Standard BIP39 12-word test mnemonic.
 const testMnemonic12 = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
 
+// Standard BIP39 15-word test mnemonic.
+const testMnemonic15 = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+
+// Standard BIP39 18-word test mnemonic.
+const testMnemonic18 = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+
 // Standard BIP39 24-word test mnemonic.
 const testMnemonic24 = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
 
@@ -34,6 +40,16 @@ func TestCryptoDLPDetection(t *testing.T) {
 		{
 			name:    "24-word BIP39 mnemonic",
 			content: testMnemonic24,
+			wantID:  "builtin:dlp-crypto-bip39-mnemonic",
+		},
+		{
+			name:    "15-word BIP39 mnemonic",
+			content: testMnemonic15,
+			wantID:  "builtin:dlp-crypto-bip39-mnemonic",
+		},
+		{
+			name:    "18-word BIP39 mnemonic",
+			content: testMnemonic18,
 			wantID:  "builtin:dlp-crypto-bip39-mnemonic",
 		},
 		{
