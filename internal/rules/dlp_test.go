@@ -54,6 +54,62 @@ func TestDLPFalsePositives(t *testing.T) {
 		// Short dapi-like string (not 32 hex chars)
 		{"dapi-like but too short", "Write",
 			`{"file_path":"/tmp/test.py","content":"dapibus = 'lorem ipsum'"}`},
+		// PEM: certificates and public keys are NOT private keys
+		{"PEM certificate (not private key)", "Write",
+			`{"file_path":"/tmp/test.pem","content":"-----BEGIN CERTIFICATE-----\nMIIBkTCB...\n-----END CERTIFICATE-----"}`},
+		{"PEM public key (not private key)", "Write",
+			`{"file_path":"/tmp/test.pem","content":"-----BEGIN PUBLIC KEY-----\nMIIBIjAN...\n-----END PUBLIC KEY-----"}`},
+		// Short HuggingFace-like token
+		{"hf_ too short", "Write",
+			`{"file_path":"/tmp/test.py","content":"hf_short"}`},
+		// Short Groq-like key
+		{"gsk_ too short", "Write",
+			`{"file_path":"/tmp/test.py","content":"gsk_short"}`},
+		// Short Twilio-like key (SK but not 32 hex)
+		{"SK too short for Twilio", "Write",
+			`{"file_path":"/tmp/test.py","content":"SKU = 'product-123'"}`},
+		// Short r8_ token
+		{"r8_ too short", "Write",
+			`{"file_path":"/tmp/test.py","content":"r8_short"}`},
+		// vercel_ in normal code (version string, not a token)
+		{"vercel_ in version context", "Write",
+			`{"file_path":"/tmp/test.js","content":"const vercel_sdk = '1.0'"}`},
+		// "BEGIN CERTIFICATE" is not a private key
+		{"PEM certificate request", "Write",
+			`{"file_path":"/tmp/test.pem","content":"-----BEGIN CERTIFICATE REQUEST-----\nMIIBkTCB...\n-----END CERTIFICATE REQUEST-----"}`},
+		// hvs. but too short
+		{"hvs. too short", "Write",
+			`{"file_path":"/tmp/test.env","content":"hvs.short"}`},
+		// dp.st. but too short
+		{"dp.st. too short", "Write",
+			`{"file_path":"/tmp/test.env","content":"dp.st.short"}`},
+		// lin_api_ but too short
+		{"lin_api_ too short", "Write",
+			`{"file_path":"/tmp/test.env","content":"lin_api_short"}`},
+		// PMAK- but too short
+		{"PMAK- too short", "Write",
+			`{"file_path":"/tmp/test.env","content":"PMAK-short"}`},
+		// sbp_ but too short
+		{"sbp_ too short", "Write",
+			`{"file_path":"/tmp/test.env","content":"sbp_short"}`},
+		// Normal Go code with SK in variable name
+		{"SK in Go variable name", "Write",
+			`{"file_path":"/tmp/test.go","content":"func SKip() {}"}`},
+		// Firebase-like but too short
+		{"AAAA prefix but too short", "Write",
+			`{"file_path":"/tmp/test.py","content":"AAAA_PADDING = True"}`},
+		// Normal code mentioning private key in comments
+		{"private key in comment text", "Write",
+			`{"file_path":"/tmp/test.py","content":"# Generate a private key using openssl"}`},
+		// dop_v1_ but too short
+		{"dop_v1_ too short", "Write",
+			`{"file_path":"/tmp/test.env","content":"dop_v1_short"}`},
+		// Normal Python f-string with hf_ substring
+		{"hf_ in variable name", "Write",
+			`{"file_path":"/tmp/test.py","content":"half_width = 100"}`},
+		// gsk_ as Go package prefix
+		{"gsk_ in package name", "Write",
+			`{"file_path":"/tmp/test.go","content":"import gsk_utils"}`},
 	}
 
 	for _, tc := range cases {
@@ -266,6 +322,87 @@ func TestDLPSecretDetection(t *testing.T) {
 			"DLP: writing age secret key",
 			"Write",
 			`{"file_path":"/home/user/project/key.txt","content":"` + "AGE-SECRET-KEY-" + "1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ" + `"}`,
+		},
+		// --- Expanded patterns ---
+		{
+			"DLP: RSA private key in any operation",
+			"Bash",
+			`{"command":"cat /tmp/key.pem"}` + "\n-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBA...\n-----END RSA PRIVATE KEY-----",
+		},
+		{
+			"DLP: OpenSSH private key",
+			"Write",
+			`{"file_path":"/home/user/project/deploy_key","content":"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAA...\n-----END OPENSSH PRIVATE KEY-----"}`,
+		},
+		{
+			"DLP: writing HuggingFace token",
+			"Write",
+			`{"file_path":"/home/user/project/.env","content":"HF_TOKEN=` + "hf_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh" + `"}`,
+		},
+		{
+			"DLP: writing Groq API key",
+			"Write",
+			`{"file_path":"/home/user/project/.env","content":"GROQ_KEY=` + "gsk_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx" + `"}`,
+		},
+		{
+			"DLP: writing Vercel token",
+			"Write",
+			`{"file_path":"/home/user/project/.env","content":"VERCEL_TOKEN=` + "vercel_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZab" + `"}`,
+		},
+		{
+			"DLP: writing Supabase key",
+			"Write",
+			`{"file_path":"/home/user/project/.env","content":"SUPABASE_KEY=` + "sbp_" + "aabbccddeeff00112233445566778899aabbccddeeff" + `"}`,
+		},
+		{
+			"DLP: writing DigitalOcean PAT",
+			"Write",
+			`{"file_path":"/home/user/project/.env","content":"DO_TOKEN=` + "dop_v1_" + "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabb" + `"}`,
+		},
+		{
+			"DLP: writing DigitalOcean OAuth token",
+			"Write",
+			`{"file_path":"/home/user/project/.env","content":"DO_OAUTH=` + "doo_v1_" + "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabb" + `"}`,
+		},
+		{
+			"DLP: writing HashiCorp Vault token",
+			"Write",
+			`{"file_path":"/home/user/project/.env","content":"VAULT_TOKEN=` + "hvs." + "ABCDEFghijklmnopqrstuvwx0123" + `"}`,
+		},
+		{
+			"DLP: writing Linear API key",
+			"Write",
+			`{"file_path":"/home/user/project/.env","content":"LINEAR_KEY=` + "lin_api_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop" + `"}`,
+		},
+		{
+			"DLP: writing Postman API key",
+			"Write",
+			`{"file_path":"/home/user/project/.env","content":"POSTMAN_KEY=` + "PMAK-" + "ABCDEFGHIJKLMNOPQRSTUVWXYZab" + `"}`,
+		},
+		{
+			"DLP: writing Replicate API token",
+			"Write",
+			`{"file_path":"/home/user/project/.env","content":"REPLICATE_TOKEN=` + "r8_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop" + `"}`,
+		},
+		{
+			"DLP: writing Twilio API key",
+			"Write",
+			`{"file_path":"/home/user/project/.env","content":"TWILIO_KEY=` + "SK" + "aabbccddeeff00112233445566778899" + `"}`,
+		},
+		{
+			"DLP: writing Doppler token",
+			"Write",
+			`{"file_path":"/home/user/project/.env","content":"DOPPLER_TOKEN=` + "dp.st." + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst" + `"}`,
+		},
+		{
+			"DLP: writing OpenAI admin key",
+			"Write",
+			`{"file_path":"/home/user/project/.env","content":"OPENAI_ADMIN=` + "sk-admin-" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst" + `"}`,
+		},
+		{
+			"DLP: writing Firebase key",
+			"Write",
+			`{"file_path":"/home/user/project/.env","content":"FIREBASE_KEY=` + "AAAA" + "ABCDEFG" + ":" + strings.Repeat("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop", 4) + `"}`,
 		},
 	}
 

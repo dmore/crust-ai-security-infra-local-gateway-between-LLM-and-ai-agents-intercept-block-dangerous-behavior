@@ -345,7 +345,7 @@ func FuzzBuiltinRuleBypass(f *testing.F) {
 	f.Add("Write", `{"file_path":"/home/user/.zshrc","content":"backdoor"}`)
 	// protect-ssh-authorized-keys
 	f.Add("Write", `{"file_path":"/home/user/.ssh/authorized_keys","content":"ssh-rsa AAAA..."}`)
-	// detect-private-key-write (constructed to avoid gitleaks false positive)
+	// detect-private-key-write / builtin:dlp-private-key
 	pkHeader := "-----BEGIN " + "RSA PRIVATE KEY-----"
 	f.Add("Write", `{"file_path":"/tmp/key","content":"`+pkHeader+`"}`)
 	// builtin:protect-crust-api (hardcoded, all loopback forms)

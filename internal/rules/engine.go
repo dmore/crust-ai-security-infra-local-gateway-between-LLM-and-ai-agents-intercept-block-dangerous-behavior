@@ -430,6 +430,17 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 				}
 			}
 
+			// Tier 3: Crypto-specific DLP (checksum-validated).
+			if m := scanCrypto(dlpContent); m != nil {
+				return MatchResult{
+					Matched:  true,
+					RuleName: m.name,
+					Severity: SeverityCritical,
+					Action:   ActionBlock,
+					Message:  m.message,
+				}
+			}
+
 			if findings := e.dlpScanner.Scan(dlpContent); len(findings) > 0 {
 				f := findings[0]
 				msg := "Blocked secret — " + f.Description
@@ -460,8 +471,12 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 	// Step 12: Expand globs against real filesystem (e.g. ~/.e* → ~/.env).
 	normalizedPaths = expandFileGlobs(normalizedPaths)
 
-	// Step 13: Block /proc access (hardcoded; checked before symlink resolution).
-	if blocked, path := hasProcPath(normalizedPaths); blocked {
+	// Step 13: Resolve symlinks — match both original and resolved paths.
+	resolvedPaths := e.normalizer.resolveSymlinks(normalizedPaths)
+	allPaths := mergeUnique(normalizedPaths, resolvedPaths)
+
+	// Step 14: Block /proc access (hardcoded; after symlink resolution to catch symlink bypasses).
+	if blocked, path := hasProcPath(allPaths); blocked {
 		return MatchResult{
 			Matched:  true,
 			RuleName: "builtin:protect-proc",
@@ -471,18 +486,25 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 		}
 	}
 
-	// Step 14: Resolve symlinks — match both original and resolved paths.
-	resolvedPaths := e.normalizer.resolveSymlinks(normalizedPaths)
-	allPaths := mergeUnique(normalizedPaths, resolvedPaths)
+	// Step 15: Block crypto wallet access (hardcoded; after symlink resolution to catch symlink bypasses).
+	if blocked, path := hasCryptoWalletPath(allPaths); blocked {
+		return MatchResult{
+			Matched:  true,
+			RuleName: "builtin:protect-crypto-wallet",
+			Severity: SeverityCritical,
+			Action:   ActionBlock,
+			Message:  fmt.Sprintf("Cannot access %s — crypto wallet directory", path),
+		}
+	}
 
-	// Step 15: Evaluate operation-based rules (for known tools).
+	// Step 16: Evaluate operation-based rules (for known tools).
 	if info.Operation != OpNone {
 		if result := e.evaluateOperationRules(rules, info, allPaths, call.Name); result.Matched {
 			return result
 		}
 	}
 
-	// Step 16: Fallback content-only rules — matches raw JSON of any tool.
+	// Step 17: Fallback content-only rules — matches raw JSON of any tool.
 	contentForRules := info.RawJSON
 	if contentForRules == "" {
 		contentForRules = info.Content
