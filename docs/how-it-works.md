@@ -77,6 +77,33 @@ Layer 1 Rule Evaluation (17 steps):
   message: "Cannot access malicious.com"
 ```
 
+### `$HOME` Variable
+
+Path patterns support `$HOME` as a variable, expanded to the current user's home directory at engine startup. This protects only the running user's files and eliminates the need to enumerate OS-specific paths:
+
+```yaml
+- name: protect-ssh-keys
+  block: "$HOME/.ssh/id_*"
+  except: "$HOME/.ssh/id_*.pub"
+  message: "Cannot access SSH private keys"
+```
+
+At init time, `$HOME` expands to the actual home directory:
+- macOS: `/Users/yourname`
+- Linux: `/home/yourname`
+- Windows: `C:/Users/yourname`
+
+Cross-OS app paths can all be listed under `$HOME` — wrong-OS patterns compile but never match at runtime:
+
+```yaml
+# Discord on all platforms — only the matching OS path fires
+- "$HOME/Library/Application Support/discord/**"   # macOS
+- "$HOME/.config/discord/**"                        # Linux
+- "$HOME/AppData/Roaming/discord/**"                # Windows
+```
+
+`$HOME` is the only supported variable in path patterns. The linter rejects other variables (`$PATH`, `$USER`), braced syntax (`${HOME}`), and `$HOME` not at the start of a pattern.
+
 ---
 
 ## When Each Layer Blocks

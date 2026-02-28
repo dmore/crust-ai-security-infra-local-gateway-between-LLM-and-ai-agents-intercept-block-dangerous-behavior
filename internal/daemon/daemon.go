@@ -94,3 +94,11 @@ func SocketFile(proxyPort int) string {
 func IsDaemonMode() bool {
 	return os.Getenv("CRUST_DAEMON") == "1"
 }
+
+// stopCleanup restores agent configs and removes PID/port files.
+// Called from Stop() after the daemon process has been killed, because
+// a forcefully-killed process can't run its own defers.
+func stopCleanup() {
+	RestoreAgentConfigs()
+	_ = RemovePID() //nolint:errcheck // cleanup best effort
+}

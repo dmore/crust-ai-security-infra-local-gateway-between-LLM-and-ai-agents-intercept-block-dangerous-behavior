@@ -222,6 +222,9 @@ func (l *Linter) lintMatch(ruleName, fieldName string, match Match) []LintIssue 
 	return issues
 }
 
+// envVarRegex matches any $VARIABLE reference in a pattern.
+var envVarRegex = regexp.MustCompile(`\$[A-Z_][A-Z0-9_]*`)
+
 func (l *Linter) lintPathPattern(ruleName, fieldName, pattern string) []LintIssue {
 	var issues []LintIssue
 
@@ -234,6 +237,51 @@ func (l *Linter) lintPathPattern(ruleName, fieldName, pattern string) []LintIssu
 			Message:  "empty path pattern",
 		})
 		return issues
+	}
+
+	// --- $HOME variable validation ---
+
+	// $HOME must be at the start of the pattern
+	if strings.Contains(pattern, "$HOME") && !strings.HasPrefix(pattern, "$HOME") {
+		issues = append(issues, LintIssue{
+			RuleName: ruleName,
+			Field:    fieldName,
+			Severity: LintError,
+			Message:  "$HOME must be at the start of the pattern",
+		})
+	}
+
+	// $HOME must be followed by '/' or be the entire pattern
+	if strings.HasPrefix(pattern, "$HOME") && len(pattern) > 5 && pattern[5] != '/' {
+		issues = append(issues, LintIssue{
+			RuleName: ruleName,
+			Field:    fieldName,
+			Severity: LintError,
+			Message:  "$HOME must be followed by '/'",
+		})
+	}
+
+	// Block ${HOME} braced syntax (use $HOME instead)
+	if strings.Contains(pattern, "${") {
+		issues = append(issues, LintIssue{
+			RuleName: ruleName,
+			Field:    fieldName,
+			Severity: LintError,
+			Message:  "use $HOME instead of ${HOME} braced syntax",
+		})
+	}
+
+	// Block other env vars (only $HOME is supported)
+	for _, m := range envVarRegex.FindAllString(pattern, -1) {
+		if m != "$HOME" {
+			issues = append(issues, LintIssue{
+				RuleName: ruleName,
+				Field:    fieldName,
+				Severity: LintError,
+				Message:  fmt.Sprintf("only $HOME is supported as a variable in path patterns (found %s)", m),
+			})
+			break
+		}
 	}
 
 	// Check for suspicious patterns

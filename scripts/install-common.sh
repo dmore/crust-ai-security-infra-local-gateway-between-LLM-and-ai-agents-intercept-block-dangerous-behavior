@@ -277,6 +277,37 @@ run_uninstall() {
     echo ""
 }
 
+# Install gitleaks for DLP Tier 2 secret detection (200+ secret patterns).
+setup_gitleaks() {
+    if command -v gitleaks &> /dev/null; then
+        echo -e "  ${GREEN}gitleaks already installed${NC}"
+        return 0
+    fi
+
+    echo -e "${YELLOW}Installing gitleaks (secret detection)...${NC}"
+
+    local os
+    os="$(uname -s)"
+
+    # Prefer Homebrew on macOS
+    if [ "$os" = "Darwin" ] && command -v brew &> /dev/null; then
+        if brew install gitleaks 2>/dev/null; then
+            echo -e "  ${GREEN}gitleaks installed via Homebrew${NC}"
+            return 0
+        fi
+    fi
+
+    # Fallback: go install (works on all platforms with Go)
+    if go install github.com/gitleaks/gitleaks/v8@latest 2>/dev/null; then
+        echo -e "  ${GREEN}gitleaks installed via go install${NC}"
+        return 0
+    fi
+
+    echo -e "${RED}Error: Failed to install gitleaks${NC}"
+    echo "Install manually: brew install gitleaks  OR  go install github.com/gitleaks/gitleaks/v8@latest"
+    exit 1
+}
+
 # Install a Nerd Font for optimal TUI rendering (optional, non-fatal).
 # Installs Cascadia Mono NF from Nerd Fonts GitHub releases.
 # macOS: ~/Library/Fonts/  |  Linux: ~/.local/share/fonts/

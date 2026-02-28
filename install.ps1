@@ -104,6 +104,28 @@ function Get-Platform {
     }
 }
 
+function Install-Gitleaks {
+    if (Test-Command "gitleaks") {
+        Write-Host "  gitleaks already installed" -ForegroundColor Green
+        return
+    }
+
+    Write-Host "Installing gitleaks (secret detection)..." -ForegroundColor Yellow
+
+    # Go is already required, so go install should work
+    try {
+        & go install github.com/gitleaks/gitleaks/v8@latest 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  gitleaks installed via go install" -ForegroundColor Green
+            return
+        }
+    } catch {}
+
+    Write-Host "Error: Failed to install gitleaks" -ForegroundColor Red
+    Write-Host "Install manually: go install github.com/gitleaks/gitleaks/v8@latest" -ForegroundColor Red
+    exit 1
+}
+
 function Install-NerdFont {
     if ($NoTUI -or $NoFont) { return }
 
@@ -292,6 +314,9 @@ try {
     } catch {
         Write-Host "  Shell completion setup skipped (non-fatal)" -ForegroundColor Yellow
     }
+
+    # Install gitleaks for secret detection
+    Install-Gitleaks
 
     # Install Nerd Font
     Install-NerdFont

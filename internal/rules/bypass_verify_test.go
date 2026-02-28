@@ -94,7 +94,7 @@ func TestBypassVerification(t *testing.T) {
 		desc      string
 	}{
 		// 1. Path traversal evasion → protect-ssh-keys
-		{"promo-1-path-traversal", "Bash", map[string]any{"command": "cat /home/dev/../dev/.ssh/id_rsa"}, true, "protect-ssh-keys", "path traversal to SSH key"},
+		{"promo-1-path-traversal", "Bash", map[string]any{"command": "cat /home/user/../user/.ssh/id_rsa"}, true, "protect-ssh-keys", "path traversal to SSH key"},
 
 		// 2. Variable expansion via shell → protect-env-files
 		{"promo-2-var-expansion", "Bash", map[string]any{"command": "bash -c 'cat $HOME/.env'"}, true, "protect-env-files", "variable expansion reads .env"},
@@ -229,20 +229,20 @@ func TestBypassFix_GlobInPath(t *testing.T) {
 			"glob on .env.* variants",
 		},
 
-		// SSH key glob patterns → protect-ssh-keys
+		// SSH key glob → protect-ssh-keys ($HOME expands to tempdir)
 		{
 			"glob-ssh-key", "Bash",
-			map[string]any{"command": "cat " + homeSlash + "/.ssh/id_r*"},
+			map[string]any{"command": "cat " + homeSlash + "/.ssh/id_*"},
 			true, "protect-ssh-keys",
-			"glob on SSH key",
+			"star glob on SSH key",
 		},
 
-		// AWS credentials glob → protect-cloud-credentials
+		// AWS credentials glob → protect-cloud-credentials ($HOME expands to tempdir)
 		{
 			"glob-aws-creds", "Bash",
 			map[string]any{"command": "cat " + homeSlash + "/.aws/cred*"},
 			true, "protect-cloud-credentials",
-			"glob on AWS credentials",
+			"star glob on AWS credentials",
 		},
 
 		// Negative: glob that doesn't match any protected file

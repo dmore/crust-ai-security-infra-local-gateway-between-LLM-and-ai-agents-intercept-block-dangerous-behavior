@@ -103,10 +103,12 @@ var knownCommandFields = []string{
 	// Non-shell text that fails AST parsing triggers Evasive=true → hard block.
 }
 
-// fieldStrings extracts all string values from a field value.
-// Handles string and []any (from JSON arrays or case-collision merging).
-// Maps and other non-string types return nil — deeply nested arguments
-// are rejected at the Extract() level via jsonDepth, not silently traversed.
+// fieldStrings recursively extracts all string values from a field value.
+// Handles string, []any (from JSON arrays or case-collision merging), and
+// map[string]any (nested JSON objects). Recursion ensures that strings
+// buried inside nested structures are still extracted for rule matching —
+// without this, {"path":{"value":"/etc/passwd"}} would silently bypass
+// path-based rules.
 // This is the single point of type normalization — all extraction
 // functions use this instead of inline type assertions.
 func fieldStrings(val any) []string {
@@ -118,38 +120,17 @@ func fieldStrings(val any) []string {
 	case []any:
 		var result []string
 		for _, item := range v {
-			if s, ok := item.(string); ok && s != "" {
-				result = append(result, s)
-			}
+			result = append(result, fieldStrings(item)...)
+		}
+		return result
+	case map[string]any:
+		var result []string
+		for _, child := range v {
+			result = append(result, fieldStrings(child)...)
 		}
 		return result
 	}
 	return nil
-}
-
-// jsonDepth returns the maximum nesting depth of a parsed JSON value.
-// Strings/numbers/bools/nil = 0, flat object/array = 1, nested = 2+.
-func jsonDepth(val any) int {
-	switch v := val.(type) {
-	case map[string]any:
-		deepest := 0
-		for _, child := range v {
-			if d := jsonDepth(child); d > deepest {
-				deepest = d
-			}
-		}
-		return 1 + deepest
-	case []any:
-		deepest := 0
-		for _, child := range v {
-			if d := jsonDepth(child); d > deepest {
-				deepest = d
-			}
-		}
-		return 1 + deepest
-	default:
-		return 0
-	}
 }
 
 // Extractor extracts paths and operations from tool calls
@@ -788,19 +769,6 @@ func (e *Extractor) Extract(toolName string, args json.RawMessage) ExtractedInfo
 	if err := json.Unmarshal(args, &info.RawArgs); err != nil {
 		info.Content = string(args)
 		return info
-	}
-
-	// SECURITY: Reject excessively nested arguments. Legitimate tool calls use
-	// flat or single-level nesting (depth ≤ 2). Deep nesting is a sign of
-	// evasion — hiding security-relevant fields inside nested objects to bypass
-	// field-name extraction. Mark as evasive (hard block) rather than recursing.
-	const maxArgDepth = 2
-	for k, v := range info.RawArgs {
-		if jsonDepth(v) > maxArgDepth {
-			info.Evasive = true
-			info.EvasiveReason = fmt.Sprintf("deeply nested argument %q could not be safely analyzed", k)
-			break
-		}
 	}
 
 	// SECURITY: Re-marshal decoded args for content matching.

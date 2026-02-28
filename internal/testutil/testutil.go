@@ -20,3 +20,19 @@ func NewEngine(tb testing.TB) *rules.Engine {
 	}
 	return engine
 }
+
+// NewEngineWithHome creates a rules.Engine with a custom home directory.
+// This makes $HOME-based security rules (SSH keys, shell history, etc.)
+// match paths under the given homeDir instead of the real system home.
+func NewEngineWithHome(tb testing.TB, homeDir string) *rules.Engine {
+	tb.Helper()
+	normalizer := rules.NewNormalizerWithEnv(homeDir, homeDir, nil)
+	engine, err := rules.NewEngineWithNormalizer(rules.EngineConfig{
+		UserRulesDir:   tb.TempDir(),
+		DisableBuiltin: false,
+	}, normalizer)
+	if err != nil {
+		tb.Fatalf("Failed to create engine: %v", err)
+	}
+	return engine
+}

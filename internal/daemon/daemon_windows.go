@@ -61,7 +61,9 @@ func WritePID() error {
 
 // CleanupPID releases the file lock and removes the PID and port files.
 // Named pipes are cleaned up by the kernel on Windows; no socket cleanup needed.
+// It also restores any agent configs that were patched on startup.
 func CleanupPID() {
+	RestoreAgentConfigs()
 	if pidLockFile != nil {
 		pidLockFile.Close()
 		pidLockFile = nil
@@ -120,7 +122,8 @@ func Stop() error {
 	// the process may already be gone or stuck.
 	windows.WaitForSingleObject(h, 3000) //nolint:errcheck // best-effort wait
 
-	_ = RemovePID() //nolint:errcheck // cleanup best effort
+	// TerminateProcess doesn't trigger defers.
+	stopCleanup()
 	return nil
 }
 

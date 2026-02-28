@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,6 +16,41 @@ import (
 	"github.com/BakeLens/crust/internal/logger"
 	"github.com/gobwas/glob"
 )
+
+// expandRuleHomes replaces $HOME in rule path patterns with the actual home
+// directory. This allows YAML rules to use "$HOME/.ssh/id_*" instead of
+// enumerating OS-specific paths. Called before compileRules() so glob patterns
+// contain real paths.
+func expandRuleHomes(rules []Rule, homeDir string) []Rule {
+	if homeDir == "" {
+		return rules
+	}
+	home := filepath.ToSlash(homeDir)
+	for i := range rules {
+		for j, p := range rules[i].Block.Paths {
+			rules[i].Block.Paths[j] = strings.ReplaceAll(p, "$HOME", home)
+		}
+		for j, p := range rules[i].Block.Except {
+			rules[i].Block.Except[j] = strings.ReplaceAll(p, "$HOME", home)
+		}
+		// Expand in Match.Path (Level 4+ rules)
+		if rules[i].Match != nil && strings.Contains(rules[i].Match.Path, "$HOME") {
+			rules[i].Match.Path = strings.ReplaceAll(rules[i].Match.Path, "$HOME", home)
+		}
+		// Expand in AllConditions and AnyConditions
+		for j := range rules[i].AllConditions {
+			if strings.Contains(rules[i].AllConditions[j].Path, "$HOME") {
+				rules[i].AllConditions[j].Path = strings.ReplaceAll(rules[i].AllConditions[j].Path, "$HOME", home)
+			}
+		}
+		for j := range rules[i].AnyConditions {
+			if strings.Contains(rules[i].AnyConditions[j].Path, "$HOME") {
+				rules[i].AnyConditions[j].Path = strings.ReplaceAll(rules[i].AnyConditions[j].Path, "$HOME", home)
+			}
+		}
+	}
+	return rules
+}
 
 var log = logger.New("rules")
 
@@ -142,11 +178,26 @@ func GetGlobalEngine() *Engine {
 
 // NewEngine creates a new path-based rule engine
 func NewEngine(cfg EngineConfig) (*Engine, error) {
+	return NewEngineWithNormalizer(cfg, NewNormalizer())
+}
+
+// NewEngineWithNormalizer creates a new engine with a custom normalizer.
+// The normalizer is used from the start so $HOME in YAML rules expands
+// to the normalizer's home directory before pattern compilation.
+func NewEngineWithNormalizer(cfg EngineConfig, normalizer *Normalizer) (*Engine, error) {
 	loader := NewLoader(cfg.UserRulesDir)
 
+	// Build extractor env that matches normalizer so shell interpreter
+	// and path normalization agree on HOME, etc.
+	extEnv := make(map[string]string, len(normalizer.env)+1)
+	maps.Copy(extEnv, normalizer.env)
+	if h := normalizer.GetHomeDir(); h != "" {
+		extEnv["HOME"] = h
+	}
+
 	e := &Engine{
-		extractor:  NewExtractor(),
-		normalizer: NewNormalizer(),
+		extractor:  NewExtractorWithEnv(extEnv),
+		normalizer: normalizer,
 		loader:     loader,
 		preFilter:  NewPreFilter(),
 		dlpScanner: NewDLPScanner(),
@@ -173,6 +224,9 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 		dynamicRules := generateProtectionRules(cfg)
 		builtinRules = append(dynamicRules, builtinRules...)
 
+		// Expand $HOME in YAML rule paths to actual home directory
+		builtinRules = expandRuleHomes(builtinRules, normalizer.GetHomeDir())
+
 		compiled, err := e.compileRules(builtinRules, true)
 		if err != nil {
 			return nil, err
@@ -193,17 +247,6 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 	}
 
 	return e, nil
-}
-
-// NewEngineWithNormalizer creates a new engine with a custom normalizer.
-// This is useful for testing with a controlled environment.
-func NewEngineWithNormalizer(cfg EngineConfig, normalizer *Normalizer) (*Engine, error) {
-	engine, err := NewEngine(cfg)
-	if err != nil {
-		return nil, err
-	}
-	engine.normalizer = normalizer
-	return engine, nil
 }
 
 // NewTestEngine creates a new engine from a list of rules.
@@ -299,6 +342,9 @@ func (e *Engine) ReloadUserRules() error {
 	if err != nil {
 		return err
 	}
+
+	// Expand $HOME in user YAML rule paths
+	userRules = expandRuleHomes(userRules, e.normalizer.GetHomeDir())
 
 	compiled, err := e.compileRules(userRules, false)
 	if err != nil {
@@ -430,7 +476,7 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 				}
 			}
 
-			// Tier 3: Crypto-specific DLP (checksum-validated).
+			// Crypto-specific DLP (checksum-validated).
 			if m := scanCrypto(dlpContent); m != nil {
 				return MatchResult{
 					Matched:  true,
@@ -834,7 +880,17 @@ func (e *Engine) ScanDLP(content string) *MatchResult {
 			}
 		}
 	}
-	// Tier 2: gitleaks (if available)
+	// Tier 2: crypto-specific DLP (checksum-validated)
+	if m := scanCrypto(content); m != nil {
+		return &MatchResult{
+			Matched:  true,
+			RuleName: m.name,
+			Severity: SeverityCritical,
+			Action:   ActionBlock,
+			Message:  m.message,
+		}
+	}
+	// Tier 3: gitleaks (if available)
 	if findings := e.dlpScanner.Scan(content); len(findings) > 0 {
 		f := findings[0]
 		msg := "Blocked secret — " + f.Description

@@ -1545,63 +1545,123 @@ func TestFieldStrings(t *testing.T) {
 	}
 }
 
-// TestExtract_DeepNestingEvasive verifies that deeply nested arguments are
-// rejected as evasive rather than silently dropping nested values.
-func TestExtract_DeepNestingEvasive(t *testing.T) {
+// TestExtract_DeepNestingAllowed verifies that deeply nested arguments
+// (e.g. MCP sampling/createMessage with depth 3) are NOT rejected.
+// Content matching via info.Content provides the real defense.
+func TestExtract_DeepNestingAllowed(t *testing.T) {
 	extractor := NewExtractor()
 
 	tests := []struct {
-		name    string
-		args    string
-		evasive bool
+		name string
+		args string
 	}{
 		{
-			"flat args ok",
-			`{"command":"ls"}`,
-			false,
+			"sampling createMessage depth 3",
+			`{"messages":[{"role":"user","content":{"type":"text","text":"hello"}}],"maxTokens":100}`,
 		},
 		{
-			"single nesting ok",
-			`{"config":{"key":"value"}}`,
-			false,
+			"triple nesting",
+			`{"data":{"level1":{"level2":{"level3":"value"}}}}`,
 		},
 		{
-			"double nesting ok",
-			`{"config":{"settings":{"key":"value"}}}`,
-			false,
-		},
-		{
-			"triple nesting evasive",
-			`{"data":{"level1":{"level2":{"level3":"evil"}}}}`,
-			true,
-		},
-		{
-			"nested command bypass evasive",
-			`{"command":{"a":{"b":{"c":"cat /etc/shadow"}}}}`,
-			true,
-		},
-		{
-			"nested path bypass evasive",
-			`{"path":{"a":{"b":{"c":"/etc/passwd"}}}}`,
-			true,
-		},
-		{
-			"array of strings ok",
-			`{"args":["a","b","c"]}`,
-			false,
-		},
-		{
-			"array with nested object evasive",
-			`{"args":[{"deep":{"hidden":"rm -rf /"}}]}`,
-			true,
+			"array with nested object",
+			`{"args":[{"deep":{"hidden":"value"}}]}`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			info := extractor.Extract("CustomTool", json.RawMessage(tt.args))
-			if info.Evasive != tt.evasive {
-				t.Errorf("Evasive = %v, want %v (reason: %s)", info.Evasive, tt.evasive, info.EvasiveReason)
+			if info.Evasive {
+				t.Errorf("Evasive = true, want false (reason: %s) — deep nesting should not be blocked", info.EvasiveReason)
+			}
+		})
+	}
+}
+
+// TestFieldStrings_RecursiveExtraction verifies that fieldStrings recursively
+// extracts strings from nested maps and arrays, preventing evasion via
+// nested JSON objects (e.g. {"path":{"value":"/etc/passwd"}}).
+func TestFieldStrings_RecursiveExtraction(t *testing.T) {
+	tests := []struct {
+		name string
+		val  any
+		want []string
+	}{
+		{"string", "/etc/passwd", []string{"/etc/passwd"}},
+		{"empty string", "", nil},
+		{"flat array", []any{"/a", "/b"}, []string{"/a", "/b"}},
+		{"nested map", map[string]any{"value": "/etc/passwd"}, []string{"/etc/passwd"}},
+		{"deep nested map", map[string]any{
+			"level1": map[string]any{
+				"level2": "/etc/shadow",
+			},
+		}, []string{"/etc/shadow"}},
+		{"array with maps", []any{
+			map[string]any{"path": "/a"},
+			"/b",
+		}, []string{"/a", "/b"}},
+		{"mixed nesting", map[string]any{
+			"files": []any{"/x", "/y"},
+			"other": "z",
+		}, []string{"/x", "/y", "z"}},
+		{"nil", nil, nil},
+		{"number", 42, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := fieldStrings(tt.val)
+			if len(got) != len(tt.want) {
+				t.Fatalf("fieldStrings() = %v, want %v", got, tt.want)
+			}
+			// Check all wanted values are present (order may vary for maps)
+			seen := make(map[string]bool)
+			for _, s := range got {
+				seen[s] = true
+			}
+			for _, w := range tt.want {
+				if !seen[w] {
+					t.Errorf("missing %q in result %v", w, got)
+				}
+			}
+		})
+	}
+}
+
+// TestExtract_NestedPathExtraction verifies that strings inside nested JSON
+// values of recognized path keys are extracted. fieldStrings() now recurses
+// into maps/arrays, so {"path":{"nested":"/etc/passwd"}} is caught.
+func TestExtract_NestedPathExtraction(t *testing.T) {
+	extractor := NewExtractor()
+
+	tests := []struct {
+		name     string
+		args     string
+		wantPath string
+	}{
+		{
+			"path value is a nested map",
+			`{"path":{"value":"/etc/passwd"}}`,
+			"/etc/passwd",
+		},
+		{
+			"path value is deeply nested map",
+			`{"path":{"level1":{"level2":"/etc/shadow"}}}`,
+			"/etc/shadow",
+		},
+		{
+			"file_path value is an array with nested object",
+			`{"file_path":[{"name":"/etc/passwd"}]}`,
+			"/etc/passwd",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := extractor.Extract("CustomTool", json.RawMessage(tt.args))
+			if !slices.Contains(info.Paths, tt.wantPath) {
+				t.Errorf("path %q not extracted from nested args; got paths=%v", tt.wantPath, info.Paths)
 			}
 		})
 	}

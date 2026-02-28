@@ -10,10 +10,13 @@ rules:
     severity: critical
 
   - name: protect-ssh-keys
-    block: ["**/.ssh/id_*"]
-    except: ["**/.ssh/id_*.pub"]
+    block:
+      - "$HOME/.ssh/id_*"
+      - "$HOME/.ssh/config"
+    except:
+      - "$HOME/.ssh/id_*.pub"
     actions: [read, write, delete, copy, move, network]
-    message: "Cannot access SSH private keys"
+    message: "Cannot access SSH private keys or config"
     severity: critical
 
   # ===========================================================================
@@ -37,7 +40,7 @@ rules:
     block:
       - "**/.crust/**"
       - "**/crust*.db"
-    actions: [read, write, delete]
+    actions: [read, write, delete, copy, move, network]
     message: "Cannot access Crust data"
     severity: critical
 
@@ -46,16 +49,16 @@ rules:
   # ===========================================================================
   - name: protect-shell-history
     block:
-      - "**/.bash_history"
-      - "**/.zsh_history"
-      - "**/.sh_history"
-      - "**/.history"
-      - "**/.python_history"
-      - "**/.node_repl_history"
-      - "**/.mysql_history"
-      - "**/.psql_history"
-      - "**/.sqlite_history"
-      - "**/.lesshst"
+      - "$HOME/.bash_history"
+      - "$HOME/.zsh_history"
+      - "$HOME/.sh_history"
+      - "$HOME/.history"
+      - "$HOME/.python_history"
+      - "$HOME/.node_repl_history"
+      - "$HOME/.mysql_history"
+      - "$HOME/.psql_history"
+      - "$HOME/.sqlite_history"
+      - "$HOME/.lesshst"
     actions: [read, write, delete, copy, move, network]
     message: "Cannot access shell history files"
     severity: high
@@ -65,21 +68,19 @@ rules:
   # ===========================================================================
   - name: protect-cloud-credentials
     block:
-      # AWS
-      - "**/.aws/credentials"
-      - "**/.aws/config"
+      # AWS (credentials only — .aws/config has non-sensitive region/profile settings)
+      - "$HOME/.aws/credentials"
       # Google Cloud
-      - "**/.config/gcloud/**"
-      - "**/application_default_credentials.json"
+      - "$HOME/.config/gcloud/**"
       # Azure
-      - "**/.azure/**"
-      # Kubernetes
-      - "**/.kube/config"
-      - "**/.kube/cache/**"
+      - "$HOME/.azure/**"
+      # Kubernetes (config only — .kube/cache has non-sensitive API discovery metadata)
+      - "$HOME/.kube/config"
       # Docker
-      - "**/.docker/config.json"
-      # Terraform
-      - "**/.terraform.d/credentials.tfrc.json"
+      - "$HOME/.docker/config.json"
+      # Terraform (home-scoped)
+      - "$HOME/.terraform.d/credentials.tfrc.json"
+      # Terraform (project-scoped)
       - "**/terraform.tfstate"
       - "**/terraform.tfstate.backup"
     actions: [read, write, delete, copy, move, network]
@@ -91,13 +92,11 @@ rules:
   # ===========================================================================
   - name: protect-gpg-keys
     block:
-      - "**/.gnupg/private-keys-v1.d/**"
-      - "**/.gnupg/secring.gpg"
-      - "**/.gnupg/trustdb.gpg"
-      - "**/.gnupg/random_seed"
-    except:
-      - "**/.gnupg/pubring.gpg"
-      - "**/.gnupg/*.conf"
+      - "$HOME/.gnupg/private-keys-v1.d/**"
+      - "$HOME/.gnupg/secring.gpg"
+      - "$HOME/.gnupg/trustdb.gpg"
+      - "$HOME/.gnupg/random_seed"
+    # No except needed — block list targets only private key material
     actions: [read, write, delete, copy, move, network]
     message: "Cannot access GPG private keys"
     severity: critical
@@ -107,22 +106,30 @@ rules:
   # ===========================================================================
   - name: protect-browser-data
     block:
-      # Chrome (macOS)
-      - "**/Library/Application Support/Google/Chrome/**/Login Data"
-      - "**/Library/Application Support/Google/Chrome/**/Cookies"
-      - "**/Library/Application Support/Google/Chrome/**/History"
-      # Chrome (Linux)
-      - "**/.config/google-chrome/**/Login Data"
-      - "**/.config/google-chrome/**/Cookies"
-      - "**/.config/google-chrome/**/History"
+      # Chrome
+      - "$HOME/Library/Application Support/Google/Chrome/**/Login Data"
+      - "$HOME/Library/Application Support/Google/Chrome/**/Cookies"
+      - "$HOME/Library/Application Support/Google/Chrome/**/History"
+      - "$HOME/.config/google-chrome/**/Login Data"
+      - "$HOME/.config/google-chrome/**/Cookies"
+      - "$HOME/.config/google-chrome/**/History"
+      - "$HOME/AppData/Local/Google/Chrome/User Data/**/Login Data"
+      - "$HOME/AppData/Local/Google/Chrome/User Data/**/Cookies"
+      - "$HOME/AppData/Local/Google/Chrome/User Data/**/History"
       # Firefox
-      - "**/.mozilla/firefox/**/logins.json"
-      - "**/.mozilla/firefox/**/key*.db"
-      - "**/.mozilla/firefox/**/cookies.sqlite"
-      # Safari
-      - "**/Library/Safari/History.db"
-      - "**/Library/Cookies/Cookies.binarycookies"
-    actions: [read, copy]
+      - "$HOME/Library/Application Support/Firefox/Profiles/**/logins.json"
+      - "$HOME/Library/Application Support/Firefox/Profiles/**/key*.db"
+      - "$HOME/Library/Application Support/Firefox/Profiles/**/cookies.sqlite"
+      - "$HOME/.mozilla/firefox/**/logins.json"
+      - "$HOME/.mozilla/firefox/**/key*.db"
+      - "$HOME/.mozilla/firefox/**/cookies.sqlite"
+      - "$HOME/AppData/Roaming/Mozilla/Firefox/Profiles/**/logins.json"
+      - "$HOME/AppData/Roaming/Mozilla/Firefox/Profiles/**/key*.db"
+      - "$HOME/AppData/Roaming/Mozilla/Firefox/Profiles/**/cookies.sqlite"
+      # Safari (macOS only)
+      - "$HOME/Library/Safari/History.db"
+      - "$HOME/Library/Cookies/Cookies.binarycookies"
+    actions: [read, write, delete, copy, move, network]
     message: "Cannot access browser sensitive data"
     severity: high
 
@@ -168,13 +175,15 @@ rules:
   # ===========================================================================
   - name: protect-shell-rc
     block:
-      - "**/.bashrc"
-      - "**/.bash_profile"
-      - "**/.bash_login"
-      - "**/.zshrc"
-      - "**/.zprofile"
-      - "**/.zshenv"
-      - "**/.profile"
+      - "$HOME/.bashrc"
+      - "$HOME/.bash_profile"
+      - "$HOME/.bash_login"
+      - "$HOME/.zshrc"
+      - "$HOME/.zprofile"
+      - "$HOME/.zshenv"
+      - "$HOME/.zlogin"
+      - "$HOME/.profile"
+      - "$HOME/.config/fish/config.fish"
     actions: [write, delete]
     message: "Cannot modify shell startup files - persistence vector"
     severity: critical
@@ -184,14 +193,98 @@ rules:
   # ===========================================================================
   - name: protect-ssh-authorized-keys
     block:
-      - "**/.ssh/authorized_keys"
-      - "**/.ssh/authorized_keys2"
+      - "$HOME/.ssh/authorized_keys"
+      - "$HOME/.ssh/authorized_keys2"
+      - "$HOME/.ssh/known_hosts"
     actions: [write, delete]
-    message: "Cannot modify SSH authorized keys - persistence vector"
+    message: "Cannot modify SSH authorized keys or known hosts - persistence vector"
     severity: critical
 
   # ===========================================================================
-  # 12. PRIVATE KEY CONTENT DETECTION
+  # 12. DESKTOP APP TOKEN PROTECTION
+  # ===========================================================================
+  - name: protect-desktop-app-tokens
+    block:
+      # Electron apps store session tokens in LevelDB/SQLite under app data dirs.
+      # No legitimate AI coding agent reads these — MCP integrations use API
+      # tokens via env vars, not local session files.
+      #
+      # $HOME expands to the current user's home directory at engine init.
+      # Cross-OS paths are listed under $HOME — wrong-OS patterns compile
+      # but never match (e.g., $HOME/Library/... on Linux is harmless).
+      #
+      # --- Chat / Communication (account takeover risk) ---
+      # Discord (+ PTB / Canary variants)
+      - "$HOME/Library/Application Support/discord/**"
+      - "$HOME/Library/Application Support/discordptb/**"
+      - "$HOME/Library/Application Support/discordcanary/**"
+      - "$HOME/.config/discord/**"
+      - "$HOME/.config/discordptb/**"
+      - "$HOME/.config/discordcanary/**"
+      - "$HOME/AppData/Roaming/discord/**"
+      - "$HOME/AppData/Roaming/discordptb/**"
+      - "$HOME/AppData/Roaming/discordcanary/**"
+      # Slack
+      - "$HOME/Library/Application Support/Slack/**"
+      - "$HOME/.config/Slack/**"
+      - "$HOME/AppData/Roaming/Slack/**"
+      # Telegram Desktop
+      - "$HOME/Library/Application Support/Telegram Desktop/**"
+      - "$HOME/.local/share/TelegramDesktop/**"
+      - "$HOME/AppData/Roaming/Telegram Desktop/**"
+      # Signal
+      - "$HOME/Library/Application Support/Signal/**"
+      - "$HOME/.config/Signal/**"
+      - "$HOME/AppData/Roaming/Signal/**"
+      # WhatsApp Desktop
+      - "$HOME/Library/Application Support/WhatsApp/**"
+      - "$HOME/.config/WhatsApp/**"
+      - "$HOME/AppData/Roaming/WhatsApp/**"
+      # Microsoft Teams
+      - "$HOME/Library/Application Support/Microsoft Teams/**"
+      - "$HOME/.config/Microsoft/Microsoft Teams/**"
+      - "$HOME/AppData/Roaming/Microsoft/Teams/**"
+      # Element (Matrix)
+      - "$HOME/Library/Application Support/Element/**"
+      - "$HOME/.config/Element/**"
+      - "$HOME/AppData/Roaming/Element/**"
+      # Skype
+      - "$HOME/Library/Application Support/Microsoft/Skype for Desktop/**"
+      - "$HOME/.config/skypeforlinux/**"
+      - "$HOME/AppData/Roaming/Microsoft/Skype for Desktop/**"
+      # --- Developer Tools (API keys / OAuth tokens) ---
+      # Postman
+      - "$HOME/Library/Application Support/Postman/**"
+      - "$HOME/.config/Postman/**"
+      - "$HOME/AppData/Roaming/Postman/**"
+      # GitHub Desktop
+      - "$HOME/Library/Application Support/GitHub Desktop/**"
+      - "$HOME/.config/GitHub Desktop/**"
+      - "$HOME/AppData/Roaming/GitHub Desktop/**"
+      # Figma
+      - "$HOME/Library/Application Support/Figma/**"
+      - "$HOME/.config/Figma/**"
+      - "$HOME/AppData/Roaming/Figma/**"
+      # Insomnia
+      - "$HOME/Library/Application Support/Insomnia/**"
+      - "$HOME/.config/Insomnia/**"
+      - "$HOME/AppData/Roaming/Insomnia/**"
+      # --- Password Managers (local vault = all passwords) ---
+      # Bitwarden
+      - "$HOME/Library/Application Support/Bitwarden/**"
+      - "$HOME/.config/Bitwarden/**"
+      - "$HOME/AppData/Roaming/Bitwarden/**"
+      # --- Productivity ---
+      # Notion
+      - "$HOME/Library/Application Support/Notion/**"
+      - "$HOME/.config/Notion/**"
+      - "$HOME/AppData/Roaming/Notion/**"
+    actions: [read, write, delete, copy, move, network]
+    message: "Cannot access desktop app data - may contain session tokens"
+    severity: critical
+
+  # ===========================================================================
+  # 13. PRIVATE KEY CONTENT DETECTION
   # ===========================================================================
   - name: detect-private-key-write
     match:
@@ -201,7 +294,7 @@ rules:
     severity: critical
 
   # ===========================================================================
-  # 13. SHELL EVASION PATTERNS (defense-in-depth for command regex rules)
+  # 14. SHELL EVASION PATTERNS (defense-in-depth for command regex rules)
   # ===========================================================================
   - name: block-eval-exec
     match:

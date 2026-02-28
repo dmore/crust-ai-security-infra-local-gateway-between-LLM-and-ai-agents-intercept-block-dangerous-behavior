@@ -48,15 +48,16 @@ func loadScenarios(t *testing.T, filename string) []ScenarioCase {
 	return file.Scenarios
 }
 
-// createEngineWithBuiltinRules creates an engine with only builtin rules
+// createEngineWithBuiltinRules creates an engine with only builtin rules.
+// Uses a test normalizer with home=/home/user to match scenario YAML fixtures.
 func createEngineWithBuiltinRules(t *testing.T) *Engine {
 	t.Helper()
 
-	// Create engine with builtin rules enabled but no user rules directory
-	engine, err := NewEngine(EngineConfig{
+	normalizer := NewNormalizerWithEnv("/home/user", "/home/user/project", nil)
+	engine, err := NewEngineWithNormalizer(EngineConfig{
 		UserRulesDir:   "", // No user rules
 		DisableBuiltin: false,
-	})
+	}, normalizer)
 	if err != nil {
 		t.Fatalf("Failed to create engine: %v", err)
 	}

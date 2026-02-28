@@ -49,20 +49,32 @@ func RunProxy(engine *rules.Engine, cmd []string, stdin io.ReadCloser, stdout io
 		log.Error("Failed to create %s stdin pipe: %v", cfg.ProcessLabel, err)
 		return 1
 	}
-	childStdout, err := child.StdoutPipe()
+
+	// Use os.Pipe instead of child.StdoutPipe to avoid a race condition:
+	// child.Wait() closes StdoutPipe before returning, which can truncate
+	// buffered output if the outbound goroutine hasn't finished reading.
+	// With os.Pipe, we control the read-end lifetime ourselves.
+	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
-		childStdin.Close() // Bug fix #4: close already-created pipe
+		childStdin.Close()
 		log.Error("Failed to create %s stdout pipe: %v", cfg.ProcessLabel, err)
 		return 1
 	}
+	child.Stdout = stdoutW
 	child.Stderr = os.Stderr
 
 	if err := child.Start(); err != nil {
 		childStdin.Close()
-		childStdout.Close()
+		stdoutR.Close()
+		stdoutW.Close()
 		log.Error("Failed to start %s: %v", cfg.ProcessLabel, err)
 		return 1
 	}
+
+	// Close parent's write end — child has its own copy via fork.
+	// When the child exits, the OS closes the child's copy, and
+	// stdoutR gets EOF after all buffered data is drained.
+	stdoutW.Close()
 
 	log.Info("%s started: PID %d, command: %v", cfg.ProcessLabel, child.Process.Pid, cmd)
 	log.Info("Rule engine: %d rules loaded", engine.RuleCount())
@@ -92,11 +104,12 @@ func RunProxy(engine *rules.Engine, cmd []string, stdin io.ReadCloser, stdout io
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer stdoutR.Close()
 		if cfg.Outbound.Convert != nil {
-			PipeInspect(log, engine, childStdout, clientWriter, childWriter,
+			PipeInspect(log, engine, stdoutR, clientWriter, childWriter,
 				cfg.Outbound.Convert, cfg.Outbound.Protocol, cfg.Outbound.Label)
 		} else {
-			PipePassthrough(log, childStdout, clientWriter, cfg.Outbound.Label)
+			PipePassthrough(log, stdoutR, clientWriter, cfg.Outbound.Label)
 		}
 	}()
 

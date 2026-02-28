@@ -47,7 +47,9 @@ func WritePID() error {
 }
 
 // CleanupPID releases the flock and removes the PID, port, and socket files.
+// It also restores any agent configs that were patched on startup.
 func CleanupPID() {
+	RestoreAgentConfigs()
 	if pidLockFile != nil {
 		pidLockFile.Close()
 		pidLockFile = nil
@@ -111,9 +113,9 @@ func Stop() error {
 		}
 	}
 
-	// Force kill if still running
+	// Force kill if still running — SIGKILL doesn't trigger defers.
 	_ = process.Signal(syscall.SIGKILL)
-	_ = RemovePID() //nolint:errcheck // cleanup best effort
+	stopCleanup()
 
 	return nil
 }

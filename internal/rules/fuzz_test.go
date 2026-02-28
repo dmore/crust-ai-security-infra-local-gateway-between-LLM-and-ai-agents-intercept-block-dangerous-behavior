@@ -308,6 +308,7 @@ func FuzzExtractBashCommand(f *testing.F) {
 // COVERS: protect-package-tokens
 // COVERS: protect-shell-rc
 // COVERS: protect-ssh-authorized-keys
+// COVERS: protect-desktop-app-tokens
 // COVERS: detect-private-key-write
 // COVERS: block-eval-exec
 // COVERS: protect-system-auth
@@ -345,6 +346,9 @@ func FuzzBuiltinRuleBypass(f *testing.F) {
 	f.Add("Write", `{"file_path":"/home/user/.zshrc","content":"backdoor"}`)
 	// protect-ssh-authorized-keys
 	f.Add("Write", `{"file_path":"/home/user/.ssh/authorized_keys","content":"ssh-rsa AAAA..."}`)
+	// protect-desktop-app-tokens
+	f.Add("Read", `{"file_path":"/home/user/.config/discord/Local Storage/leveldb/000003.ldb"}`)
+	f.Add("Bash", `{"command":"cat /home/user/.config/Slack/Cookies"}`)
 	// detect-private-key-write / builtin:dlp-private-key
 	pkHeader := "-----BEGIN " + "RSA PRIVATE KEY-----"
 	f.Add("Write", `{"file_path":"/tmp/key","content":"`+pkHeader+`"}`)

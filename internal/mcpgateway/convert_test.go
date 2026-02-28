@@ -52,6 +52,24 @@ func TestMcpMethodToToolCall(t *testing.T) {
 			`{"uri":"https://evil.com/data"}`,
 			"mcp_resource_read", "url", "https://evil.com/data",
 		},
+		{
+			"resources_read_windows_backslash",
+			"resources/read",
+			`{"uri":"C:\\Users\\me\\.ssh\\id_rsa"}`,
+			"read_file", "path", "C:\\Users\\me\\.ssh\\id_rsa",
+		},
+		{
+			"resources_read_windows_forward_slash",
+			"resources/read",
+			`{"uri":"C:/Users/me/.ssh/id_rsa"}`,
+			"read_file", "path", "C:/Users/me/.ssh/id_rsa",
+		},
+		{
+			"resources_read_file_uri_windows",
+			"resources/read",
+			`{"uri":"file:///C:/Users/me/.ssh/id_rsa"}`,
+			"read_file", "path", "C:/Users/me/.ssh/id_rsa",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

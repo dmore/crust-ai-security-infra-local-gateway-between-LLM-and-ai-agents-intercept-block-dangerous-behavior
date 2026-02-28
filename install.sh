@@ -59,6 +59,7 @@ main() {
     install_go_binary "$tmp_dir/crust"
     setup_data_dir
     setup_completion
+    setup_gitleaks
     setup_font
 
     # Success

@@ -88,25 +88,45 @@ func MCPMethodToToolCall(method string, params json.RawMessage) (*rules.ToolCall
 			return nil, fmt.Errorf("invalid URI in %s: %w", method, err)
 		}
 
-		switch parsed.Scheme {
-		case "file", "":
-			path := parsed.Path
-			if path == "" {
+		// Detect filesystem paths vs remote URLs.
+		// url.Parse("C:\Users\...") yields Scheme="c" (single char), which would
+		// fall through to the remote-URL branch and bypass filesystem rules.
+		// Valid URL schemes are always ≥2 chars (RFC 3986), so a single-letter
+		// scheme is always a Windows drive letter.
+		isFilePath := parsed.Scheme == "file" || parsed.Scheme == ""
+		if !isFilePath && len(parsed.Scheme) == 1 {
+			isFilePath = true
+		}
+
+		if isFilePath {
+			var path string
+			if len(parsed.Scheme) == 1 {
+				// Drive-letter URI: url.Parse splits "C:" into Scheme,
+				// losing it from Path. Use raw URI to preserve the full path.
 				path = p.URI
+			} else {
+				path = parsed.Path
+				if path == "" {
+					path = p.URI
+				}
+				// file:///C:/Users/... → parsed.Path="/C:/Users/..."
+				// Strip leading "/" before a Windows drive letter (X:).
+				if len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+					path = path[1:]
+				}
 			}
 			args, err := json.Marshal(map[string]string{"path": path})
 			if err != nil {
 				return nil, fmt.Errorf("marshal error: %w", err)
 			}
 			return &rules.ToolCall{Name: "read_file", Arguments: args}, nil
-
-		default:
-			args, err := json.Marshal(map[string]string{"url": p.URI})
-			if err != nil {
-				return nil, fmt.Errorf("marshal error: %w", err)
-			}
-			return &rules.ToolCall{Name: "mcp_resource_read", Arguments: args}, nil
 		}
+
+		args, err := json.Marshal(map[string]string{"url": p.URI})
+		if err != nil {
+			return nil, fmt.Errorf("marshal error: %w", err)
+		}
+		return &rules.ToolCall{Name: "mcp_resource_read", Arguments: args}, nil
 
 	case "sampling/createMessage":
 		var p samplingCreateMessageParams

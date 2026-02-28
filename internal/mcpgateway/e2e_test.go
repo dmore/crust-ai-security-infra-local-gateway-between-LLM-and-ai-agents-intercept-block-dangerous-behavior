@@ -74,7 +74,9 @@ type e2eResponse struct {
 // all JSON-RPC responses received by the client.
 func runMCPE2E(t *testing.T, dir string, messages []string) []e2eResponse {
 	t.Helper()
-	engine := testutil.NewEngine(t)
+	// Use dir as $HOME so that $HOME-based security rules (SSH keys, etc.)
+	// match files inside the test directory.
+	engine := testutil.NewEngineWithHome(t, dir)
 	input := strings.Join(messages, "\n") + "\n"
 	stdinR := io.NopCloser(strings.NewReader(input))
 	var stdout strings.Builder

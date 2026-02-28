@@ -424,6 +424,9 @@ func runDaemon(cfg *config.Config, logLevel string, disableBuiltin bool, endpoin
 		os.Exit(1)
 	}
 
+	// Patch known agent configs to point at the proxy (restored on shutdown)
+	daemon.PatchAgentConfigs(cfg.Server.Port)
+
 	log.Info("Starting Crust daemon...")
 
 	// Initialize rules engine

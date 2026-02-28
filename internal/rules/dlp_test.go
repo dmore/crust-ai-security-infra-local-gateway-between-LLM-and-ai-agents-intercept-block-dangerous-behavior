@@ -485,6 +485,23 @@ func TestNullByteWriteAllowsCleanContent(t *testing.T) {
 }
 
 // TestDLPScanAllOperations verifies DLP fires on execute/network operations, not just writes.
+func TestScanDLP_CryptoDetection(t *testing.T) {
+	engine, err := NewEngine(EngineConfig{DisableBuiltin: false})
+	if err != nil {
+		t.Fatalf("Failed to create engine: %v", err)
+	}
+
+	// BIP39 12-word mnemonic — should be caught by ScanDLP's crypto tier.
+	mnemonic := "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+	result := engine.ScanDLP(mnemonic)
+	if result == nil {
+		t.Fatal("ScanDLP should block BIP39 mnemonic in server response")
+	}
+	if result.RuleName != "builtin:dlp-crypto-bip39-mnemonic" {
+		t.Errorf("RuleName = %s, want builtin:dlp-crypto-bip39-mnemonic", result.RuleName)
+	}
+}
+
 func TestDLPScanAllOperations(t *testing.T) {
 	engine, err := NewEngine(EngineConfig{DisableBuiltin: false})
 	if err != nil {
