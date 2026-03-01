@@ -4,9 +4,10 @@ import (
 	"testing"
 )
 
-// TestBuiltinRulesLoad verifies builtin security rules can be loaded.
+// TestBuiltinRulesLoad verifies all 17 builtin security rules can be loaded.
 // Tests rule: protect-env-files
 // Tests rule: protect-ssh-keys
+// Tests rule: protect-system-auth
 // Tests rule: protect-crust
 // Tests rule: protect-shell-history
 // Tests rule: protect-cloud-credentials
@@ -37,6 +38,7 @@ func TestBuiltinRulesLoad(t *testing.T) {
 	expectedRules := []string{
 		"protect-env-files",
 		"protect-ssh-keys",
+		"protect-system-auth",
 		"protect-crust",
 		"protect-shell-history",
 		"protect-cloud-credentials",
@@ -47,6 +49,8 @@ func TestBuiltinRulesLoad(t *testing.T) {
 		"protect-shell-rc",
 		"protect-ssh-authorized-keys",
 		"protect-desktop-app-tokens",
+		"protect-os-keychains",
+		"protect-github-cli",
 		"detect-private-key-write",
 		"block-eval-exec",
 	}
