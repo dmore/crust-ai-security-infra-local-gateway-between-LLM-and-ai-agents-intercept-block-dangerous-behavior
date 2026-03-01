@@ -158,8 +158,10 @@ func (s *APIServer) handleStats(c *gin.Context) {
 // handleStatus handles GET /api/security/status
 func (s *APIServer) handleStatus(c *gin.Context) {
 	ruleCount := 0
+	lockedCount := 0
 	if ruleEngine := rules.GetGlobalEngine(); ruleEngine != nil {
 		ruleCount = ruleEngine.RuleCount()
+		lockedCount = ruleEngine.LockedRuleCount()
 	}
 
 	enabled := false
@@ -168,9 +170,10 @@ func (s *APIServer) handleStatus(c *gin.Context) {
 	}
 
 	api.Success(c, gin.H{
-		"enabled":     enabled,
-		"rules_count": ruleCount,
-		"timestamp":   time.Now().UTC().Format(time.RFC3339),
+		"enabled":            enabled,
+		"rules_count":        ruleCount,
+		"locked_rules_count": lockedCount,
+		"timestamp":          time.Now().UTC().Format(time.RFC3339),
 	})
 }
 

@@ -879,6 +879,19 @@ func (e *Engine) RuleCount() int {
 	return len(e.merged)
 }
 
+// LockedRuleCount returns the number of locked builtin rules
+func (e *Engine) LockedRuleCount() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	count := 0
+	for _, cr := range e.builtin {
+		if cr.Rule.IsLocked() {
+			count++
+		}
+	}
+	return count
+}
+
 // GetLoader returns the rule loader
 func (e *Engine) GetLoader() *Loader {
 	return e.loader

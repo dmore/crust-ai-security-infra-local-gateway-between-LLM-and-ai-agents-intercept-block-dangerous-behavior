@@ -28,7 +28,13 @@ func RenderPlain(rulesList []rules.Rule, total int) error {
 	}
 
 	if len(builtinRules) > 0 {
-		fmt.Println("--- Builtin Rules ---")
+		locked := 0
+		for _, r := range builtinRules {
+			if r.IsLocked() {
+				locked++
+			}
+		}
+		fmt.Printf("--- Builtin Rules (%d locked) ---\n", locked)
 		fmt.Println()
 		for _, r := range builtinRules {
 			PrintRule(r, "  ")
