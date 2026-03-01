@@ -10,6 +10,7 @@ rules:
     severity: critical
 
   - name: protect-ssh-keys
+    locked: true
     block:
       - "$HOME/.ssh/id_*"
       - "$HOME/.ssh/config"
@@ -23,6 +24,7 @@ rules:
   # 2. SYSTEM AUTHENTICATION FILES
   # ===========================================================================
   - name: protect-system-auth
+    locked: true
     block:
       - "/etc/passwd"
       - "/etc/shadow"
@@ -37,6 +39,7 @@ rules:
   # 3. SELF PROTECTION
   # ===========================================================================
   - name: protect-crust
+    locked: true
     block:
       - "**/.crust/**"
       - "**/crust*.db"
@@ -48,6 +51,7 @@ rules:
   # 4. SHELL HISTORY PROTECTION
   # ===========================================================================
   - name: protect-shell-history
+    locked: true
     block:
       - "$HOME/.bash_history"
       - "$HOME/.zsh_history"
@@ -69,6 +73,7 @@ rules:
   # 5. CLOUD CREDENTIALS PROTECTION
   # ===========================================================================
   - name: protect-cloud-credentials
+    locked: true
     block:
       # AWS (credentials only — .aws/config has non-sensitive region/profile settings)
       - "$HOME/.aws/credentials"
@@ -93,6 +98,7 @@ rules:
   # 6. GPG/PGP KEY PROTECTION
   # ===========================================================================
   - name: protect-gpg-keys
+    locked: true
     block:
       - "$HOME/.gnupg/private-keys-v1.d/**"
       - "$HOME/.gnupg/secring.gpg"
@@ -153,6 +159,7 @@ rules:
   # 8. GIT CREDENTIALS PROTECTION
   # ===========================================================================
   - name: protect-git-credentials
+    locked: true
     block:
       - "**/.git-credentials"
       - "**/.config/git/credentials"
@@ -217,6 +224,7 @@ rules:
   # 11. SSH AUTHORIZED KEYS PROTECTION
   # ===========================================================================
   - name: protect-ssh-authorized-keys
+    locked: true
     block:
       - "$HOME/.ssh/authorized_keys"
       - "$HOME/.ssh/authorized_keys2"
@@ -229,6 +237,7 @@ rules:
   # 12. DESKTOP APP TOKEN PROTECTION
   # ===========================================================================
   - name: protect-desktop-app-tokens
+    locked: true
     block:
       # Electron apps store session tokens in LevelDB/SQLite under app data dirs.
       # No legitimate AI coding agent reads these — MCP integrations use API
@@ -324,6 +333,7 @@ rules:
   # 13. OS KEYCHAIN / SECRET STORE PROTECTION
   # ===========================================================================
   - name: protect-os-keychains
+    locked: true
     block:
       # macOS Keychain files (login.keychain-db contains all saved passwords)
       - "$HOME/Library/Keychains/**"

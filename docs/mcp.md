@@ -117,6 +117,6 @@ crust mcp-gateway [flags] -- <mcp-server-command> [args...]
 | `--config` | `~/.crust/config.yaml` | Path to configuration file |
 | `--rules-dir` | `~/.crust/rules/` | Directory for custom rules |
 | `--log-level` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
-| `--disable-builtin` | `false` | Disable built-in security rules |
+| `--disable-builtin` | `false` | Disable built-in security rules (10 locked rules remain active) |
 
 Logs go to stderr so they don't interfere with the JSON-RPC stdio stream.

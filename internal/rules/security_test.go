@@ -64,3 +64,79 @@ func TestBuiltinRulesLoad(t *testing.T) {
 
 	t.Logf("Loaded %d builtin rules", len(rules))
 }
+
+// TestLockedRulesSurviveDisableBuiltin verifies that locked rules remain active
+// when --disable-builtin is set, while unlocked rules are removed.
+func TestLockedRulesSurviveDisableBuiltin(t *testing.T) {
+	loader := NewLoader("")
+	rules, err := loader.LoadBuiltin()
+	if err != nil {
+		t.Fatalf("Failed to load builtin rules: %v", err)
+	}
+
+	// Verify locked rules exist
+	lockedNames := []string{
+		"protect-ssh-keys",
+		"protect-system-auth",
+		"protect-crust",
+		"protect-shell-history",
+		"protect-cloud-credentials",
+		"protect-gpg-keys",
+		"protect-git-credentials",
+		"protect-ssh-authorized-keys",
+		"protect-desktop-app-tokens",
+		"protect-os-keychains",
+	}
+	unlockedNames := []string{
+		"protect-env-files",
+		"protect-browser-data",
+		"protect-package-tokens",
+		"protect-shell-rc",
+		"protect-github-cli",
+		"detect-private-key-write",
+		"block-eval-exec",
+	}
+
+	for _, r := range rules {
+		for _, name := range lockedNames {
+			if r.Name == name && !r.IsLocked() {
+				t.Errorf("Rule %s should be locked", name)
+			}
+		}
+		for _, name := range unlockedNames {
+			if r.Name == name && r.IsLocked() {
+				t.Errorf("Rule %s should NOT be locked", name)
+			}
+		}
+	}
+
+	// Simulate --disable-builtin: filter to locked only
+	var locked []Rule
+	for _, r := range rules {
+		if r.IsLocked() {
+			locked = append(locked, r)
+		}
+	}
+
+	if len(locked) != len(lockedNames) {
+		t.Errorf("Expected %d locked rules, got %d", len(lockedNames), len(locked))
+	}
+
+	lockedSet := make(map[string]bool)
+	for _, r := range locked {
+		lockedSet[r.Name] = true
+	}
+
+	for _, name := range lockedNames {
+		if !lockedSet[name] {
+			t.Errorf("Locked rule %s missing after filter", name)
+		}
+	}
+	for _, name := range unlockedNames {
+		if lockedSet[name] {
+			t.Errorf("Unlocked rule %s should have been filtered out", name)
+		}
+	}
+
+	t.Logf("Locked rules surviving --disable-builtin: %d/%d", len(locked), len(rules))
+}

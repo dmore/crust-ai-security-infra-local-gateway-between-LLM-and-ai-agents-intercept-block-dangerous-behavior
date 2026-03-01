@@ -130,7 +130,11 @@ func (d ruleDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 		icon = tui.StyleMuted.Render(tui.IconCircle)
 		name = tui.Strikethrough(ri.rule.Name)
 	}
-	title := icon + " " + name
+	lockIndicator := ""
+	if ri.rule.IsLocked() {
+		lockIndicator = " " + tui.IconLock
+	}
+	title := icon + " " + name + lockIndicator
 	desc := ri.Description()
 
 	if selected {

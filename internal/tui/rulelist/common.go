@@ -64,7 +64,11 @@ func PrintRule(r rules.Rule, prefix string) {
 	if !enabled {
 		status = "[OFF]"
 	}
-	fmt.Printf("%s%s %s\n", prefix, status, r.Name)
+	lockTag := ""
+	if r.IsLocked() {
+		lockTag = " [locked]"
+	}
+	fmt.Printf("%s%s %s%s\n", prefix, status, r.Name, lockTag)
 
 	desc := r.Description
 	if desc == "" {

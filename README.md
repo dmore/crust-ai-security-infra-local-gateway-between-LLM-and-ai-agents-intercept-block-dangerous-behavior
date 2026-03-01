@@ -127,7 +127,7 @@ Supports JetBrains IDEs and other ACP-compatible editors. See the [ACP setup gui
 
 ## Built-in Protection
 
-Crust ships with **14 security rules** and **34 DLP token-detection patterns** out of the box:
+Crust ships with **17 security rules** (10 locked, 7 user-disablable) and **34 DLP token-detection patterns** out of the box:
 
 | Category | What's Protected |
 |----------|-----------------|

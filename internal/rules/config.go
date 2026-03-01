@@ -54,6 +54,7 @@ type RuleConfig struct {
 
 	// Common fields
 	Name     string   `yaml:"name,omitempty"`
+	Locked   *bool    `yaml:"locked,omitempty"`
 	Actions  []string `yaml:"actions,omitempty"`
 	Message  string   `yaml:"message,omitempty"`
 	Severity Severity `yaml:"severity,omitempty"`
@@ -136,6 +137,7 @@ func (m *MatchConfig) Validate() error {
 func (r *RuleConfig) ToRule() *Rule {
 	rule := &Rule{
 		Name:     r.Name,
+		Locked:   r.Locked,
 		Message:  r.Message,
 		Severity: r.Severity,
 		Actions:  parseActions(r.Actions),

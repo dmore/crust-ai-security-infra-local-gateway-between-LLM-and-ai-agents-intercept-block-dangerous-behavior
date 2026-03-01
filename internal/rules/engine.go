@@ -219,28 +219,38 @@ func NewEngineWithNormalizer(cfg EngineConfig, normalizer *Normalizer) (*Engine,
 		}
 	}
 
-	// Load builtin rules (unless disabled)
+	// Load builtin rules
+	builtinRules, err := loader.LoadBuiltin()
+	if err != nil {
+		return nil, err
+	}
+
+	// Add dynamic protection rules based on config (always locked)
+	dynamicRules := generateProtectionRules(cfg)
+	builtinRules = append(dynamicRules, builtinRules...)
+
+	if cfg.DisableBuiltin {
+		// Keep only locked rules — they cannot be disabled
+		var locked []Rule
+		for _, r := range builtinRules {
+			if r.IsLocked() {
+				locked = append(locked, r)
+			}
+		}
+		log.Warn("Builtin rules disabled (%d locked rules remain active)", len(locked))
+		builtinRules = locked
+	}
+
+	// Expand $HOME in YAML rule paths to actual home directory
+	builtinRules = expandRuleHomes(builtinRules, normalizer.GetHomeDir())
+
+	compiled, err := e.compileRules(builtinRules, true)
+	if err != nil {
+		return nil, err
+	}
+	e.builtin = compiled
 	if !cfg.DisableBuiltin {
-		builtinRules, err := loader.LoadBuiltin()
-		if err != nil {
-			return nil, err
-		}
-
-		// Add dynamic protection rules based on config
-		dynamicRules := generateProtectionRules(cfg)
-		builtinRules = append(dynamicRules, builtinRules...)
-
-		// Expand $HOME in YAML rule paths to actual home directory
-		builtinRules = expandRuleHomes(builtinRules, normalizer.GetHomeDir())
-
-		compiled, err := e.compileRules(builtinRules, true)
-		if err != nil {
-			return nil, err
-		}
-		e.builtin = compiled
 		log.Info("Loaded %d builtin rules (%d dynamic)", len(compiled), len(dynamicRules))
-	} else {
-		log.Warn("Builtin rules disabled")
 	}
 
 	// Load user rules
