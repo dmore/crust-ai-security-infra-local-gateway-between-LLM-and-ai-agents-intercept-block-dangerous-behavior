@@ -177,7 +177,7 @@ func runStartupReader(defaultEndpoint string, defaultProxyPort int) (Config, err
 			}
 		}
 
-		fmt.Printf("  %s Disable builtin rules? (10 locked rules remain active) [y/N]: ", prompt)
+		fmt.Printf("  %s Disable builtin rules? (14 locked rules remain active) [y/N]: ", prompt)
 		rulesAnswer, _ := reader.ReadString('\n')
 		rulesAnswer = strings.TrimSpace(strings.ToLower(rulesAnswer))
 		config.DisableBuiltinRules = rulesAnswer == "y" || rulesAnswer == "yes"

@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-// TestBuiltinRulesLoad verifies all 17 builtin security rules can be loaded.
+// TestBuiltinRulesLoad verifies all 21 builtin security rules can be loaded.
 // Tests rule: protect-env-files
 // Tests rule: protect-ssh-keys
 // Tests rule: protect-system-auth
@@ -22,6 +22,10 @@ import (
 // Tests rule: protect-github-cli
 // Tests rule: detect-private-key-write
 // Tests rule: block-eval-exec
+// Tests rule: protect-system-config
+// Tests rule: protect-persistence
+// Tests rule: detect-reverse-shell
+// Tests rule: block-ssrf-metadata
 // NOTE: protect-crust-api is hardcoded in engine.go (not a YAML rule)
 func TestBuiltinRulesLoad(t *testing.T) {
 	loader := NewLoader("")
@@ -53,6 +57,10 @@ func TestBuiltinRulesLoad(t *testing.T) {
 		"protect-github-cli",
 		"detect-private-key-write",
 		"block-eval-exec",
+		"protect-system-config",
+		"protect-persistence",
+		"detect-reverse-shell",
+		"block-ssrf-metadata",
 	}
 
 	ruleNames := make(map[string]bool)
@@ -90,6 +98,10 @@ func TestLockedRulesSurviveDisableBuiltin(t *testing.T) {
 		"protect-ssh-authorized-keys",
 		"protect-desktop-app-tokens",
 		"protect-os-keychains",
+		"protect-system-config",
+		"protect-persistence",
+		"detect-reverse-shell",
+		"block-ssrf-metadata",
 	}
 	unlockedNames := []string{
 		"protect-env-files",

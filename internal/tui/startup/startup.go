@@ -181,7 +181,7 @@ func runStartupForm(defaultEndpoint string, defaultProxyPort int) (Config, error
 				}),
 			huh.NewConfirm().
 				Title("Disable builtin rules?").
-				Description("Only use user-defined rules (10 locked rules remain active)").
+				Description("Only use user-defined rules (14 locked rules remain active)").
 				Value(&disableBuiltin),
 			huh.NewInput().
 				Title("Proxy port").

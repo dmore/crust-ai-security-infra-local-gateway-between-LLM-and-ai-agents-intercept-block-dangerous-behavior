@@ -32,7 +32,7 @@ func newTestServer(status any, stats any, sessions any, events any) *httptest.Se
 
 func TestFetchStatus(t *testing.T) {
 	srv := newTestServer(
-		map[string]any{"enabled": true, "rules_count": 17},
+		map[string]any{"enabled": true, "rules_count": 21},
 		SecurityStats{TotalToolCalls: 100, BlockedCalls: 5, AllowedCalls: 95},
 		nil, nil,
 	)
@@ -61,8 +61,8 @@ func TestFetchStatus(t *testing.T) {
 			if !data.Enabled {
 				t.Error("expected Enabled=true")
 			}
-			if data.RuleCount != 17 {
-				t.Errorf("RuleCount = %d, want 17", data.RuleCount)
+			if data.RuleCount != 21 {
+				t.Errorf("RuleCount = %d, want 21", data.RuleCount)
 			}
 			if data.Stats.TotalToolCalls != 100 {
 				t.Errorf("TotalToolCalls = %d, want 100", data.Stats.TotalToolCalls)
@@ -149,10 +149,10 @@ func TestRenderPlain(t *testing.T) {
 			"running with stats",
 			StatusData{
 				Running: true, PID: 1234, Healthy: true, Enabled: true,
-				RuleCount: 17, LogFile: "/tmp/crust.log",
+				RuleCount: 21, LogFile: "/tmp/crust.log",
 				Stats: SecurityStats{TotalToolCalls: 100, BlockedCalls: 10, AllowedCalls: 90},
 			},
-			[]string{"PID 1234", "healthy", "enabled", "17 loaded", "10 tool calls", "/tmp/crust.log"},
+			[]string{"PID 1234", "healthy", "enabled", "21 loaded", "10 tool calls", "/tmp/crust.log"},
 		},
 		{
 			"not running",

