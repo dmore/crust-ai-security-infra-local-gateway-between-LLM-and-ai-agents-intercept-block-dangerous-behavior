@@ -2,6 +2,7 @@ package rules
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 )
 
@@ -171,11 +172,12 @@ func TestDynamicProtectionRulesSurviveDisableBuiltin(t *testing.T) {
 		t.Fatalf("NewEngine: %v", err)
 	}
 
-	// Use json.Marshal to construct arguments — raw string concatenation
-	// produces invalid JSON on Windows where TempDir contains backslashes
-	// (e.g. C:\Users\... → \U is an invalid JSON escape).
-	deleteArgs, _ := json.Marshal(map[string]string{"command": "rm -rf " + rulesDir + "/foo"})
-	writeArgs, _ := json.Marshal(map[string]string{"file_path": rulesDir + "/evil.yaml", "content": "x"})
+	// Use filepath.ToSlash to normalize Windows backslash paths to forward
+	// slashes. Backslashes break both JSON encoding (C:\U → invalid escape)
+	// and bash parsing (the shell AST treats \ as an escape character).
+	rulesDirSlash := filepath.ToSlash(rulesDir)
+	deleteArgs, _ := json.Marshal(map[string]string{"command": "rm -rf " + rulesDirSlash + "/foo"})
+	writeArgs, _ := json.Marshal(map[string]string{"file_path": rulesDirSlash + "/evil.yaml", "content": "x"})
 
 	tests := []struct {
 		name     string
