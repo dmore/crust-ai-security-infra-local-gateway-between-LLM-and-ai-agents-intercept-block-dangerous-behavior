@@ -98,7 +98,7 @@ Any editor that supports ACP (Zed, Neovim via CodeCompanion/avante.nvim) can use
 ## Status
 
 - ACP handshake (initialize/response) passes through correctly for Goose and Gemini CLI
-- Security rules block dangerous `fs/read_text_file`, `fs/write_text_file`, and `terminal/create` requests
+- Security rules block dangerous `fs/read_text_file`, `fs/write_text_file`, and `terminal/create` requests with a `[Crust]`-prefixed message explaining the block reason and a "Do not retry" directive
 - Non-security ACP methods pass through unchanged
 
 Please [open an issue](https://github.com/BakeLens/crust/issues) if you encounter problems with a specific agent or editor.

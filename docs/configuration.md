@@ -57,7 +57,9 @@ API key values support `$VAR` and `${VAR}` environment variable expansion. This 
 
 | Mode | Behavior |
 |------|----------|
-| `remove` (default) | Dangerous tool calls are silently removed from the request/response |
+| `remove` (default) | Dangerous tool calls are removed; a `[Crust]` warning with the block reason is injected into the response |
 | `replace` | Dangerous tool calls are replaced with an echo command explaining what was blocked |
 
-Use `replace` to let the agent see block messages and adjust its behavior.
+Both modes deliver agent-friendly messages that explain *why* a tool call was blocked and include a "Do not retry" directive to prevent the agent from re-attempting the same action.
+
+All block messages are formatted by the centralized `internal/message` package to ensure consistency across HTTP, SSE streaming, and JSON-RPC (MCP/ACP) delivery paths.

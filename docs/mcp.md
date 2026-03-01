@@ -38,7 +38,7 @@ Crust inspects both directions:
 - **Inbound (Client→Server):** Evaluates `tools/call` and `resources/read` requests against path rules, DLP patterns, and content matching. Tool arguments are extracted using **shape-based detection** — any tool with a `path` field is treated as file access, regardless of the tool name.
 - **Outbound (Server→Client):** Scans server responses for leaked secrets using DLP patterns. If a server returns file content containing API keys or tokens, the response is blocked before it reaches the client.
 
-Allowed messages pass through byte-for-byte unchanged. Blocked messages receive a JSON-RPC error response with code `-32001` and a `[Crust]`-prefixed message explaining the block.
+Allowed messages pass through byte-for-byte unchanged. Blocked messages receive a JSON-RPC error response with code `-32001` and a `[Crust]`-prefixed message explaining the block reason and a "Do not retry" directive.
 
 ## Prerequisites
 
