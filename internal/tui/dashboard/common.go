@@ -80,13 +80,14 @@ func FetchSessionEvents(mgmtClient *http.Client, apiBase string, sessionID strin
 
 // StatusData holds all data for the dashboard display.
 type StatusData struct {
-	Running   bool          `json:"running"`
-	PID       int           `json:"pid"`
-	Healthy   bool          `json:"healthy"`
-	LogFile   string        `json:"log_file"`
-	RuleCount int           `json:"rule_count"`
-	Enabled   bool          `json:"enabled"`
-	Stats     SecurityStats `json:"stats"`
+	Running         bool          `json:"running"`
+	PID             int           `json:"pid"`
+	Healthy         bool          `json:"healthy"`
+	LogFile         string        `json:"log_file"`
+	RuleCount       int           `json:"rule_count"`
+	LockedRuleCount int           `json:"locked_rule_count"`
+	Enabled         bool          `json:"enabled"`
+	Stats           SecurityStats `json:"stats"`
 }
 
 // SecurityStats mirrors API response data for security metrics.
@@ -119,12 +120,14 @@ func FetchStatus(mgmtClient *http.Client, apiBase string, proxyBaseURL string, p
 	if resp, err := mgmtClient.Get(apiBase + "/api/security/status"); err == nil && resp != nil { //nolint:noctx
 		defer resp.Body.Close()
 		var result struct {
-			Enabled    bool `json:"enabled"`
-			RulesCount int  `json:"rules_count"`
+			Enabled          bool `json:"enabled"`
+			RulesCount       int  `json:"rules_count"`
+			LockedRulesCount int  `json:"locked_rules_count"`
 		}
 		if json.NewDecoder(resp.Body).Decode(&result) == nil {
 			data.Enabled = result.Enabled
 			data.RuleCount = result.RulesCount
+			data.LockedRuleCount = result.LockedRulesCount
 		}
 	}
 
@@ -155,7 +158,11 @@ func RenderPlain(data StatusData) string {
 		} else {
 			sb.WriteString("[crust] Security: disabled\n")
 		}
-		fmt.Fprintf(&sb, "[crust] Rules:    %d loaded\n", data.RuleCount)
+		if data.LockedRuleCount > 0 {
+			fmt.Fprintf(&sb, "[crust] Rules:    %d loaded (%d locked)\n", data.RuleCount, data.LockedRuleCount)
+		} else {
+			fmt.Fprintf(&sb, "[crust] Rules:    %d loaded\n", data.RuleCount)
+		}
 		if data.Stats.BlockedCalls > 0 {
 			fmt.Fprintf(&sb, "[crust] Blocked:  %d tool calls\n", data.Stats.BlockedCalls)
 		}

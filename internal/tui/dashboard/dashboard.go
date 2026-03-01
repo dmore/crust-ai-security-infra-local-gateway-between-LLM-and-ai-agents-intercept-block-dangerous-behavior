@@ -348,6 +348,9 @@ func (m model) renderOverview() string {
 	// Info section
 	pidStr := fmt.Sprintf("  %s  %d", tui.Faint("PID"), d.PID)
 	rulesStr := fmt.Sprintf("  %s  %d loaded", tui.Faint("Rules"), d.RuleCount)
+	if d.LockedRuleCount > 0 {
+		rulesStr = fmt.Sprintf("  %s  %d loaded (%d locked)", tui.Faint("Rules"), d.RuleCount, d.LockedRuleCount)
+	}
 	healthStr := fmt.Sprintf("  %s  %s healthy", tui.Faint("Health"), tui.StyleSuccess.Render(tui.IconCheck))
 	if !d.Healthy {
 		healthStr = fmt.Sprintf("  %s  %s unhealthy", tui.Faint("Health"), tui.StyleError.Render(tui.IconCross))
@@ -587,7 +590,11 @@ func RenderStatic(data StatusData) string {
 		if data.Healthy {
 			fmt.Fprintf(&sb, "  %s  %s healthy\n", tui.Faint("Health"), tui.StyleSuccess.Render(tui.IconCheck))
 		}
-		fmt.Fprintf(&sb, "  %s  %d loaded\n", tui.Faint("Rules"), data.RuleCount)
+		if data.LockedRuleCount > 0 {
+			fmt.Fprintf(&sb, "  %s  %d loaded (%d locked)\n", tui.Faint("Rules"), data.RuleCount, data.LockedRuleCount)
+		} else {
+			fmt.Fprintf(&sb, "  %s  %d loaded\n", tui.Faint("Rules"), data.RuleCount)
+		}
 
 		if data.Stats.BlockedCalls > 0 {
 			fmt.Fprintf(&sb, "  %s  %s blocked\n",

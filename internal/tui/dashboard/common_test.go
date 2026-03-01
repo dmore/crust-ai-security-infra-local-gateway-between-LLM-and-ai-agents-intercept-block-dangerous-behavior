@@ -149,10 +149,10 @@ func TestRenderPlain(t *testing.T) {
 			"running with stats",
 			StatusData{
 				Running: true, PID: 1234, Healthy: true, Enabled: true,
-				RuleCount: 14, LogFile: "/tmp/crust.log",
+				RuleCount: 17, LogFile: "/tmp/crust.log",
 				Stats: SecurityStats{TotalToolCalls: 100, BlockedCalls: 10, AllowedCalls: 90},
 			},
-			[]string{"PID 1234", "healthy", "enabled", "14 loaded", "10 tool calls", "/tmp/crust.log"},
+			[]string{"PID 1234", "healthy", "enabled", "17 loaded", "10 tool calls", "/tmp/crust.log"},
 		},
 		{
 			"not running",

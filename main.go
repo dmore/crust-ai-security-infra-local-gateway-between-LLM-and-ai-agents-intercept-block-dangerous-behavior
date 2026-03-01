@@ -160,7 +160,7 @@ func runStart(args []string) {
 	configPath := startFlags.String("config", config.DefaultConfigPath(), "Path to configuration file")
 	logLevel := startFlags.String("log-level", "", "Log level: trace, debug, info, warn, error")
 	noColor := startFlags.Bool("no-color", false, "Disable colored log output")
-	disableBuiltin := startFlags.Bool("disable-builtin", false, "Disable builtin security rules")
+	disableBuiltin := startFlags.Bool("disable-builtin", false, "Disable builtin security rules (locked rules remain active)")
 	daemonMode := startFlags.Bool("daemon-mode", false, "Internal: indicates running as daemon")
 	foreground := startFlags.Bool("foreground", false, "Run in foreground (don't daemonize); useful for containers")
 
@@ -761,7 +761,7 @@ func printUsage() {
 		{"--db-key string", "Database encryption key (optional)"},
 		{"--log-level string", "Log level: trace, debug, info, warn, error"},
 		{"--no-color", "Disable colored log output"},
-		{"--disable-builtin", "Disable builtin security rules"},
+		{"--disable-builtin", "Disable builtin security rules (locked rules remain active)"},
 		{"--proxy-port int", "Proxy server port (default from config)"},
 		{"--listen-address string", "Bind address (default 127.0.0.1, use 0.0.0.0 for Docker)"},
 		{"--foreground", "Run in foreground (don't daemonize); for Docker/containers"},
@@ -930,7 +930,7 @@ func runProxyCommand(pcfg proxyRunConfig, args []string) {
 	configPath := fs.String("config", config.DefaultConfigPath(), "Path to configuration file")
 	logLevel := fs.String("log-level", "warn", "Log level: trace, debug, info, warn, error")
 	rulesDir := fs.String("rules-dir", "", "Override rules directory")
-	disableBuiltin := fs.Bool("disable-builtin", false, "Disable builtin security rules")
+	disableBuiltin := fs.Bool("disable-builtin", false, "Disable builtin security rules (locked rules remain active)")
 	_ = fs.Parse(args)
 
 	subCmd := fs.Args()
