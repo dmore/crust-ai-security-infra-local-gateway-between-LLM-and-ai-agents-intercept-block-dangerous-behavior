@@ -38,7 +38,7 @@ func NewDLPScanner() *DLPScanner {
 	path, err := exec.LookPath("gitleaks")
 	if err != nil {
 		log.Warn("DLP Tier 2 disabled: gitleaks not found — install for full secret detection (200+ patterns)")
-		log.Warn("  brew install gitleaks  OR  go install github.com/gitleaks/gitleaks/v8@latest")
+		log.Warn("  brew install gitleaks  OR  go install github.com/zricethezav/gitleaks/v8@latest")
 		return s
 	}
 
