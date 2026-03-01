@@ -43,7 +43,31 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.13'
+
+      - name: Build
+        run: go build ./...
+
+      - name: Build (notui)
+        run: go build -tags notui ./...
+
+      - name: Unit tests (with race detector)
+        run: go test -race ./... -short
+
+  # macOS and FreeBSD run only on main to reduce CI costs (macOS is 10x billing).
+  test-expensive:
+    name: Go Test (${{ matrix.os }})
+    if: github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -62,13 +86,14 @@ jobs:
 
   test-freebsd:
     name: Go Test (FreeBSD)
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: vmactions/freebsd-vm@v1
         with:
-          release: '14.2'
+          release: '15.0'
           usesh: true
           prepare: |
             pkg install -y go
