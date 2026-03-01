@@ -95,6 +95,11 @@ func (n *Normalizer) Normalize(path string) string {
 	// Convert to forward slashes early so all subsequent checks (~/,  ./, etc.) work.
 	path = pathutil.ToSlash(path)
 
+	// SECURITY: Strip NTFS Alternate Data Stream suffixes — on Windows,
+	// "file.txt::$DATA" accesses the same content as "file.txt" but bypasses
+	// glob pattern matching. Strip ":streamname" and "::$DATA" etc.
+	path = stripADS(path)
+
 	// SECURITY: Sanitize invalid UTF-8 before NFKC — invalid bytes (e.g., 0xF5)
 	// can corrupt NFKC processing of subsequent valid runes, breaking idempotency.
 	path = strings.ToValidUTF8(path, "\uFFFD")
@@ -473,4 +478,36 @@ func stripConfusables(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// stripADS removes NTFS Alternate Data Stream suffixes from path segments.
+// On Windows, "file::$DATA" and "file:streamname" access the same base file
+// or hidden streams. Stripping the ADS suffix ensures glob patterns match
+// the canonical filename. On non-Windows platforms this is a no-op since
+// paths never contain ADS syntax legitimately, but we strip unconditionally
+// for defense-in-depth (agents can send Windows-style paths from any platform).
+func stripADS(p string) string {
+	// Fast path: no colon means no ADS possible.
+	// Skip drive letter prefix (e.g., "C:/...") — the colon at index 1
+	// is a drive separator, not an ADS marker.
+	start := 0
+	if len(p) >= 2 && p[1] == ':' && pathutil.IsDriverLetter(p[0]) {
+		start = 2
+	}
+	if !strings.Contains(p[start:], ":") {
+		return p
+	}
+
+	// Process each path segment, stripping everything after the first colon.
+	parts := strings.Split(p, "/")
+	for i, part := range parts {
+		// Skip empty segments and drive letter (first segment like "C:")
+		if i == 0 && len(part) == 2 && part[1] == ':' && pathutil.IsDriverLetter(part[0]) {
+			continue
+		}
+		if before, _, ok := strings.Cut(part, ":"); ok {
+			parts[i] = before
+		}
+	}
+	return strings.Join(parts, "/")
 }

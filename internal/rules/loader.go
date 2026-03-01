@@ -99,11 +99,9 @@ func (l *Loader) LoadUser() ([]Rule, error) {
 
 	log.Trace("Loading user path-based rules from: %s", l.userDir)
 
-	// Ensure directory exists. Use plain MkdirAll here — the directory's
-	// DACL is secured by SecureMkdirAll when rules are written via the API
-	// or WriteUserRule. Re-applying PROTECTED_DACL on every load would
-	// break files written before the DACL change (Windows does not
-	// retroactively propagate new DACLs to existing children).
+	// Use plain MkdirAll here — SecureMkdirAll sets PROTECTED_DACL with
+	// NO_INHERITANCE on Windows, which breaks access to files already in the
+	// directory. SecureMkdirAll is used in WriteUserRule (the creation path).
 	if err := os.MkdirAll(l.userDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create rules directory: %w", err)
 	}

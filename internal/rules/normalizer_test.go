@@ -311,6 +311,41 @@ func TestNormalizer_NormalizeAll(t *testing.T) {
 	}
 }
 
+func TestStripADS(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		// No-op cases
+		{name: "no colon", input: "/etc/passwd", expected: "/etc/passwd"},
+		{name: "empty string", input: "", expected: ""},
+		{name: "root", input: "/", expected: "/"},
+
+		// NTFS ADS stripping
+		{name: "default data stream", input: "/Users/file.txt::$DATA", expected: "/Users/file.txt"},
+		{name: "named stream", input: "/Users/file.txt:Zone.Identifier", expected: "/Users/file.txt"},
+		{name: "nested path with ADS", input: "/home/user/.ssh/id_rsa::$DATA", expected: "/home/user/.ssh/id_rsa"},
+		{name: "multiple segments with ADS", input: "/dir:s1/file:s2", expected: "/dir/file"},
+
+		// Drive letter preservation
+		{name: "drive letter preserved", input: "C:/Users/file.txt::$DATA", expected: "C:/Users/file.txt"},
+		{name: "drive letter no ADS", input: "C:/Users/file.txt", expected: "C:/Users/file.txt"},
+		{name: "lowercase drive letter", input: "c:/foo:bar", expected: "c:/foo"},
+		{name: "drive letter only", input: "C:", expected: "C:"},
+		{name: "drive letter with just stream", input: "C:/file:stream/dir", expected: "C:/file/dir"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stripADS(tt.input)
+			if result != tt.expected {
+				t.Errorf("stripADS(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestNormalizer_EnvVarEdgeCases(t *testing.T) {
 	env := map[string]string{
 		"A":         "/a",

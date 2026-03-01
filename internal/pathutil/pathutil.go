@@ -5,8 +5,53 @@
 // re-implementations across packages. Case sensitivity is detected via direct
 // kernel syscalls (not file-creation probes) and cannot be fooled by userspace tricks.
 //
-// Supported platforms: macOS (APFS/HFS+), Windows (NTFS), Linux (ext4/btrfs/xfs/vfat/CIFS),
-// FreeBSD 15+ (UFS/ZFS).
+// # Supported Platforms and Detection Methods
+//
+//   - macOS: pathconf(path, _PC_CASE_SENSITIVE) — works on APFS (default
+//     case-insensitive) and HFS+. Returns the volume's actual setting, not a
+//     guess. Constant _PC_CASE_SENSITIVE = 11 (not exported by x/sys/unix).
+//
+//   - Windows: GetVolumeInformation — reads FILE_CASE_SENSITIVE_SEARCH from
+//     the volume flags. NTFS is case-insensitive by default. Windows 10+
+//     supports per-directory case sensitivity, but the volume-level flag
+//     reflects the default behavior.
+//
+//   - Linux: statfs(path) — compares f_type against a list of known
+//     case-insensitive filesystem magic numbers: vfat/FAT32, exFAT, CIFS,
+//     SMB, SMB2/SMB3. Standard Linux filesystems (ext4, btrfs, xfs, ZFS)
+//     are treated as case-sensitive.
+//
+//   - FreeBSD 15+: pathconf(path, _PC_CASE_INSENSITIVE) — works on UFS and
+//     ZFS (including ZFS with casesensitivity=insensitive). Constant
+//     _PC_CASE_INSENSITIVE = 70 (not exported by x/sys/unix).
+//
+//   - Other platforms: safe fallback to case-sensitive.
+//
+// # Known Limitations
+//
+//   - Linux ZFS with casesensitivity=insensitive: statfs returns the same
+//     magic number as case-sensitive ZFS. Crust treats it as case-sensitive
+//     (safe default — may cause false negatives, never allows a bypass).
+//
+//   - Linux ext4 with casefold (5.2+): same magic number as regular ext4.
+//     Same safe-default behavior as ZFS above. Very rare in practice.
+//
+//   - APFS ß/ss ligature: NFKC does not decompose ß to ss. A rule
+//     protecting "password" would not match "paßword". Low risk — no
+//     real-world sensitive paths contain ß.
+//
+//   - Detection scope: case sensitivity is detected once for $HOME at first
+//     use ([DefaultFS]). Paths on different volumes with different settings
+//     inherit $HOME's result. This avoids per-path I/O overhead. In practice,
+//     user files are almost always on the same volume as $HOME.
+//
+// # Safe Fallback Behavior
+//
+// On error or unsupported platforms, DetectFS returns CaseSensitive=true
+// (except Windows, which defaults to false). Case-sensitive is the safe
+// default: it may cause false negatives in rule matching (failing to match
+// a path that should be blocked), but it never allows a bypass (matching a
+// path that should be allowed).
 package pathutil
 
 import (
