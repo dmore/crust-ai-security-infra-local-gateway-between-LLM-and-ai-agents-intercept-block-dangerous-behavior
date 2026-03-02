@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/BakeLens/crust/internal/fileutil"
 	"github.com/BakeLens/crust/internal/logger"
 	"github.com/BakeLens/crust/internal/types"
 	"gopkg.in/yaml.v3"
@@ -293,7 +294,7 @@ func isUnknownFieldError(err error) bool {
 func Load(path string) (*Config, error) {
 	cfg := DefaultConfig()
 
-	data, err := os.ReadFile(path)
+	data, err := fileutil.ReadFileWithLock(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return cfg, nil

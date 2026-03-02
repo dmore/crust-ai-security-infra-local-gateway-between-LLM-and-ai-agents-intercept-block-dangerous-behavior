@@ -172,12 +172,8 @@ func Daemonize(args []string, extraEnvKeys []string) (int, error) {
 		"USERNAME=" + os.Getenv("USERNAME"),
 		"CRUST_DAEMON=1",
 	}
-	if apiKey := os.Getenv("LLM_API_KEY"); apiKey != "" {
-		cmd.Env = append(cmd.Env, "LLM_API_KEY="+apiKey)
-	}
-	if dbKey := os.Getenv("DB_KEY"); dbKey != "" {
-		cmd.Env = append(cmd.Env, "DB_KEY="+dbKey)
-	}
+	// SECURITY: LLM_API_KEY and DB_KEY are NOT propagated via env vars.
+	// The daemon reads secrets from OS keyring / file fallback directly.
 	// Propagate proxy environment variables (required for upstream connectivity)
 	for _, key := range []string{
 		"HTTP_PROXY", "http_proxy",
