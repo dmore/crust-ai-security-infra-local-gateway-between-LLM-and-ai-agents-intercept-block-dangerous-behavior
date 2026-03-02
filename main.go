@@ -102,6 +102,9 @@ func main() {
 		case "mcp-gateway":
 			runMcpGateway(os.Args[2:])
 			return
+		case "mcp-http":
+			runMcpHTTP(os.Args[2:])
+			return
 		case "wrap":
 			runWrap(os.Args[2:])
 			return
@@ -745,6 +748,8 @@ func printUsage() {
 	fmt.Print(tui.AlignColumns([][2]string{
 		{"crust doctor [--timeout 5s] [--report]", "Check provider endpoint connectivity"},
 		{"crust acp-wrap [flags] -- <cmd...>", "ACP stdio proxy with security rules"},
+		{"crust mcp-gateway [flags] -- <cmd...>", "MCP stdio proxy with security rules"},
+		{"crust mcp-http --upstream <url>", "MCP HTTP reverse proxy with security rules"},
 		{"crust completion [--install]", "Install shell completion (bash/zsh/fish)"},
 		{"crust uninstall", "Uninstall crust completely"},
 		{"crust help", "Show this help message"},
@@ -990,6 +995,97 @@ func runMcpGateway(args []string) {
 		usage: "mcp-gateway [flags] -- <mcp-server-command> [args...]",
 		run:   mcpgateway.Run,
 	}, args)
+}
+
+func runMcpHTTP(args []string) {
+	fs := flag.NewFlagSet("mcp-http", flag.ExitOnError)
+	upstream := fs.String("upstream", "", "Upstream MCP server URL (required)")
+	listen := fs.String("listen", "127.0.0.1:9091", "Local listen address")
+	configPath := fs.String("config", config.DefaultConfigPath(), "Path to configuration file")
+	logLevel := fs.String("log-level", "warn", "Log level: trace, debug, info, warn, error")
+	rulesDir := fs.String("rules-dir", "", "Override rules directory")
+	disableBuiltin := fs.Bool("disable-builtin", false, "Disable builtin security rules (locked rules remain active)")
+	_ = fs.Parse(args)
+
+	if *upstream == "" {
+		fmt.Fprintf(os.Stderr, "Usage: crust mcp-http --upstream <url> [flags]\n")
+		fmt.Fprintf(os.Stderr, "Error: --upstream is required\n")
+		os.Exit(1)
+	}
+
+	// Logger to stderr only
+	logger.SetColored(false)
+	if *logLevel != "" {
+		logger.SetGlobalLevelFromString(*logLevel)
+	}
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		cfg = config.DefaultConfig()
+	}
+
+	dir := *rulesDir
+	if dir == "" {
+		dir = cfg.Rules.UserDir
+	}
+	if dir == "" {
+		dir = rules.DefaultUserRulesDir()
+	}
+
+	if err := fileutil.SecureMkdirAll(dir); err != nil {
+		fmt.Fprintf(os.Stderr, "crust mcp-http: failed to create rules dir: %v\n", err)
+		os.Exit(1)
+	}
+
+	engine, err := rules.NewEngine(rules.EngineConfig{
+		UserRulesDir:   dir,
+		DisableBuiltin: *disableBuiltin || cfg.Rules.DisableBuiltin,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "crust mcp-http: failed to init rules: %v\n", err)
+		os.Exit(1)
+	}
+
+	gw, err := mcpgateway.NewHTTPGateway(*upstream, engine)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "crust mcp-http: %v\n", err)
+		os.Exit(1)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+	mux.Handle("/", gw)
+
+	srv := &http.Server{
+		Addr:              *listen,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	mcpLog := logger.New("mcp-http")
+	mcpLog.Info("Starting MCP HTTP gateway: listen=%s upstream=%s rules=%d",
+		*listen, *upstream, engine.RuleCount())
+
+	// Graceful shutdown on SIGINT/SIGTERM
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		<-ctx.Done()
+		mcpLog.Info("Shutting down MCP HTTP gateway...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		//nolint:errcheck // best-effort shutdown
+		srv.Shutdown(shutdownCtx)
+	}()
+
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		fmt.Fprintf(os.Stderr, "crust mcp-http: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func runWrap(args []string) {

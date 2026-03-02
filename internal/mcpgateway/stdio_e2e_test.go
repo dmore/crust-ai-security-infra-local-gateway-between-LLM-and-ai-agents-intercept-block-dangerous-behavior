@@ -26,53 +26,9 @@ func skipE2E(t *testing.T) {
 	}
 }
 
-// setupTestDir creates a temp directory with test files for the filesystem server.
-// It resolves symlinks so paths match on macOS (/var → /private/var).
-func setupTestDir(t *testing.T) string {
-	t.Helper()
-	raw := t.TempDir()
-	dir, err := filepath.EvalSymlinks(raw)
-	if err != nil {
-		t.Fatalf("failed to resolve symlinks for %s: %v", raw, err)
-	}
-
-	// Safe files
-	os.WriteFile(filepath.Join(dir, "safe.txt"), []byte("hello world"), 0o644)
-	os.MkdirAll(filepath.Join(dir, "subdir"), 0o755)
-	os.WriteFile(filepath.Join(dir, "subdir", "code.go"), []byte("package main"), 0o644)
-
-	// Sensitive files (should be blocked by Crust path rules)
-	os.WriteFile(filepath.Join(dir, ".env"), []byte("SECRET_KEY=sk-1234"), 0o644)
-	os.MkdirAll(filepath.Join(dir, ".ssh"), 0o700)
-	os.WriteFile(filepath.Join(dir, ".ssh", "id_rsa"), []byte("fake-private-key"), 0o600)
-
-	// Files with embedded secrets (should be blocked by response DLP)
-	// These files have innocent names but contain real API key patterns.
-	os.WriteFile(filepath.Join(dir, "config.txt"),
-		[]byte("# App config\nAWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\nREGION=us-east-1"), 0o644)
-	os.WriteFile(filepath.Join(dir, "tokens.txt"),
-		[]byte("github_token=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklm\n"), 0o644)
-	os.WriteFile(filepath.Join(dir, "notes.txt"),
-		[]byte("TODO: refactor auth module\nno secrets here"), 0o644)
-
-	return dir
-}
-
-// e2eResponse represents a parsed JSON-RPC response from the proxy output.
-type e2eResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Method  string          `json:"method,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	} `json:"error,omitempty"`
-}
-
 // runMCPE2E runs the MCP proxy against the real filesystem server and returns
 // all JSON-RPC responses received by the client.
-func runMCPE2E(t *testing.T, dir string, messages []string) []e2eResponse {
+func runMCPE2E(t *testing.T, dir string, messages []string) []testResponse {
 	t.Helper()
 	// Use dir as $HOME so that $HOME-based security rules (SSH keys, etc.)
 	// match files inside the test directory.
@@ -95,48 +51,10 @@ func runMCPE2E(t *testing.T, dir string, messages []string) []e2eResponse {
 
 	select {
 	case <-done:
-		return parseE2EResponses(t, stdout.String())
+		return parseResponses(t, stdout.String())
 	case <-time.After(30 * time.Second):
 		t.Fatal("E2E test timed out (30s)")
 		return nil
-	}
-}
-
-// parseE2EResponses parses JSONL output into e2eResponse structs.
-func parseE2EResponses(t *testing.T, output string) []e2eResponse {
-	t.Helper()
-	var responses []e2eResponse
-	for line := range strings.SplitSeq(output, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var resp e2eResponse
-		if err := json.Unmarshal([]byte(line), &resp); err != nil {
-			t.Logf("skipping non-JSON line: %s", line)
-			continue
-		}
-		responses = append(responses, resp)
-	}
-	return responses
-}
-
-// findByID finds a response with the given integer ID.
-func findByID(responses []e2eResponse, id int) *e2eResponse {
-	target := fmt.Sprintf("%d", id)
-	for i := range responses {
-		if string(responses[i].ID) == target {
-			return &responses[i]
-		}
-	}
-	return nil
-}
-
-// initMessages returns the standard MCP handshake messages (initialize + initialized notification).
-func initMessages() []string {
-	return []string{
-		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"crust-e2e","version":"1.0.0"}}}`,
-		`{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}`,
 	}
 }
 

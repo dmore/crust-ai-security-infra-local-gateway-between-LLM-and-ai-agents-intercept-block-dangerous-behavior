@@ -110,7 +110,7 @@ jobs:
             go test ./... -short
 
   e2e:
-    name: E2E Tests (MCP)
+    name: E2E Tests (MCP stdio + HTTP)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -123,11 +123,16 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Pre-install MCP filesystem server
-        run: npm install -g @modelcontextprotocol/server-filesystem
+      - name: Pre-install MCP servers
+        run: |
+          npm install -g @modelcontextprotocol/server-filesystem
+          npm install -g @modelcontextprotocol/server-everything
 
-      - name: E2E tests
-        run: go test ./internal/mcpgateway/... -v -run E2E -timeout 120s
+      - name: Install gitleaks (DLP Tier 2)
+        run: go install github.com/zricethezav/gitleaks/v8@latest
+
+      - name: E2E tests (stdio + HTTP)
+        run: go test ./internal/mcpgateway/... -v -run E2E -timeout 180s
 
   docker-test:
     name: Docker

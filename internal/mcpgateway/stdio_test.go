@@ -1,33 +1,12 @@
 package mcpgateway
 
 import (
-	"bytes"
-	"strings"
 	"testing"
-
-	"github.com/BakeLens/crust/internal/jsonrpc"
-	"github.com/BakeLens/crust/internal/logger"
-	"github.com/BakeLens/crust/internal/testutil"
 )
-
-var testLog = logger.New("mcp-test")
-
-// runPipe runs PipeInspect with MCPMethodToToolCall and returns what was
-// forwarded and what error responses were generated.
-func runPipe(t *testing.T, input string) (fwd, errOut string) {
-	t.Helper()
-	engine := testutil.NewEngine(t)
-	var fwdBuf, errBuf bytes.Buffer
-	fwdWriter := jsonrpc.NewLockedWriter(&fwdBuf)
-	errWriter := jsonrpc.NewLockedWriter(&errBuf)
-	jsonrpc.PipeInspect(testLog, engine, strings.NewReader(input),
-		fwdWriter, errWriter, MCPMethodToToolCall, "MCP", "Client->Server")
-	return fwdBuf.String(), errBuf.String()
-}
 
 // --- Edge-case blocking (malformed inputs, resources/read) ---
 // Path-based blocking, passthrough, batch handling, error shapes, and DLP are
-// covered by jsonrpc/proxy_test.go (unit) and e2e_test.go (real MCP server).
+// covered by jsonrpc/proxy_test.go (unit) and stdio_e2e_test.go (real MCP server).
 // These tests verify MCP-specific converter edge cases in the full pipeline.
 
 func TestPipeClientToServer_BlocksEdgeCases(t *testing.T) {
