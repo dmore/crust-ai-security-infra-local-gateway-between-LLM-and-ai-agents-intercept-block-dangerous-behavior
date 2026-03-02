@@ -77,8 +77,8 @@ func (g *HTTPGateway) handlePost(w http.ResponseWriter, r *http.Request) {
 
 	var msg jsonrpc.Message
 	if err := json.Unmarshal(body, &msg); err != nil {
-		// Can't parse as JSON-RPC — proxy as-is (defensive)
-		g.proxyPostRaw(w, r, body)
+		// Can't parse as JSON-RPC — reject to prevent inspection bypass
+		http.Error(w, "Invalid JSON-RPC request", http.StatusBadRequest)
 		return
 	}
 
@@ -213,28 +213,6 @@ func (g *HTTPGateway) handleDelete(w http.ResponseWriter, r *http.Request) {
 	if sid := r.Header.Get(sessionHeader); sid != "" {
 		g.sessions.Remove(sid)
 	}
-
-	g.copyResponseHeaders(w, upResp)
-	w.WriteHeader(upResp.StatusCode)
-	_, _ = io.Copy(w, upResp.Body)
-}
-
-// proxyPostRaw forwards an unparseable request body to upstream.
-func (g *HTTPGateway) proxyPostRaw(w http.ResponseWriter, r *http.Request, body []byte) {
-	upReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, g.upstream.String(), strings.NewReader(string(body)))
-	if err != nil {
-		http.Error(w, "Failed to create upstream request", http.StatusInternalServerError)
-		return
-	}
-	upReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
-	g.copyMCPHeaders(r, upReq)
-
-	upResp, err := g.client.Do(upReq) //nolint:gosec // upstream URL is user-configured, not tainted
-	if err != nil || upResp == nil {
-		http.Error(w, "Upstream request failed", http.StatusBadGateway)
-		return
-	}
-	defer upResp.Body.Close()
 
 	g.copyResponseHeaders(w, upResp)
 	w.WriteHeader(upResp.StatusCode)

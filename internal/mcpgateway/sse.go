@@ -23,6 +23,7 @@ func ReadSSEEvents(ctx context.Context, r io.Reader) <-chan SSEEvent {
 	go func() {
 		defer close(ch)
 		scanner := bufio.NewScanner(r)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) // up to 1MB per SSE line
 		var event SSEEvent
 		var dataLines []string
 

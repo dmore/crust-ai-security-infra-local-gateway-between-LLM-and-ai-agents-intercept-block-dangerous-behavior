@@ -6,6 +6,7 @@ import (
 
 	"github.com/BakeLens/crust/internal/message"
 	"github.com/BakeLens/crust/internal/rules"
+	"github.com/BakeLens/crust/internal/selfprotect"
 	"github.com/BakeLens/crust/internal/telemetry"
 	"github.com/BakeLens/crust/internal/types"
 )
@@ -317,10 +318,16 @@ func (i *Interceptor) evaluateToolCall(
 	model string,
 	useReplaceMode bool,
 ) (rules.MatchResult, bool) {
-	matchResult := i.engine.Evaluate(rules.ToolCall{
-		Name:      tc.Name,
-		Arguments: tc.Arguments,
-	})
+	// Self-protection pre-check: block management API/socket access before rule engine.
+	var matchResult rules.MatchResult
+	if m := selfprotect.Check(string(tc.Arguments)); m != nil {
+		matchResult = *m
+	} else {
+		matchResult = i.engine.Evaluate(rules.ToolCall{
+			Name:      tc.Name,
+			Arguments: tc.Arguments,
+		})
+	}
 
 	isBlocked := matchResult.Matched && matchResult.Action == rules.ActionBlock
 	ruleName := ""

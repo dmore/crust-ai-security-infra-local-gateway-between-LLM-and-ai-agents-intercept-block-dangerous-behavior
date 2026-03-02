@@ -25,10 +25,10 @@ import (
 	"github.com/BakeLens/crust/internal/config"
 	"github.com/BakeLens/crust/internal/daemon"
 	"github.com/BakeLens/crust/internal/fileutil"
+	"github.com/BakeLens/crust/internal/httpproxy"
 	"github.com/BakeLens/crust/internal/logger"
 	"github.com/BakeLens/crust/internal/mcpdiscover"
 	"github.com/BakeLens/crust/internal/mcpgateway"
-	"github.com/BakeLens/crust/internal/proxy"
 	"github.com/BakeLens/crust/internal/rules"
 	"github.com/BakeLens/crust/internal/security"
 	"github.com/BakeLens/crust/internal/telemetry"
@@ -520,7 +520,7 @@ func runDaemon(cfg *config.Config, logLevel string, disableBuiltin bool, endpoin
 	}
 
 	// Create proxy
-	proxyHandler, err := proxy.NewProxy(cfg.Upstream.URL, cfg.Upstream.APIKey, time.Duration(cfg.Upstream.Timeout)*time.Second, cfg.Upstream.Providers, autoMode)
+	proxyHandler, err := httpproxy.NewProxy(cfg.Upstream.URL, cfg.Upstream.APIKey, time.Duration(cfg.Upstream.Timeout)*time.Second, cfg.Upstream.Providers, autoMode)
 	if err != nil {
 		log.Error("Failed to create proxy: %v", err)
 		os.Exit(1)
@@ -1363,7 +1363,7 @@ func runDoctor(args []string) {
 	fmt.Println(tui.Separator("Provider Diagnostics"))
 	fmt.Println()
 
-	results := proxy.RunDoctor(proxy.DoctorOptions{
+	results := httpproxy.RunDoctor(httpproxy.DoctorOptions{
 		Timeout:       *timeout,
 		Retries:       *retries,
 		UserProviders: cfg.Upstream.Providers,
@@ -1374,9 +1374,9 @@ func runDoctor(args []string) {
 	for _, r := range results {
 		printDoctorResult(r)
 		switch r.Status {
-		case proxy.StatusOK:
+		case httpproxy.StatusOK:
 			okCount++
-		case proxy.StatusAuthError:
+		case httpproxy.StatusAuthError:
 			warnCount++
 		default:
 			errCount++
@@ -1401,7 +1401,7 @@ func runDoctor(args []string) {
 }
 
 // printDoctorResult prints a single provider check result.
-func printDoctorResult(r proxy.DoctorResult) {
+func printDoctorResult(r httpproxy.DoctorResult) {
 	tag := r.Status.String()
 	latency := fmt.Sprintf("(%s)", r.Duration.Round(time.Millisecond))
 
@@ -1419,10 +1419,10 @@ func printDoctorResult(r proxy.DoctorResult) {
 	var icon string
 	var style lipgloss.Style
 	switch r.Status {
-	case proxy.StatusOK:
+	case httpproxy.StatusOK:
 		icon = tui.IconCheck
 		style = tui.StyleSuccess
-	case proxy.StatusAuthError:
+	case httpproxy.StatusAuthError:
 		icon = tui.IconWarning
 		style = tui.StyleWarning
 	default:
@@ -1444,7 +1444,7 @@ func printDoctorResult(r proxy.DoctorResult) {
 // buildDoctorReport generates a sanitized markdown report for GitHub issues.
 // Privacy: user-defined provider URLs are masked to host-only; API keys are
 // never included (DoctorResult doesn't carry them).
-func buildDoctorReport(results []proxy.DoctorResult, okCount, warnCount, errCount int) string {
+func buildDoctorReport(results []httpproxy.DoctorResult, okCount, warnCount, errCount int) string {
 	var sb strings.Builder
 	sb.WriteString("## Crust Doctor Report\n\n")
 	sb.WriteString("```\n")

@@ -1,5 +1,5 @@
 // Package proxy provides SSE parsing for LLM streaming responses.
-package proxy
+package httpproxy
 
 import (
 	"bytes"

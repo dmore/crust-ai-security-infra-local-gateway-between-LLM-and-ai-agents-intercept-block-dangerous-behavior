@@ -78,12 +78,13 @@ func patchConfigFile(path string, client clientDef, crustBin string) (int, error
 	for name, raw := range servers {
 		var def map[string]any
 		if err := json.Unmarshal(raw, &def); err != nil || def == nil {
+			fmt.Fprintf(os.Stderr, "crust: mcp discover: skip %q: invalid JSON: %v\n", name, err)
 			continue
 		}
 
 		cmd, ok := def["command"].(string)
 		if !ok || cmd == "" {
-			continue // HTTP or invalid — skip
+			continue // HTTP/SSE transport — no command to wrap
 		}
 
 		args := extractArgs(def)
@@ -103,6 +104,7 @@ func patchConfigFile(path string, client clientDef, crustBin string) (int, error
 
 		newRaw, err := json.Marshal(def)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "crust: mcp discover: skip %q: marshal error: %v\n", name, err)
 			continue
 		}
 		servers[name] = json.RawMessage(newRaw)
@@ -124,8 +126,8 @@ func patchConfigFile(path string, client clientDef, crustBin string) (int, error
 		}
 	}
 
-	// Re-marshal servers back into root.
-	newServers, err := json.MarshalIndent(servers, "  ", "  ")
+	// Re-marshal servers back into root (compact; outer MarshalIndent handles formatting).
+	newServers, err := json.Marshal(servers)
 	if err != nil {
 		return 0, err
 	}

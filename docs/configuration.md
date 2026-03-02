@@ -33,7 +33,7 @@ See [`config.yaml`](../config.yaml) in the repo root for the full list of fields
 
 ## Auto Mode
 
-In auto mode (`--auto`), the gateway resolves providers from the model name using a [built-in registry](../internal/proxy/providers.go) (Anthropic, OpenAI, DeepSeek, Gemini, Mistral, Groq, and more). Clients bring their own API keys unless a per-provider `api_key` is configured. User-defined providers take priority.
+In auto mode (`--auto`), the gateway resolves providers from the model name using a [built-in registry](../internal/httpproxy/providers.go) (Anthropic, OpenAI, DeepSeek, Gemini, Mistral, Groq, and more). Clients bring their own API keys unless a per-provider `api_key` is configured. User-defined providers take priority.
 
 ## Per-Provider API Keys
 

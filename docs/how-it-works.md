@@ -11,24 +11,24 @@ Agent Request ──▶ [Layer 0: History Scan] ──▶ LLM ──▶ [Layer 1
                    (14-30μs)                             (14-30μs)
                "Bad agent detected"                   "Action blocked"
 
-Layer 1 Rule Evaluation (17 steps):
+Pre-filter: Self-protection (blocks management API/socket access)
+
+Layer 1 Rule Evaluation (15 steps):
   1.  Sanitize tool name → strip null bytes, control chars
   2.  Extract paths, commands, content from tool arguments
   3.  Normalize Unicode → NFKC, strip invisible chars and confusables
   4.  Block null bytes in write content
   5.  Detect encoding obfuscation (base64, hex)
   6.  Block evasive commands (fork bombs, unparseable shell)
-  7.  Self-protection → block management API access (hardcoded)
-  8.  Block management API via Unix socket / named pipe
-  9.  DLP Secret Detection → API keys/tokens + crypto keys (BIP39, xprv, WIF)
-  10. Filter bare shell globs (not real paths)
-  11. Normalize paths → expand ~, env vars
-  12. Expand globs against real filesystem
-  13. Resolve symlinks → match both original and resolved
-  14. Block /proc access (hardcoded, after symlink resolution)
-  15. Block crypto wallet access (hardcoded, after symlink resolution)
-  16. Operation-based rules → path/command/host matching
-  17. Fallback rules (content-only) → raw JSON matching for ANY tool
+  7.  DLP Secret Detection → API keys/tokens + crypto keys (BIP39, xprv, WIF)
+  8.  Filter bare shell globs (not real paths)
+  9.  Normalize paths → expand ~, env vars
+  10. Expand globs against real filesystem
+  11. Resolve symlinks → match both original and resolved
+  12. Block /proc access (hardcoded, after symlink resolution)
+  13. Block crypto wallet access (hardcoded, after symlink resolution)
+  14. Operation-based rules → path/command/host matching
+  15. Fallback rules (content-only) → raw JSON matching for ANY tool
 ```
 
 **Layer 0 (Request History):** Scans tool_calls in conversation history. Catches "bad agent" patterns where malicious actions already occurred in past turns.

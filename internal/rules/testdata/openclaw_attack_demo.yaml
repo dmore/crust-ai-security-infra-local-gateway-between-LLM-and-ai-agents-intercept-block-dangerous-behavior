@@ -54,12 +54,12 @@ scenarios:
     expect: BLOCKED
     description: "Wrapper chain hiding SSH key read"
 
-  # 8. Hex IP bypass — 0x7f000001 resolved to 127.0.0.1
+  # 8. Hex IP bypass — handled by selfprotect pre-filter (not engine)
   - tool: exec
     args:
       command: "curl http://0x7f000001:9100/crust/api/rules"
-    expect: BLOCKED
-    description: "Hex IP bypass targeting Crust management API"
+    expect: SELFPROTECT
+    description: "Hex IP bypass — handled by selfprotect pre-filter"
 
   # 9. file:// URL bypass — local file read via WebFetch
   - tool: web_fetch

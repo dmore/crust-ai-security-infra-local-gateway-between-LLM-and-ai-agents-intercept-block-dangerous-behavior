@@ -178,9 +178,14 @@ func TestOpenClawAttackDemo(t *testing.T) {
 
 	t.Logf("=== OpenClaw Attack Demo: %d evasion techniques ===\n", len(scenarios))
 
-	var passed, failed int
+	var passed, failed, skipped int
 	for i, scenario := range scenarios {
 		t.Run(fmt.Sprintf("%d_%s", i+1, scenario.Description), func(t *testing.T) {
+			if scenario.Expect != "" && scenario.Expect != "BLOCKED" {
+				skipped++
+				t.Skipf("SKIP: %s — not an engine-level block", scenario.Description)
+				return
+			}
 			call := scenarioToToolCall(scenario)
 			result := engine.Evaluate(call)
 			if result.Matched {
@@ -193,7 +198,7 @@ func TestOpenClawAttackDemo(t *testing.T) {
 		})
 	}
 
-	t.Logf("\n%d/%d attacks blocked. %d missed.", passed, len(scenarios), failed)
+	t.Logf("\n%d/%d attacks blocked. %d missed. %d skipped.", passed, len(scenarios), failed, skipped)
 }
 
 // TestRuleHitCoverage checks which rules are hit by malicious scenarios

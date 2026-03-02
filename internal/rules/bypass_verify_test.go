@@ -36,8 +36,8 @@ func TestBypassVerification(t *testing.T) {
 		// 2. LD_PRELOAD — underlying command still reads SSH key
 		{"ld-preload-ssh", "Bash", map[string]any{"command": "LD_PRELOAD=/tmp/evil.so cat ~/.ssh/id_rsa"}, true, "SSH key read with LD_PRELOAD"},
 
-		// 3. Bare 0 IP — selfProtectAPIRegex
-		{"bare-zero-crust", "Bash", map[string]any{"command": "curl http://0:9090/api/crust/rules"}, true, "bare 0 = 0.0.0.0"},
+		// 3. Bare 0 IP — handled by selfprotect pre-filter, not engine
+		{"bare-zero-crust", "Bash", map[string]any{"command": "curl http://0:9090/api/crust/rules"}, false, "bare 0 = 0.0.0.0 — selfprotect pre-filter"},
 
 		// 4. Cloud metadata — blocked by block-ssrf-metadata
 		{"cloud-metadata-aws", "Bash", map[string]any{"command": "curl http://169.254.169.254/latest/meta-data/"}, true, "block-ssrf-metadata blocks AWS IMDS"},
@@ -57,8 +57,8 @@ func TestBypassVerification(t *testing.T) {
 		// 8. Combining mark on .env path
 		{"combining-mark-env", "Read", map[string]any{"file_path": "/home/user/.env\u0308"}, false, "diaeresis on .env last char"},
 
-		// 9. URL backslash confusion
-		{"url-backslash", "Bash", map[string]any{"command": `curl "http://safe.com\@127.0.0.1:9090/api/crust/rules"`}, true, "backslash before @"},
+		// 9. URL backslash confusion — handled by selfprotect pre-filter, not engine
+		{"url-backslash", "Bash", map[string]any{"command": `curl "http://safe.com\@127.0.0.1:9090/api/crust/rules"`}, false, "backslash before @ — selfprotect pre-filter"},
 
 		// === False positive fixes (must NOT block) ===
 
@@ -124,8 +124,8 @@ func TestBypassVerification(t *testing.T) {
 		// 7. Wrapper chain (sudo env sh) → protect-ssh-keys
 		{"promo-7-wrapper-chain", "Bash", map[string]any{"command": "sudo env F=~/.ssh/id_rsa sh -c 'cat $F'"}, true, "protect-ssh-keys", "sudo env wrapper chain reads SSH key"},
 
-		// 8. Hex IP bypass (0x7f000001) → protect-crust-api
-		{"promo-8-hex-ip", "Bash", map[string]any{"command": "curl http://0x7f000001:9100/api/crust/rules"}, true, "builtin:protect-crust-api", "hex IP bypasses host filter"},
+		// 8. Hex IP bypass (0x7f000001) → selfprotect pre-filter (not engine)
+		{"promo-8-hex-ip", "Bash", map[string]any{"command": "curl http://0x7f000001:9100/api/crust/rules"}, false, "", "hex IP — handled by selfprotect pre-filter, not engine"},
 
 		// 9. file:// URL bypass (AWS creds) → protect-cloud-credentials
 		{"promo-9-file-url", "WebFetch", map[string]any{"url": "file:///home/user/.aws/credentials"}, true, "protect-cloud-credentials", "file:// URL reads AWS creds"},

@@ -850,28 +850,9 @@ func FuzzJSONUnicodeEscapeBypass(f *testing.F) {
 			Arguments: json.RawMessage(argsJSON),
 		})
 
-		// INVARIANT: After json round-trip, if the decoded content matches the
-		// pattern "loopback[:/]...crust", it MUST be blocked.
-		// This mirrors the actual regex: (localhost|127.0.0.1|...)[:/].*crust
-		decoded, err := json.Marshal(parsed)
-		if err != nil {
-			return
-		}
-		decodedStr := string(decoded)
-
-		loopbacks := []string{"localhost", "127.0.0.1", "[::1]", "::1", "0.0.0.0", "0x7f000001", "2130706433"}
-		for _, lb := range loopbacks {
-			_, after, ok := strings.Cut(decodedStr, lb)
-			if !ok {
-				continue
-			}
-
-			// Must be followed by : or / then eventually "crust"
-			if len(after) > 0 && (after[0] == ':' || after[0] == '/') &&
-				strings.Contains(after, "crust") && !result.Matched {
-				t.Errorf("BYPASS: JSON unicode escape bypassed API protection: raw=%s decoded=%s", argsJSON, decodedStr)
-			}
-		}
+		// NOTE: Self-protection (loopback+crust) is handled by the
+		// selfprotect pre-filter, not the engine. See selfprotect_test.go.
+		_ = result
 	})
 }
 
@@ -1299,27 +1280,9 @@ func FuzzLoopbackRegex(f *testing.F) {
 			Arguments: json.RawMessage(argsJSON),
 		})
 
-		// INVARIANT: If decoded JSON contains both a known loopback AND
-		// "crust", the engine must block.
-		decoded, err := json.Marshal(parsed)
-		if err != nil {
-			return
-		}
-		decodedStr := strings.ToLower(string(decoded))
-
-		// Check pattern: loopback[:/]...crust (mirrors actual regex)
-		loopbacks := []string{"localhost", "127.0.0.1", "127.0.1", "127.1", "[::1]", "::1", "0.0.0.0", "0x7f000001", "2130706433"}
-		for _, lb := range loopbacks {
-			_, after, ok := strings.Cut(decodedStr, lb)
-			if !ok {
-				continue
-			}
-
-			if len(after) > 0 && (after[0] == ':' || after[0] == '/') &&
-				strings.Contains(after, "crust") && !result.Matched {
-				t.Errorf("BYPASS: loopback+crust not blocked: tool=%s args=%s", toolName, argsJSON)
-			}
-		}
+		// NOTE: Self-protection (loopback+crust) is handled by the
+		// selfprotect pre-filter, not the engine. See selfprotect_test.go.
+		_ = result
 	})
 }
 
@@ -1363,29 +1326,9 @@ func FuzzContentConfusableBypass(f *testing.F) {
 			Arguments: json.RawMessage(argsJSON),
 		})
 
-		// INVARIANT: After JSON round-trip + NFKC + confusable normalization,
-		// if the content would match the loopback+crust pattern, it
-		// MUST be blocked. This catches confusable-based bypasses.
-		decoded, err := json.Marshal(parsed)
-		if err != nil {
-			return
-		}
-		// Apply same normalization chain as would be needed
-		decodedStr := strings.ToLower(NormalizeUnicode(string(decoded)))
-
-		loopbacks := []string{"localhost", "127.0.0.1", "[::1]", "::1", "0.0.0.0", "0x7f000001", "2130706433"}
-		for _, lb := range loopbacks {
-			_, after, ok := strings.Cut(decodedStr, lb)
-			if !ok {
-				continue
-			}
-
-			if len(after) > 0 && (after[0] == ':' || after[0] == '/') &&
-				strings.Contains(after, "crust") && !result.Matched {
-				t.Errorf("CONFUSABLE BYPASS: normalized content matches but engine didn't block: tool=%s args=%s normalized=%s",
-					toolName, argsJSON, decodedStr)
-			}
-		}
+		// NOTE: Self-protection (loopback+crust confusable) is handled by
+		// the selfprotect pre-filter, not the engine. See selfprotect_test.go.
+		_ = result
 	})
 }
 
@@ -1729,26 +1672,8 @@ func FuzzWebSearchURLBypass(f *testing.F) {
 			}
 		}
 
-		// ---------------------------------------------------------------
-		// INDEPENDENT ORACLE 2: loopback + crust detection
-		// Re-marshals JSON (same as engine does) then checks for the
-		// selfProtectAPIRegex pattern directly. No Extractor involved.
-		// ---------------------------------------------------------------
-		var decoded map[string]any
-		if json.Unmarshal(argsJSON, &decoded) == nil {
-			if remarshaled, mErr := json.Marshal(decoded); mErr == nil {
-				reStr := strings.ToLower(NormalizeUnicode(string(remarshaled)))
-				loopbacks := []string{"localhost", "127.0.0.1", "127.0.1", "127.1", "::1", "0.0.0.0"}
-				for _, lb := range loopbacks {
-					_, after, ok := strings.Cut(reStr, lb)
-					if ok && len(after) > 0 && (after[0] == ':' || after[0] == '/') &&
-						strings.Contains(after, "crust") && !result.Matched {
-						t.Errorf("LOOPBACK BYPASS: tool=%s url=%q re-marshaled contains %s[:/]...crust but not blocked",
-							toolName, rawURL, lb)
-					}
-				}
-			}
-		}
+		// NOTE: Oracle 2 (loopback+crust) moved to selfprotect pre-filter.
+		// See selfprotect_test.go for coverage.
 
 		// ---------------------------------------------------------------
 		// INDEPENDENT ORACLE 3: IP normalization idempotency
@@ -1963,21 +1888,8 @@ func FuzzMCPToolBypass(f *testing.F) {
 			}
 		}
 
-		// ---------------------------------------------------------------
-		// INDEPENDENT ORACLE 3: Loopback + crust in re-marshaled JSON
-		// ---------------------------------------------------------------
-		if remarshaled, mErr := json.Marshal(args); mErr == nil {
-			reStr := strings.ToLower(NormalizeUnicode(string(remarshaled)))
-			loopbacks := []string{"localhost", "127.0.0.1", "::1", "0.0.0.0"}
-			for _, lb := range loopbacks {
-				_, after, ok := strings.Cut(reStr, lb)
-				if ok && len(after) > 0 && (after[0] == ':' || after[0] == '/') &&
-					strings.Contains(after, "crust") && !result.Matched {
-					t.Errorf("MCP LOOPBACK BYPASS: tool=%s loopback=%s not blocked: %s",
-						toolName, lb, reStr)
-				}
-			}
-		}
+		// NOTE: Oracle 3 (loopback+crust) moved to selfprotect pre-filter.
+		// See selfprotect_test.go for coverage.
 
 	})
 }

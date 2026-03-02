@@ -1,4 +1,4 @@
-package proxy
+package httpproxy
 
 import (
 	"bytes"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/BakeLens/crust/internal/rules"
 	"github.com/BakeLens/crust/internal/security"
+	"github.com/BakeLens/crust/internal/selfprotect"
 	"github.com/BakeLens/crust/internal/telemetry"
 	"github.com/BakeLens/crust/internal/types"
 )
@@ -97,10 +98,16 @@ func (r *SSEReader) triggerComplete() {
 
 		// Log all tool calls and check for violations
 		for _, tc := range toolCalls {
-			matchResult := engine.Evaluate(rules.ToolCall{
-				Name:      tc.Name,
-				Arguments: tc.Arguments,
-			})
+			// Self-protection pre-check: block management API/socket access before rule engine.
+			var matchResult rules.MatchResult
+			if m := selfprotect.Check(string(tc.Arguments)); m != nil {
+				matchResult = *m
+			} else {
+				matchResult = engine.Evaluate(rules.ToolCall{
+					Name:      tc.Name,
+					Arguments: tc.Arguments,
+				})
+			}
 
 			blocked := matchResult.Matched && matchResult.Action == rules.ActionBlock
 			ruleName := ""

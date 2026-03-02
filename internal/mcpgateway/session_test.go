@@ -9,6 +9,7 @@ import (
 
 func TestSessionStore_BasicOps(t *testing.T) {
 	s := NewSessionStore()
+	defer s.Close()
 
 	if s.Exists("abc") {
 		t.Error("empty store should not contain 'abc'")
@@ -27,6 +28,7 @@ func TestSessionStore_BasicOps(t *testing.T) {
 
 func TestSessionStore_MaxIDLength(t *testing.T) {
 	s := NewSessionStore()
+	defer s.Close()
 	longID := strings.Repeat("x", maxSessionIDLen+1)
 	s.Track(longID)
 	if s.Exists(longID) {
@@ -42,6 +44,7 @@ func TestSessionStore_MaxIDLength(t *testing.T) {
 
 func TestSessionStore_EmptyID(t *testing.T) {
 	s := NewSessionStore()
+	defer s.Close()
 	s.Track("")
 	if s.Exists("") {
 		t.Error("should reject empty IDs")
@@ -50,6 +53,7 @@ func TestSessionStore_EmptyID(t *testing.T) {
 
 func TestSessionStore_Concurrent(t *testing.T) {
 	s := NewSessionStore()
+	defer s.Close()
 	var wg sync.WaitGroup
 	const n = 100
 
@@ -74,5 +78,34 @@ func TestSessionStore_Concurrent(t *testing.T) {
 		if !s.Exists(id) {
 			t.Errorf("expected %s to still exist", id)
 		}
+	}
+}
+
+func TestSessionStore_MaxSessions(t *testing.T) {
+	s := NewSessionStore()
+	defer s.Close()
+
+	// Fill to capacity
+	for i := range maxSessions {
+		s.Track(fmt.Sprintf("s-%d", i))
+	}
+
+	// New session should be rejected
+	s.Track("overflow")
+	if s.Exists("overflow") {
+		t.Error("should reject new sessions at capacity")
+	}
+
+	// Updating existing session should still work
+	s.Track("s-0")
+	if !s.Exists("s-0") {
+		t.Error("should allow updating existing sessions at capacity")
+	}
+
+	// After removing one, new session should be accepted
+	s.Remove("s-0")
+	s.Track("new-session")
+	if !s.Exists("new-session") {
+		t.Error("should accept new session after removal frees capacity")
 	}
 }

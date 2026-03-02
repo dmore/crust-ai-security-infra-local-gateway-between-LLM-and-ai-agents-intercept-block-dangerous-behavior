@@ -8,6 +8,7 @@ import (
 	"github.com/BakeLens/crust/internal/logger"
 	"github.com/BakeLens/crust/internal/message"
 	"github.com/BakeLens/crust/internal/rules"
+	"github.com/BakeLens/crust/internal/selfprotect"
 )
 
 // SendBlockError sends a JSON-RPC error response back through the writer.
@@ -118,7 +119,13 @@ func processMessage(log *logger.Logger, engine *rules.Engine, line []byte, msg *
 		return resultBlocked
 	}
 
-	result := engine.Evaluate(*toolCall)
+	// Self-protection pre-check: block management API/socket access before rule engine.
+	var result rules.MatchResult
+	if m := selfprotect.Check(string(toolCall.Arguments)); m != nil {
+		result = *m
+	} else {
+		result = engine.Evaluate(*toolCall)
+	}
 
 	if result.Matched && result.Action == rules.ActionBlock {
 		log.Warn("Blocked %s %s (tool=%s): rule=%s message=%s",
