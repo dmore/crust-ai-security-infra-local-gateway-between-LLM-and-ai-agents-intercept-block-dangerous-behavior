@@ -50,6 +50,8 @@ var command = &complete.Command{
 		"doctor":       {Flags: map[string]complete.Predictor{"config": predict.Files("*.yaml"), "timeout": predict.Nothing, "retries": predict.Nothing, "report": predict.Nothing}},
 		"uninstall":    {},
 		"help":         {},
+		"wrap":         {},
+		"acp-wrap":     {},
 		"mcp-gateway":  {},
 		"mcp-http": {Flags: map[string]complete.Predictor{
 			"upstream":        predict.Nothing,
@@ -58,6 +60,11 @@ var command = &complete.Command{
 			"log-level":       predict.Set{"trace", "debug", "info", "warn", "error"},
 			"rules-dir":       predict.Something,
 			"disable-builtin": predict.Nothing,
+		}},
+		"mcp-discover": {Flags: map[string]complete.Predictor{
+			"json":    predict.Nothing,
+			"patch":   predict.Nothing,
+			"restore": predict.Nothing,
 		}},
 		"completion": {Flags: map[string]complete.Predictor{"install": predict.Nothing, "uninstall": predict.Nothing}},
 	},

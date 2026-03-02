@@ -26,6 +26,7 @@ import (
 	"github.com/BakeLens/crust/internal/daemon"
 	"github.com/BakeLens/crust/internal/fileutil"
 	"github.com/BakeLens/crust/internal/logger"
+	"github.com/BakeLens/crust/internal/mcpdiscover"
 	"github.com/BakeLens/crust/internal/mcpgateway"
 	"github.com/BakeLens/crust/internal/proxy"
 	"github.com/BakeLens/crust/internal/rules"
@@ -107,6 +108,9 @@ func main() {
 			return
 		case "wrap":
 			runWrap(os.Args[2:])
+			return
+		case "mcp-discover":
+			runMCPDiscover(os.Args[2:])
 			return
 		case "uninstall":
 			runUninstall()
@@ -750,6 +754,7 @@ func printUsage() {
 		{"crust acp-wrap [flags] -- <cmd...>", "ACP stdio proxy with security rules"},
 		{"crust mcp-gateway [flags] -- <cmd...>", "MCP stdio proxy with security rules"},
 		{"crust mcp-http --upstream <url>", "MCP HTTP reverse proxy with security rules"},
+		{"crust mcp-discover [--patch] [--restore]", "Scan/patch MCP client configs"},
 		{"crust completion [--install]", "Install shell completion (bash/zsh/fish)"},
 		{"crust uninstall", "Uninstall crust completely"},
 		{"crust help", "Show this help message"},
@@ -1094,6 +1099,108 @@ func runWrap(args []string) {
 		usage: "wrap [flags] -- <command> [args...]",
 		run:   autowrap.Run,
 	}, args)
+}
+
+// runMCPDiscover handles the mcp-discover subcommand.
+func runMCPDiscover(args []string) {
+	fs := flag.NewFlagSet("mcp-discover", flag.ExitOnError)
+	jsonOut := fs.Bool("json", false, "Output as JSON")
+	patch := fs.Bool("patch", false, "Patch configs to route through crust wrap")
+	restore := fs.Bool("restore", false, "Restore configs from backups")
+	_ = fs.Parse(args)
+
+	header := tui.BrandGradient("CRUST", true) + " " + tui.BrandGradient("MCP DISCOVER", true)
+	if tui.IsPlainMode() {
+		header = "CRUST MCP DISCOVER"
+	}
+
+	if *restore {
+		mcpdiscover.RestoreAll()
+		tui.PrintSuccess("MCP configs restored from backups")
+		return
+	}
+
+	result := mcpdiscover.Discover()
+
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(result) //nolint:errcheck
+		return
+	}
+
+	fmt.Println()
+	fmt.Println(header)
+	fmt.Println()
+
+	if len(result.Servers) == 0 && len(result.Errors) == 0 {
+		tui.PrintInfo("No MCP servers found in known client configs")
+		return
+	}
+
+	// Group servers by client
+	byClient := make(map[mcpdiscover.ClientType][]mcpdiscover.MCPServer)
+	for _, srv := range result.Servers {
+		byClient[srv.Client] = append(byClient[srv.Client], srv)
+	}
+
+	for client, servers := range byClient {
+		fmt.Printf("  %s (%d servers)\n", tui.StyleBold.Render(string(client)), len(servers))
+		for _, srv := range servers {
+			status := ""
+			if srv.AlreadyWrapped {
+				status = tui.StyleSuccess.Render(" [wrapped]")
+			}
+			transport := string(srv.Transport)
+			if srv.Transport == mcpdiscover.TransportHTTP {
+				transport += " (skip)"
+			}
+			fmt.Printf("    %s  %s  %s%s\n",
+				tui.StyleCommand.Render(srv.Name),
+				tui.StyleMuted.Render(transport),
+				commandSummary(srv),
+				status,
+			)
+		}
+		fmt.Println()
+	}
+
+	for _, e := range result.Errors {
+		tui.PrintWarning(fmt.Sprintf("%s: %v", e.ConfigPath, e.Err))
+	}
+
+	if *patch {
+		crustBin, err := mcpdiscover.CrustBinaryPath()
+		if err != nil {
+			tui.PrintError(fmt.Sprintf("Cannot resolve crust binary: %v", err))
+			os.Exit(1)
+		}
+		patchResult := mcpdiscover.PatchConfigs(crustBin)
+		if patchResult.Patched > 0 {
+			tui.PrintSuccess(fmt.Sprintf("Patched %d server(s) to route through crust wrap", patchResult.Patched))
+		} else {
+			tui.PrintInfo("Nothing to patch (all servers already wrapped or HTTP-only)")
+		}
+		for _, e := range patchResult.Errors {
+			tui.PrintWarning(fmt.Sprintf("%s: %v", e.ConfigPath, e.Err))
+		}
+	}
+}
+
+// commandSummary returns a short display string for an MCP server.
+func commandSummary(srv mcpdiscover.MCPServer) string {
+	if srv.Transport == mcpdiscover.TransportHTTP {
+		return srv.URL
+	}
+	s := srv.Command
+	if len(srv.Args) > 0 {
+		s += " " + strings.Join(srv.Args, " ")
+	}
+	const maxLen = 60
+	if len(s) > maxLen {
+		s = s[:maxLen-3] + "..."
+	}
+	return s
 }
 
 // runUninstall handles the uninstall subcommand

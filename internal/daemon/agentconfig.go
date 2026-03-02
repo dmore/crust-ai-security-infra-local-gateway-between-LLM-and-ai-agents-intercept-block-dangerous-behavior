@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/BakeLens/crust/internal/fileutil"
+	"github.com/BakeLens/crust/internal/mcpdiscover"
 )
 
 const backupSuffix = ".crust-backup"
@@ -47,6 +48,9 @@ var knownAgents = []agentConfig{
 // Only agents whose config file already exists are touched.
 // Errors are non-fatal — a failed patch just means that agent
 // won't go through the proxy automatically.
+//
+// Also patches MCP client configs to route stdio servers through
+// "crust wrap" for automatic security enforcement.
 func PatchAgentConfigs(proxyPort int) {
 	for _, agent := range knownAgents {
 		path := agent.ConfigPath()
@@ -59,10 +63,18 @@ func PatchAgentConfigs(proxyPort int) {
 			continue
 		}
 	}
+
+	// Patch MCP client configs (Claude Desktop, Cursor, Windsurf, etc.)
+	crustBin, err := mcpdiscover.CrustBinaryPath()
+	if err == nil {
+		mcpdiscover.PatchConfigs(crustBin)
+	}
 }
 
 // RestoreAgentConfigs restores every known agent config from its
 // backup file. Called from CleanupPID on daemon shutdown.
+//
+// Also restores MCP client configs from their backups.
 func RestoreAgentConfigs() {
 	for _, agent := range knownAgents {
 		path := agent.ConfigPath()
@@ -71,6 +83,8 @@ func RestoreAgentConfigs() {
 		}
 		_ = restoreAgentConfig(path, agent.URLKey) //nolint:errcheck // best-effort restore
 	}
+
+	mcpdiscover.RestoreAll()
 }
 
 // patchAgentConfig saves the original value of urlKey into a backup

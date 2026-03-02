@@ -125,6 +125,30 @@ Add Crust as a wrapper in your Claude Desktop MCP config (`~/Library/Application
 }
 ```
 
+### Auto-discover and Patch
+
+`crust mcp-discover` scans known IDE/client config files and can automatically patch them to route stdio MCP servers through `crust wrap`.
+
+```bash
+# Scan and display discovered MCP servers
+crust mcp-discover
+
+# Patch configs to route through crust wrap
+crust mcp-discover --patch
+
+# Undo all patches (restore from backups)
+crust mcp-discover --restore
+
+# Machine-readable output
+crust mcp-discover --json
+```
+
+Supported clients: Claude Desktop, Cursor, Windsurf, Claude Code, Neovim (mcphub).
+
+When the Crust daemon starts (`crust start`), it automatically patches these configs and restores them on `crust stop`. The `mcp-discover` command is useful for manual control outside the daemon lifecycle.
+
+**Crash resilience:** `crust wrap` runs independently of the daemon — it spawns the child process directly and inspects stdio in-process. If the Crust daemon crashes, wrapped MCP servers continue working with security rules still enforced.
+
 ### Auto-detect Mode
 
 If you don't know whether a subprocess speaks MCP or ACP, use `crust wrap`:
@@ -191,3 +215,25 @@ crust mcp-http --upstream <url> [flags]
 | `--rules-dir` | `~/.crust/rules/` | Custom rules directory |
 | `--log-level` | `warn` | Log level |
 | `--disable-builtin` | `false` | Disable built-in rules |
+
+### `mcp-discover`
+
+```bash
+crust mcp-discover [flags]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--json` | `false` | Output as JSON |
+| `--patch` | `false` | Patch configs to route through `crust wrap` |
+| `--restore` | `false` | Restore configs from backups |
+
+Scans the following config files:
+
+| Client | Config Path (macOS) |
+|--------|-------------------|
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Cursor | `~/.cursor/mcp.json` |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+| Claude Code | `~/.claude.json` |
+| Neovim (mcphub) | `~/.config/mcphub/servers.json` |
