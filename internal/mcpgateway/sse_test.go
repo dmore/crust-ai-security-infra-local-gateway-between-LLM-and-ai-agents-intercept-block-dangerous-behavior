@@ -2,6 +2,7 @@ package mcpgateway
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -174,6 +175,45 @@ func TestProxySSEStream_InspectFilter(t *testing.T) {
 	if !strings.Contains(body, "allow") || !strings.Contains(body, "allow2") {
 		t.Errorf("allowed events missing from output: %s", body)
 	}
+}
+
+func TestReadSSEEvents_ReaderError(t *testing.T) {
+	// A reader that returns an error after some data — scanner.Err() should catch it.
+	// The channel should still close and deliver events read before the error.
+	input := "data: before-error\n\n"
+	r := &failAfterReader{data: []byte(input), failAfter: len(input)}
+	events := ReadSSEEvents(context.Background(), r)
+
+	var got []SSEEvent
+	for e := range events {
+		got = append(got, e)
+	}
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 event before error, got %d", len(got))
+	}
+	if got[0].Data != "before-error" {
+		t.Errorf("data = %q, want %q", got[0].Data, "before-error")
+	}
+}
+
+// failAfterReader returns data normally, then returns an error on subsequent reads.
+type failAfterReader struct {
+	data      []byte
+	pos       int
+	failAfter int
+}
+
+func (r *failAfterReader) Read(p []byte) (int, error) {
+	if r.pos >= r.failAfter {
+		return 0, fmt.Errorf("simulated read error")
+	}
+	n := copy(p, r.data[r.pos:])
+	r.pos += n
+	if r.pos >= r.failAfter {
+		return n, nil // next call will error
+	}
+	return n, nil
 }
 
 func TestProxySSEStream_ContextCancel(t *testing.T) {

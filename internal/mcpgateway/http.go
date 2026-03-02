@@ -105,6 +105,7 @@ func (g *HTTPGateway) handlePost(w http.ResponseWriter, r *http.Request) {
 
 	upResp, err := g.client.Do(upReq) //nolint:gosec // upstream URL is user-configured, not tainted
 	if err != nil || upResp == nil {
+		log.Warn("Upstream request failed: %v", err)
 		http.Error(w, "Upstream request failed", http.StatusBadGateway)
 		return
 	}
@@ -141,6 +142,7 @@ func (g *HTTPGateway) handleGet(w http.ResponseWriter, r *http.Request) {
 
 	upResp, err := g.client.Do(upReq) //nolint:gosec // upstream URL is user-configured, not tainted
 	if err != nil || upResp == nil {
+		log.Warn("Upstream request failed: %v", err)
 		http.Error(w, "Upstream request failed", http.StatusBadGateway)
 		return
 	}
@@ -204,6 +206,7 @@ func (g *HTTPGateway) handleDelete(w http.ResponseWriter, r *http.Request) {
 
 	upResp, err := g.client.Do(upReq) //nolint:gosec // upstream URL is user-configured, not tainted
 	if err != nil || upResp == nil {
+		log.Warn("Upstream request failed: %v", err)
 		http.Error(w, "Upstream request failed", http.StatusBadGateway)
 		return
 	}

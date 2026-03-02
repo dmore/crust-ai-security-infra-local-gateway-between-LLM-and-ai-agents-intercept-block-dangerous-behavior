@@ -19,6 +19,7 @@ type SessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]time.Time
 	stop     chan struct{}
+	once     sync.Once
 }
 
 // NewSessionStore creates a new session store with a background reaper.
@@ -63,11 +64,7 @@ func (s *SessionStore) Exists(id string) bool {
 
 // Close stops the background reaper goroutine.
 func (s *SessionStore) Close() {
-	select {
-	case <-s.stop:
-	default:
-		close(s.stop)
-	}
+	s.once.Do(func() { close(s.stop) })
 }
 
 // reapLoop periodically removes expired sessions.
