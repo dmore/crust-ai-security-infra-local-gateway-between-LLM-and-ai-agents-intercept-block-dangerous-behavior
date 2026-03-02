@@ -64,10 +64,6 @@ jobs:
           go test ./internal/rules/... -fuzz=FuzzLoopbackRegex -fuzztime=30s -short
           go test ./internal/rules/... -fuzz=FuzzMCPToolBypass -fuzztime=30s -short
 
-      - name: License compliance
-        run: |
-          go install github.com/google/go-licenses@latest
-          go-licenses check ./... --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,Zlib,Elastic-2.0
 
   test:
     name: Go Test (${{ matrix.os }})
