@@ -148,7 +148,7 @@ jobs:
             go test ./... -short
 
   e2e:
-    name: E2E Tests (MCP stdio + HTTP)
+    name: E2E Tests (MCP stdio + HTTP + ACP)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -169,8 +169,11 @@ jobs:
       - name: Install gitleaks (DLP Tier 2)
         run: go install github.com/zricethezav/gitleaks/v8@latest
 
-      - name: E2E tests (stdio + HTTP)
+      - name: MCP E2E tests (stdio + HTTP)
         run: go test ./internal/mcpgateway/... -v -run E2E -timeout 180s
+
+      - name: ACP E2E tests
+        run: go test ./internal/acpwrap/... -v -run E2E -timeout 60s
 
   docker-test:
     name: Docker
