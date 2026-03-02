@@ -126,9 +126,9 @@ func isCrustWrapped(cmd string, args []string) bool {
 	if strings.HasSuffix(cmd, "crust") || strings.HasSuffix(cmd, "crust.exe") {
 		return true
 	}
-	// Check if args contain "wrap" or "mcp-gateway"
+	// Check if args contain "wrap", "gateway", or legacy "mcp-gateway"
 	for _, a := range args {
-		if a == "wrap" || a == "mcp-gateway" {
+		if a == "wrap" || a == "mcp-gateway" || a == "gateway" {
 			return true
 		}
 		if a == "--" {

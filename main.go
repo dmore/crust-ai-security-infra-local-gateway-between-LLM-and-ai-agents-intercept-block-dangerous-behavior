@@ -100,17 +100,11 @@ func main() {
 		case "acp-wrap":
 			runAcpWrap(os.Args[2:])
 			return
-		case "mcp-gateway":
-			runMcpGateway(os.Args[2:])
-			return
-		case "mcp-http":
-			runMcpHTTP(os.Args[2:])
+		case "mcp":
+			runMCP(os.Args[2:])
 			return
 		case "wrap":
 			runWrap(os.Args[2:])
-			return
-		case "mcp-discover":
-			runMCPDiscover(os.Args[2:])
 			return
 		case "uninstall":
 			runUninstall()
@@ -752,9 +746,9 @@ func printUsage() {
 	fmt.Print(tui.AlignColumns([][2]string{
 		{"crust doctor [--timeout 5s] [--report]", "Check provider endpoint connectivity"},
 		{"crust acp-wrap [flags] -- <cmd...>", "ACP stdio proxy with security rules"},
-		{"crust mcp-gateway [flags] -- <cmd...>", "MCP stdio proxy with security rules"},
-		{"crust mcp-http --upstream <url>", "MCP HTTP reverse proxy with security rules"},
-		{"crust mcp-discover [--patch] [--restore]", "Scan/patch MCP client configs"},
+		{"crust mcp gateway [flags] -- <cmd...>", "MCP stdio proxy with security rules"},
+		{"crust mcp http --upstream <url>", "MCP HTTP reverse proxy with security rules"},
+		{"crust mcp discover [--patch] [--restore]", "Scan/patch MCP client configs"},
 		{"crust completion [--install]", "Install shell completion (bash/zsh/fish)"},
 		{"crust uninstall", "Uninstall crust completely"},
 		{"crust help", "Show this help message"},
@@ -934,7 +928,7 @@ type proxyRunConfig struct {
 }
 
 // runProxyCommand implements the shared flag parsing, config loading, engine
-// init, and subprocess launch for all proxy subcommands (acp-wrap, mcp-gateway, wrap).
+// init, and subprocess launch for all proxy subcommands (acp-wrap, mcp gateway, wrap).
 func runProxyCommand(pcfg proxyRunConfig, args []string) {
 	fs := flag.NewFlagSet(pcfg.name, flag.ExitOnError)
 	configPath := fs.String("config", config.DefaultConfigPath(), "Path to configuration file")
@@ -994,16 +988,45 @@ func runAcpWrap(args []string) {
 	}, args)
 }
 
+func runMCP(args []string) {
+	if len(args) < 1 {
+		printMCPUsage()
+		return
+	}
+	switch args[0] {
+	case "gateway":
+		runMcpGateway(args[1:])
+	case "http":
+		runMcpHTTP(args[1:])
+	case "discover":
+		runMCPDiscover(args[1:])
+	default:
+		printMCPUsage()
+	}
+}
+
+func printMCPUsage() {
+	banner.PrintBanner(Version)
+	fmt.Println()
+	fmt.Println(tui.Separator("MCP Commands"))
+	fmt.Print(tui.AlignColumns([][2]string{
+		{"crust mcp gateway [flags] -- <cmd...>", "MCP stdio proxy with security rules"},
+		{"crust mcp http --upstream <url>", "MCP HTTP reverse proxy with security rules"},
+		{"crust mcp discover [--patch] [--restore]", "Scan/patch MCP client configs"},
+	}, "  ", 2, tui.StyleCommand, tui.StyleMuted))
+	fmt.Println()
+}
+
 func runMcpGateway(args []string) {
 	runProxyCommand(proxyRunConfig{
-		name:  "mcp-gateway",
-		usage: "mcp-gateway [flags] -- <mcp-server-command> [args...]",
+		name:  "mcp gateway",
+		usage: "mcp gateway [flags] -- <mcp-server-command> [args...]",
 		run:   mcpgateway.Run,
 	}, args)
 }
 
 func runMcpHTTP(args []string) {
-	fs := flag.NewFlagSet("mcp-http", flag.ExitOnError)
+	fs := flag.NewFlagSet("mcp http", flag.ExitOnError)
 	upstream := fs.String("upstream", "", "Upstream MCP server URL (required)")
 	listen := fs.String("listen", "127.0.0.1:9091", "Local listen address")
 	configPath := fs.String("config", config.DefaultConfigPath(), "Path to configuration file")
@@ -1013,7 +1036,7 @@ func runMcpHTTP(args []string) {
 	_ = fs.Parse(args)
 
 	if *upstream == "" {
-		fmt.Fprintf(os.Stderr, "Usage: crust mcp-http --upstream <url> [flags]\n")
+		fmt.Fprintf(os.Stderr, "Usage: crust mcp http --upstream <url> [flags]\n")
 		fmt.Fprintf(os.Stderr, "Error: --upstream is required\n")
 		os.Exit(1)
 	}
@@ -1038,7 +1061,7 @@ func runMcpHTTP(args []string) {
 	}
 
 	if err := fileutil.SecureMkdirAll(dir); err != nil {
-		fmt.Fprintf(os.Stderr, "crust mcp-http: failed to create rules dir: %v\n", err)
+		fmt.Fprintf(os.Stderr, "crust mcp http: failed to create rules dir: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -1047,13 +1070,13 @@ func runMcpHTTP(args []string) {
 		DisableBuiltin: *disableBuiltin || cfg.Rules.DisableBuiltin,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "crust mcp-http: failed to init rules: %v\n", err)
+		fmt.Fprintf(os.Stderr, "crust mcp http: failed to init rules: %v\n", err)
 		os.Exit(1)
 	}
 
 	gw, err := mcpgateway.NewHTTPGateway(*upstream, engine)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "crust mcp-http: %v\n", err)
+		fmt.Fprintf(os.Stderr, "crust mcp http: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -1070,7 +1093,7 @@ func runMcpHTTP(args []string) {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	mcpLog := logger.New("mcp-http")
+	mcpLog := logger.New("mcp.http")
 	mcpLog.Info("Starting MCP HTTP gateway: listen=%s upstream=%s rules=%d",
 		*listen, *upstream, engine.RuleCount())
 
@@ -1088,7 +1111,7 @@ func runMcpHTTP(args []string) {
 	}()
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		fmt.Fprintf(os.Stderr, "crust mcp-http: %v\n", err)
+		fmt.Fprintf(os.Stderr, "crust mcp http: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -1101,9 +1124,9 @@ func runWrap(args []string) {
 	}, args)
 }
 
-// runMCPDiscover handles the mcp-discover subcommand.
+// runMCPDiscover handles the mcp discover subcommand.
 func runMCPDiscover(args []string) {
-	fs := flag.NewFlagSet("mcp-discover", flag.ExitOnError)
+	fs := flag.NewFlagSet("mcp discover", flag.ExitOnError)
 	jsonOut := fs.Bool("json", false, "Output as JSON")
 	patch := fs.Bool("patch", false, "Patch configs to route through crust wrap")
 	restore := fs.Bool("restore", false, "Restore configs from backups")
