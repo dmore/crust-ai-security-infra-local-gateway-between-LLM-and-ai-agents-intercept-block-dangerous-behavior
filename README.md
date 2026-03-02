@@ -10,11 +10,10 @@
 
 <p align="center">
   <a href="https://getcrust.io">Website</a> •
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#mcp-gateway">MCP</a> •
-  <a href="#acp-integration">ACP</a> •
-  <a href="#built-in-protection">Protection</a> •
   <a href="#how-it-works">How It Works</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#agent-setup">Agent Setup</a> •
+  <a href="#protection">Protection</a> •
   <a href="#documentation">Docs</a> •
   <a href="https://github.com/BakeLens/crust/issues">Issues</a> •
   <a href="https://github.com/BakeLens/crust/discussions">Discussions</a>
@@ -47,6 +46,22 @@ Crust is a transparent, local gateway between your AI agents and LLM providers. 
   <img src="docs/demo.gif" alt="Crust in action" width="800" />
 </p>
 
+## How It Works
+
+<p align="center">
+  <img src="docs/crust.png" alt="Crust architecture" width="90%" />
+</p>
+
+Crust inspects tool calls at multiple layers:
+
+1. **Layer 0 (Request Scan)**: Scans tool calls in conversation history before they reach the LLM — catches agents replaying dangerous actions.
+2. **Layer 1 (Response Scan)**: Scans tool calls in the LLM's response before they execute — blocks new dangerous actions in real-time.
+3. **Stdio Proxy** ([MCP](docs/mcp.md) / [ACP](docs/acp.md)): Wraps MCP servers or ACP agents as a stdio proxy, intercepting security-relevant JSON-RPC messages in both directions — including DLP scanning of server responses for leaked secrets.
+
+All modes apply a [15-step evaluation pipeline](docs/how-it-works.md) with a self-protection pre-filter — input sanitization, Unicode normalization, obfuscation detection, DLP secret scanning, path-based rules, and fallback content matching — each step in microseconds.
+
+All activity is logged locally to encrypted storage.
+
 ## Quick Start
 
 **macOS / Linux:**
@@ -74,6 +89,10 @@ crust start --auto
 ```
 
 Auto mode detects your LLM provider from the model name — no endpoint URL or API key configuration needed. Your agent's existing auth is passed through.
+
+## Agent Setup
+
+### HTTP Proxy
 
 Point your agent to Crust:
 
@@ -113,7 +132,7 @@ crust doctor     # Diagnose provider endpoints
 crust stop       # Stop crust
 ```
 
-## MCP Gateway
+### MCP Gateway
 
 For [MCP](https://modelcontextprotocol.io) servers, Crust intercepts `tools/call` and `resources/read` requests before they reach the server.
 
@@ -123,7 +142,7 @@ crust mcp gateway -- npx -y @modelcontextprotocol/server-filesystem /path/to/dir
 
 Works with any MCP server. See the [MCP setup guide](docs/mcp.md) for details and examples.
 
-## ACP Integration
+### ACP Integration
 
 For IDEs that use the [Agent Client Protocol](https://agentclientprotocol.com) (ACP), Crust can wrap any ACP agent as a transparent stdio proxy — intercepting file reads, writes, and terminal commands before the IDE executes them. No changes to the agent or IDE required.
 
@@ -133,7 +152,9 @@ crust acp-wrap -- goose acp
 
 Supports JetBrains IDEs and other ACP-compatible editors. See the [ACP setup guide](docs/acp.md) for step-by-step instructions.
 
-## Built-in Protection
+## Protection
+
+### Built-in Rules
 
 Crust ships with **21 security rules** (14 locked, 7 user-disablable) and **34 DLP token-detection patterns** out of the box:
 
@@ -154,23 +175,7 @@ Crust ships with **21 security rules** (14 locked, 7 user-disablable) and **34 D
 
 All rules are open source: [`internal/rules/builtin/security.yaml`](internal/rules/builtin/security.yaml) (path rules), [`internal/rules/dlp.go`](internal/rules/dlp.go) (DLP patterns), and [`internal/rules/dlp_crypto.go`](internal/rules/dlp_crypto.go) (crypto key detection)
 
-## Security of Crust Itself
-
-A security tool must protect itself first. Crust is built to resist tampering — even by the AI agents it monitors:
-
-| Principle | What it means |
-|-----------|---------------|
-| **Only you can access it** | Crust's control interface only listens on your machine — no one else on the network can reach it |
-| **Agents can't disable it** | A hardcoded pre-filter prevents AI agents from turning off, reconfiguring, or bypassing Crust |
-| **Your files stay private** | All config and log files are locked to your user account — other users and programs can't read them |
-| **Logs are encrypted** | Activity logs are stored in an encrypted database; the key never appears in command history |
-| **Oversized requests are rejected** | Abnormally large inputs are dropped before processing to prevent abuse |
-| **Connections are encrypted** | All traffic to LLM providers uses modern encryption (TLS 1.2+) |
-| **Every code change is scanned** | 10 automated security checks run on every commit — vulnerability scanning, secret detection, race condition testing |
-
-See [SECURITY.md](SECURITY.md) for vulnerability reporting.
-
-## Custom Rules
+### Custom Rules
 
 Rules use a progressive disclosure schema — start simple, add complexity only when needed:
 
@@ -196,21 +201,22 @@ rules:
 crust add-rule my-rules.yaml    # Rules active immediately (hot reload)
 ```
 
-## How It Works
+### Crust Self-Security
 
-<p align="center">
-  <img src="docs/crust.png" alt="Crust architecture" width="90%" />
-</p>
+A security tool must protect itself first. Crust is built to resist tampering — even by the AI agents it monitors:
 
-Crust inspects tool calls at multiple layers:
+| Principle | What it means |
+|-----------|---------------|
+| **Only you can access it** | Crust's control interface only listens on your machine — no one else on the network can reach it |
+| **Agents can't disable it** | A hardcoded pre-filter prevents AI agents from turning off, reconfiguring, or bypassing Crust |
+| **Your files stay private** | All config and log files are locked to your user account — other users and programs can't read them |
+| **Secrets use OS keyring** | API keys and encryption keys are stored in your OS keyring (macOS Keychain / Linux Secret Service / Windows Credential Manager), never in environment variables |
+| **Logs are encrypted** | Activity logs are stored in an encrypted database; the key never appears in command history |
+| **Oversized requests are rejected** | Abnormally large inputs are dropped before processing to prevent abuse |
+| **Connections are encrypted** | All traffic to LLM providers uses modern encryption (TLS 1.2+) |
+| **Every code change is scanned** | 10 automated security checks run on every commit — vulnerability scanning, secret detection, race condition testing |
 
-1. **Layer 0 (Request Scan)**: Scans tool calls in conversation history before they reach the LLM — catches agents replaying dangerous actions.
-2. **Layer 1 (Response Scan)**: Scans tool calls in the LLM's response before they execute — blocks new dangerous actions in real-time.
-3. **Stdio Proxy** ([MCP](docs/mcp.md) / [ACP](docs/acp.md)): Wraps MCP servers or ACP agents as a stdio proxy, intercepting security-relevant JSON-RPC messages in both directions — including DLP scanning of server responses for leaked secrets.
-
-All modes apply a [15-step evaluation pipeline](docs/how-it-works.md) with a self-protection pre-filter — input sanitization, Unicode normalization, obfuscation detection, DLP secret scanning, path-based rules, and fallback content matching — each step in microseconds.
-
-All activity is logged locally to encrypted storage.
+See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## Documentation
 
