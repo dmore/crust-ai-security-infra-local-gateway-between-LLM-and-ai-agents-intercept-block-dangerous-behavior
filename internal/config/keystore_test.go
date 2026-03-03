@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/zalando/go-keyring"
@@ -64,8 +65,11 @@ func TestKeystoreDelete(t *testing.T) {
 
 func TestFileFallback_SetAndGet(t *testing.T) {
 	// Override secrets file path to temp dir.
+	// Set both HOME (Unix) and USERPROFILE (Windows) so os.UserHomeDir()
+	// returns the temp dir on all platforms.
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 
 	// Create .crust dir
 	if err := os.MkdirAll(filepath.Join(tmp, ".crust"), 0700); err != nil {
@@ -84,20 +88,24 @@ func TestFileFallback_SetAndGet(t *testing.T) {
 		t.Errorf("got %q, want %q", val, "file_val")
 	}
 
-	// Verify file permissions on Unix.
+	// Verify file exists and has correct permissions on Unix.
+	// Windows uses ACLs (restrictToOwner) instead of Unix permission bits.
 	path := filepath.Join(tmp, ".crust", secretsFileName)
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0600 {
-		t.Errorf("file perms = %o, want 0600", perm)
+	if runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm != 0600 {
+			t.Errorf("file perms = %o, want 0600", perm)
+		}
 	}
 }
 
 func TestFileFallback_Delete(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 
 	if err := os.MkdirAll(filepath.Join(tmp, ".crust"), 0700); err != nil {
 		t.Fatal(err)
