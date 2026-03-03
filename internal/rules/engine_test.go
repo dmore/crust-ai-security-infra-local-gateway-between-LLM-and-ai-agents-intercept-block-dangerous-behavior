@@ -680,3 +680,232 @@ func TestGetCompiledRules_DefensiveCopy(t *testing.T) {
 		t.Errorf("GetCompiledRules returned mutated data: got %q, want %q", rules2[0].Rule.Name, "test-rule")
 	}
 }
+
+// --- Phase method unit tests ---
+
+// newMinimalEngine creates an engine with no rules for phase testing.
+func newMinimalEngine(t *testing.T) *Engine {
+	t.Helper()
+	e, err := NewTestEngine(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+// TestValidateContent_NullBytesBlocked verifies step 4 blocks null bytes in write content.
+func TestValidateContent_NullBytesBlocked(t *testing.T) {
+	e := newMinimalEngine(t)
+	info := ExtractedInfo{
+		Operation: OpWrite,
+		Content:   "hello\x00world",
+	}
+	m := e.validateContent(&info)
+	if m == nil {
+		t.Fatal("expected block for null byte in write content, got nil")
+	}
+	if m.RuleName != "builtin:block-null-byte-write" {
+		t.Errorf("expected rule builtin:block-null-byte-write, got %s", m.RuleName)
+	}
+}
+
+// TestValidateContent_CleanWrite verifies normal writes pass.
+func TestValidateContent_CleanWrite(t *testing.T) {
+	e := newMinimalEngine(t)
+	info := ExtractedInfo{
+		Operation: OpWrite,
+		Content:   "hello world",
+	}
+	m := e.validateContent(&info)
+	if m != nil {
+		t.Errorf("expected nil for clean write, got rule=%s", m.RuleName)
+	}
+}
+
+// TestValidateContent_ObfuscationBlocked verifies step 5 detects base64 obfuscation.
+func TestValidateContent_ObfuscationBlocked(t *testing.T) {
+	e := newMinimalEngine(t)
+	info := ExtractedInfo{
+		Command: "echo cGF5bG9hZA== | base64 -d | sh",
+	}
+	m := e.validateContent(&info)
+	if m == nil {
+		t.Fatal("expected block for obfuscation, got nil")
+	}
+	if m.RuleName != "builtin:block-obfuscation" {
+		t.Errorf("expected rule builtin:block-obfuscation, got %s", m.RuleName)
+	}
+}
+
+// TestValidateContent_EvasiveBlocked verifies step 6 blocks evasive commands.
+func TestValidateContent_EvasiveBlocked(t *testing.T) {
+	e := newMinimalEngine(t)
+	info := ExtractedInfo{
+		Evasive:       true,
+		EvasiveReason: "fork bomb detected",
+	}
+	m := e.validateContent(&info)
+	if m == nil {
+		t.Fatal("expected block for evasive command, got nil")
+	}
+	if m.RuleName != "builtin:block-shell-evasion" {
+		t.Errorf("expected rule builtin:block-shell-evasion, got %s", m.RuleName)
+	}
+}
+
+// TestValidateContent_DLPBlocked verifies step 7 detects API keys.
+func TestValidateContent_DLPBlocked(t *testing.T) {
+	e := newMinimalEngine(t)
+	// AWS access key: AKIA + 16 alphanumeric chars (20 total)
+	info := ExtractedInfo{
+		RawJSON: `{"key":"AKIAIOSFODNN7EXAMPLE"}`,
+	}
+	m := e.validateContent(&info)
+	if m == nil {
+		t.Fatal("expected block for AWS key, got nil")
+	}
+	if !strings.Contains(m.RuleName, "aws") {
+		t.Errorf("expected AWS DLP rule, got %s", m.RuleName)
+	}
+}
+
+// TestValidateContent_NormalCommand verifies clean commands pass all checks.
+func TestValidateContent_NormalCommand(t *testing.T) {
+	e := newMinimalEngine(t)
+	info := ExtractedInfo{
+		Command: "ls /tmp",
+	}
+	m := e.validateContent(&info)
+	if m != nil {
+		t.Errorf("expected nil for clean command, got rule=%s", m.RuleName)
+	}
+}
+
+// TestValidateContent_NormalizesUnicode verifies step 3 normalizes before later checks.
+func TestValidateContent_NormalizesUnicode(t *testing.T) {
+	e := newMinimalEngine(t)
+	info := ExtractedInfo{
+		Command: "ls /tmp",
+	}
+	e.validateContent(&info)
+	// After validateContent, Command should be NFKC-normalized
+	if strings.ContainsRune(info.Command, 0x200B) {
+		t.Error("expected zero-width space to be stripped")
+	}
+}
+
+// TestResolvePaths_ProcBlocked verifies step 10 blocks /proc access.
+func TestResolvePaths_ProcBlocked(t *testing.T) {
+	e := newMinimalEngine(t)
+	_, m := e.resolvePaths([]string{"/proc/1/environ"})
+	if m == nil {
+		t.Fatal("expected block for /proc access, got nil")
+	}
+	if m.RuleName != "builtin:protect-proc" {
+		t.Errorf("expected rule builtin:protect-proc, got %s", m.RuleName)
+	}
+}
+
+// TestResolvePaths_CleanPath verifies normal paths pass.
+func TestResolvePaths_CleanPath(t *testing.T) {
+	e := newMinimalEngine(t)
+	paths, m := e.resolvePaths([]string{"/tmp/foo"})
+	if m != nil {
+		t.Errorf("expected nil for clean path, got rule=%s", m.RuleName)
+	}
+	if len(paths) == 0 {
+		t.Error("expected non-empty paths")
+	}
+}
+
+// TestResolvePaths_FiltersShellGlobs verifies step 8 filters bare globs.
+func TestResolvePaths_FiltersShellGlobs(t *testing.T) {
+	e := newMinimalEngine(t)
+	paths, m := e.resolvePaths([]string{"*", "/tmp/foo"})
+	if m != nil {
+		t.Errorf("expected nil, got rule=%s", m.RuleName)
+	}
+	// Bare "*" should be filtered out, only /tmp/foo remains
+	found := false
+	for _, p := range paths {
+		if strings.Contains(p, "tmp/foo") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected /tmp/foo in paths, got %v", paths)
+	}
+}
+
+// TestMatchRules_PathRuleBlocks verifies step 11 matches path rules.
+func TestMatchRules_PathRuleBlocks(t *testing.T) {
+	e, err := NewTestEngine([]Rule{
+		{
+			Name:    "block-env",
+			Actions: []Operation{OpRead},
+			Block:   Block{Paths: []string{"**/.env"}},
+			Message: "blocked",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := ExtractedInfo{
+		Operation: OpRead,
+	}
+	result := e.matchRules(&info, []string{"/home/user/.env"}, "Bash")
+	if !result.Matched {
+		t.Error("expected path rule to match")
+	}
+	if result.RuleName != "block-env" {
+		t.Errorf("expected rule block-env, got %s", result.RuleName)
+	}
+}
+
+// TestMatchRules_ContentOnlyFallback verifies step 12 matches content-only rules.
+func TestMatchRules_ContentOnlyFallback(t *testing.T) {
+	e, err := NewTestEngine([]Rule{
+		{
+			Name: "block-domain",
+			Match: &Match{
+				Content: "evil.example.com",
+			},
+			Message: "blocked domain",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := ExtractedInfo{
+		RawJSON: `{"url":"https://evil.example.com/payload"}`,
+	}
+	result := e.matchRules(&info, nil, "HttpRequest")
+	if !result.Matched {
+		t.Error("expected content-only rule to match")
+	}
+	if result.RuleName != "block-domain" {
+		t.Errorf("expected rule block-domain, got %s", result.RuleName)
+	}
+}
+
+// TestMatchRules_NoMatch verifies allowed calls return Matched=false.
+func TestMatchRules_NoMatch(t *testing.T) {
+	e, err := NewTestEngine([]Rule{
+		{
+			Name:    "block-env",
+			Actions: []Operation{OpRead},
+			Block:   Block{Paths: []string{"**/.env"}},
+			Message: "blocked",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := ExtractedInfo{
+		Operation: OpRead,
+	}
+	result := e.matchRules(&info, []string{"/tmp/safe.txt"}, "Bash")
+	if result.Matched {
+		t.Errorf("expected no match, got rule=%s", result.RuleName)
+	}
+}

@@ -365,21 +365,38 @@ func (e *Engine) AddRulesFromFile(path string) (string, error) {
 // Evaluate evaluates a tool call through a 13-step pipeline (steps 0-12).
 // Returns MatchResult indicating whether the call is allowed, blocked, or logged.
 func (e *Engine) Evaluate(call ToolCall) MatchResult {
-	// Step 0: Pre-checker (self-protection). Injected at construction time
-	// to avoid circular imports. Blocks management API/socket access before
-	// any rule evaluation.
+	// Step 0: Pre-checker (self-protection).
 	if e.preChecker != nil {
 		if m := e.preChecker(string(call.Arguments)); m != nil {
 			return *m
 		}
 	}
 
-	// Step 1: Sanitize tool name — defense-in-depth at the security boundary.
+	// Step 1: Sanitize tool name.
 	call.Name = SanitizeToolName(call.Name)
 
-	// Step 2: Extract paths and operation from the tool call.
+	// Step 2: Extract paths and operation.
 	info := e.extractor.Extract(call.Name, call.Arguments)
 
+	// Steps 3-7: Content validation (Unicode, null bytes, obfuscation, evasion, DLP).
+	if m := e.validateContent(&info); m != nil {
+		return *m
+	}
+
+	// Steps 8-10: Path resolution (normalize, symlinks, hardcoded guards).
+	allPaths, m := e.resolvePaths(info.Paths)
+	if m != nil {
+		return *m
+	}
+
+	// Steps 11-12: Rule matching (operation-based + content-only fallback).
+	return e.matchRules(&info, allPaths, call.Name)
+}
+
+// validateContent runs content validation (steps 3-7): Unicode normalization,
+// null byte blocking, obfuscation detection, evasion blocking, and DLP.
+// Mutates info fields (Command, Content, RawJSON) via pointer.
+func (e *Engine) validateContent(info *ExtractedInfo) *MatchResult {
 	// Step 3: Normalize Unicode (NFKC + strip invisible) before any matching.
 	if info.Command != "" {
 		info.Command = NormalizeUnicode(info.Command)
@@ -394,7 +411,7 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 	// Step 4: Block null bytes in write content.
 	if (info.Operation == OpWrite || info.Operation == OpNone) && info.Content != "" {
 		if strings.ContainsRune(info.Content, 0) {
-			return MatchResult{
+			return &MatchResult{
 				Matched:  true,
 				RuleName: "builtin:block-null-byte-write",
 				Severity: SeverityHigh,
@@ -407,7 +424,7 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 	// Step 5: PreFilter — detect obfuscation (base64, hex encoding).
 	if info.Command != "" {
 		if match := e.preFilter.Check(info.Command); match != nil {
-			return MatchResult{
+			return &MatchResult{
 				Matched:  true,
 				RuleName: "builtin:block-obfuscation",
 				Severity: SeverityHigh,
@@ -419,7 +436,7 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 
 	// Step 6: Block evasive commands that prevent static analysis.
 	if info.Evasive {
-		return MatchResult{
+		return &MatchResult{
 			Matched:  true,
 			RuleName: "builtin:block-shell-evasion",
 			Severity: SeverityHigh,
@@ -429,22 +446,18 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 	}
 
 	// Step 7: DLP — detect API keys/tokens in all operations.
-	// Delegates to ScanDLP which runs all 3 tiers (hardcoded patterns,
-	// crypto-specific checksum validation, gitleaks).
 	dlpContent := info.RawJSON
 	if dlpContent == "" {
 		dlpContent = info.Content
 	}
-	if m := e.ScanDLP(dlpContent); m != nil {
-		return *m
-	}
+	return e.ScanDLP(dlpContent)
+}
 
-	e.mu.RLock()
-	rules := e.merged
-	e.mu.RUnlock()
-
+// resolvePaths runs path resolution (steps 8-10): prepare paths,
+// resolve symlinks, and check hardcoded path guards.
+func (e *Engine) resolvePaths(paths []string) ([]string, *MatchResult) {
 	// Step 8: Prepare paths — filter bare shell globs, normalize, expand filesystem globs.
-	normalizedPaths := e.normalizer.PreparePaths(info.Paths)
+	normalizedPaths := e.normalizer.PreparePaths(paths)
 
 	// Step 9: Resolve symlinks — match both original and resolved paths.
 	resolvedPaths := e.normalizer.resolveSymlinks(normalizedPaths)
@@ -452,12 +465,26 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 
 	// Step 10: Hardcoded path guards (after symlink resolution to catch symlink bypasses).
 	if m := checkHardcodedPaths(allPaths); m != nil {
-		return *m
+		return nil, m
 	}
+
+	return allPaths, nil
+}
+
+// getMergedRules returns the current merged rule set under read lock.
+func (e *Engine) getMergedRules() []CompiledRule {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.merged
+}
+
+// matchRules evaluates operation-based and content-only rules (steps 11-12).
+func (e *Engine) matchRules(info *ExtractedInfo, allPaths []string, toolName string) MatchResult {
+	rules := e.getMergedRules()
 
 	// Step 11: Evaluate operation-based rules (for known tools).
 	if info.Operation != OpNone {
-		if result := e.evaluateOperationRules(rules, info, allPaths, call.Name); result.Matched {
+		if result := e.evaluateOperationRules(rules, *info, allPaths, toolName); result.Matched {
 			return result
 		}
 	}
@@ -478,11 +505,9 @@ func (e *Engine) Evaluate(call ToolCall) MatchResult {
 			}
 			contentMatched := false
 			if compiled.MatchCompiled != nil {
-				// Use pre-compiled pattern
 				if compiled.MatchCompiled.ContentRegex != nil {
 					contentMatched = compiled.MatchCompiled.ContentRegex.MatchString(contentForRules)
 				} else {
-					// Literal match (case-insensitive substring)
 					contentMatched = containsIgnoreCase(contentForRules, compiled.MatchCompiled.Match.Content)
 				}
 			}
