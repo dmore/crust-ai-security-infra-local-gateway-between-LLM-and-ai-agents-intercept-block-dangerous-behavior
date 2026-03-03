@@ -22,14 +22,9 @@ func SanitizeToolName(name string) string {
 	return name
 }
 
-// stripNullBytes removes null bytes and other dangerous characters.
+// stripNullBytes removes null bytes from a string.
 func stripNullBytes(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r == 0 {
-			return -1 // Drop null bytes
-		}
-		return r
-	}, s)
+	return strings.ReplaceAll(s, "\x00", "")
 }
 
 // stripControlChars removes ASCII control characters (except tab, newline).

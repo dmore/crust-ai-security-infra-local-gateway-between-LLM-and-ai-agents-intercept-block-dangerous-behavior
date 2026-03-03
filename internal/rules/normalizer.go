@@ -79,7 +79,7 @@ func (n *Normalizer) Normalize(path string) string {
 	// SECURITY: Strip null bytes — C-level syscalls truncate at \x00,
 	// so "/etc/passwd\x00.txt" would access "/etc/passwd" while bypassing
 	// pattern matching on the full string.
-	path = strings.ReplaceAll(path, "\x00", "")
+	path = stripNullBytes(path)
 	if path == "" {
 		return ""
 	}
@@ -273,7 +273,7 @@ func (n *Normalizer) NormalizePattern(pattern string) string {
 	if pattern == "" {
 		return ""
 	}
-	pattern = strings.ReplaceAll(pattern, "\x00", "")
+	pattern = stripNullBytes(pattern)
 	if pattern == "" {
 		return ""
 	}
