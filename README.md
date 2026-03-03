@@ -52,13 +52,16 @@ Crust is a transparent, local gateway between your AI agents and LLM providers. 
   <img src="docs/crust.png" alt="Crust architecture" width="90%" />
 </p>
 
-Crust inspects tool calls at multiple layers:
+Crust has four entry points — use one or combine them:
 
-1. **Layer 0 (Request Scan)**: Scans tool calls in conversation history before they reach the LLM — catches agents replaying dangerous actions.
-2. **Layer 1 (Response Scan)**: Scans tool calls in the LLM's response before they execute — blocks new dangerous actions in real-time.
-3. **Stdio Proxy** ([MCP](docs/mcp.md) / [ACP](docs/acp.md)): Wraps MCP servers or ACP agents as a stdio proxy, intercepting security-relevant JSON-RPC messages in both directions — including DLP scanning of server responses for leaked secrets.
+| Entry Point | Command | What It Does |
+|-------------|---------|--------------|
+| **HTTP Proxy** | `crust start` | Sits between your agent and the LLM API. Scans tool calls in both the request (conversation history) and response (new actions) before they execute. |
+| **MCP Stdio Gateway** | `crust mcp gateway` | Wraps any stdio [MCP](https://modelcontextprotocol.io) server, intercepting `tools/call` and `resources/read` in both directions — including DLP scanning of server responses for leaked secrets. |
+| **MCP HTTP Gateway** | `crust mcp http` | Reverse proxy for [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http) MCP servers — same rule engine, no stdio required. |
+| **ACP Stdio Proxy** | `crust acp-wrap` | Wraps any [ACP](https://agentclientprotocol.com) agent, intercepting file reads, writes, and terminal commands before the IDE executes them. |
 
-All modes apply a [15-step evaluation pipeline](docs/how-it-works.md) with a self-protection pre-filter — input sanitization, Unicode normalization, obfuscation detection, DLP secret scanning, path-based rules, and fallback content matching — each step in microseconds.
+All entry points apply the same [15-step evaluation pipeline](docs/how-it-works.md) with a self-protection pre-filter — input sanitization, Unicode normalization, obfuscation detection, DLP secret scanning, path-based rules, and fallback content matching — each step in microseconds.
 
 All activity is logged locally to encrypted storage.
 
