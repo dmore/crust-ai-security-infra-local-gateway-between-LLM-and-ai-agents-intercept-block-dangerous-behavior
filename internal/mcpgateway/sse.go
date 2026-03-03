@@ -71,6 +71,10 @@ func ReadSSEEvents(ctx context.Context, r io.Reader) <-chan SSEEvent {
 			}
 		}
 
+		if err := scanner.Err(); err != nil {
+			log.Warn("SSE scanner error: %v", err)
+		}
+
 		// Flush any pending event at EOF (no trailing blank line)
 		if len(dataLines) > 0 {
 			event.Data = strings.Join(dataLines, "\n")

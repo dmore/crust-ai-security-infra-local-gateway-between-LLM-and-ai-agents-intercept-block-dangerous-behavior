@@ -133,8 +133,9 @@ func (l *Loader) LoadUser() ([]Rule, error) {
 		path := filepath.Join(l.userDir, entry.Name())
 		log.Trace("  Loading user file: %s", path)
 
-		// Single read: same bytes used for integrity check AND parsing
-		data, err := os.ReadFile(path)
+		// Single read with shared lock: same bytes used for integrity check AND parsing.
+		// flock(LOCK_SH) prevents reading a partially-written file.
+		data, err := fileutil.ReadFileWithLock(path)
 		if err != nil {
 			log.Warn("Failed to read rule file %s: %v", path, err)
 			log.Trace("    FAILED to read: %v", err)
@@ -192,7 +193,7 @@ func (l *Loader) LoadUser() ([]Rule, error) {
 
 // validateFile validates a rule file without loading it
 func (l *Loader) validateFile(path string) error {
-	data, err := os.ReadFile(path)
+	data, err := fileutil.ReadFileWithLock(path)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
@@ -238,8 +239,8 @@ func (l *Loader) AddRuleFile(srcPath string) (string, error) {
 		destPath = filepath.Join(l.userDir, filename)
 	}
 
-	// Write to destination
-	if err := fileutil.SecureWriteFile(destPath, data); err != nil {
+	// Write to destination with exclusive lock and 0600 permissions.
+	if err := fileutil.WriteFileWithLock(destPath, data); err != nil {
 		return "", fmt.Errorf("failed to write rule file: %w", err)
 	}
 
@@ -357,7 +358,7 @@ func (l *Loader) ListUserRuleFiles() ([]string, error) {
 func (l *Loader) VerifyIntegrity() []string {
 	var tampered []string
 	for path, expectedHash := range l.fileChecksums {
-		content, err := os.ReadFile(path)
+		content, err := fileutil.ReadFileWithLock(path)
 		if err != nil {
 			tampered = append(tampered, path+" (missing)")
 			continue

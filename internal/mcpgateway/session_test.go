@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestSessionStore_BasicOps(t *testing.T) {
@@ -107,5 +108,45 @@ func TestSessionStore_MaxSessions(t *testing.T) {
 	s.Track("new-session")
 	if !s.Exists("new-session") {
 		t.Error("should accept new session after removal frees capacity")
+	}
+}
+
+func TestSessionStore_DoubleClose(t *testing.T) {
+	s := NewSessionStore()
+	s.Close()
+	s.Close() // must not panic
+
+	// Store still usable for reads after close (reaper stopped but data intact)
+	s.Track("after-close")
+}
+
+func TestSessionStore_ReaperExpiresSessions(t *testing.T) {
+	s := &SessionStore{
+		sessions: make(map[string]time.Time),
+		stop:     make(chan struct{}),
+	}
+	defer s.Close()
+
+	// Insert an already-expired session
+	s.mu.Lock()
+	s.sessions["old"] = time.Now().Add(-25 * time.Hour)
+	s.sessions["fresh"] = time.Now()
+	s.mu.Unlock()
+
+	// Simulate one reap cycle
+	s.mu.Lock()
+	now := time.Now()
+	for id, ts := range s.sessions {
+		if now.Sub(ts) > sessionTTL {
+			delete(s.sessions, id)
+		}
+	}
+	s.mu.Unlock()
+
+	if s.Exists("old") {
+		t.Error("expired session should have been reaped")
+	}
+	if !s.Exists("fresh") {
+		t.Error("fresh session should survive reap")
 	}
 }

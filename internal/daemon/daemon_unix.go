@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/BakeLens/crust/internal/fileutil"
-	"golang.org/x/sys/unix"
 )
 
 // pidLockFile holds the open PID file to maintain the flock advisory lock.
@@ -30,7 +29,7 @@ func WritePID() error {
 	if err != nil {
 		return fmt.Errorf("open PID file: %w", err)
 	}
-	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil { //nolint:gosec // Fd() fits in int on all supported platforms
+	if err := fileutil.TryLockExclusive(f); err != nil {
 		f.Close()
 		return fmt.Errorf("another instance is running (flock %s): %w", path, err)
 	}
@@ -167,13 +166,8 @@ func Daemonize(args []string, extraEnvKeys []string) (int, error) {
 		"USER=" + os.Getenv("USER"),
 		"CRUST_DAEMON=1",
 	}
-	// Propagate secret environment variables if set
-	if apiKey := os.Getenv("LLM_API_KEY"); apiKey != "" {
-		cmd.Env = append(cmd.Env, "LLM_API_KEY="+apiKey)
-	}
-	if dbKey := os.Getenv("DB_KEY"); dbKey != "" {
-		cmd.Env = append(cmd.Env, "DB_KEY="+dbKey)
-	}
+	// SECURITY: LLM_API_KEY and DB_KEY are NOT propagated via env vars.
+	// The daemon reads secrets from OS keyring / file fallback directly.
 	// Propagate proxy environment variables (required for upstream connectivity)
 	for _, key := range []string{
 		"HTTP_PROXY", "http_proxy",

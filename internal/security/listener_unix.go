@@ -9,7 +9,6 @@ import (
 	"os"
 
 	"github.com/BakeLens/crust/internal/fileutil"
-	"golang.org/x/sys/unix"
 )
 
 const maxSocketPathLen = 104 // macOS floor (Linux is 108)
@@ -33,7 +32,7 @@ func apiListener(socketPath string) (net.Listener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open socket lockfile %s: %w", lockPath, err)
 	}
-	if err := unix.Flock(int(lf.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil { //nolint:gosec // Fd() fits in int
+	if err := fileutil.TryLockExclusive(lf); err != nil {
 		lf.Close()
 		return nil, fmt.Errorf("another instance owns %s (flock %s): %w", socketPath, lockPath, err)
 	}

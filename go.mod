@@ -12,11 +12,11 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/gobwas/glob v0.2.3
-	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/klauspost/compress v1.18.3
 	github.com/muesli/termenv v0.16.0
 	github.com/mutecomm/go-sqlcipher/v4 v4.4.2
 	github.com/posener/complete/v2 v2.1.0
+	github.com/zalando/go-keyring v0.2.6
 	golang.org/x/crypto v0.46.0
 	golang.org/x/sys v0.40.0
 	golang.org/x/term v0.39.0
@@ -26,6 +26,7 @@ require (
 )
 
 require (
+	al.essio.dev/pkg/shellescape v1.5.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/bytedance/sonic v1.14.0 // indirect
@@ -41,6 +42,7 @@ require (
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.5.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
+	github.com/danieljoos/wincred v1.2.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/gabriel-vasile/mimetype v1.4.12 // indirect
@@ -51,6 +53,7 @@ require (
 	github.com/go-quicktest/qt v1.101.1-0.20240301121107-c6c8733fa1e6 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/goccy/go-yaml v1.18.0 // indirect
+	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect

@@ -1,5 +1,3 @@
-//go:build !windows
-
 package jsonrpc
 
 import (
@@ -9,6 +7,7 @@ import (
 )
 
 // ForwardSignals registers for SIGINT, SIGTERM, and SIGHUP and returns the channel.
+// On Windows, SIGHUP is mapped to a no-op by the Go runtime.
 func ForwardSignals() chan os.Signal {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)

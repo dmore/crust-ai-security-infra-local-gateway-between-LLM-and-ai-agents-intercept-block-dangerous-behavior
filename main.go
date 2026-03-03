@@ -165,11 +165,10 @@ func runStart(args []string) {
 	daemonMode := startFlags.Bool("daemon-mode", false, "Internal: indicates running as daemon")
 	foreground := startFlags.Bool("foreground", false, "Run in foreground (don't daemonize); useful for containers")
 
-	// Allow passing secrets via flags (for scripting)
-	// SECURITY: Environment variables are preferred over CLI flags for secrets
+	// Allow passing secrets via flags (for scripting); prefer `crust set-key` for persistent storage.
 	endpoint := startFlags.String("endpoint", "", "LLM API endpoint URL")
-	apiKey := startFlags.String("api-key", "", "API key for the endpoint (prefer LLM_API_KEY env var)")
-	dbKey := startFlags.String("db-key", "", "Database encryption key (prefer DB_KEY env var)")
+	apiKey := startFlags.String("api-key", "", "API key for the endpoint (saved to OS keyring)")
+	dbKey := startFlags.String("db-key", "", "Database encryption key (auto-generated if not set)")
 	autoMode := startFlags.Bool("auto", false, "Auto mode: resolve providers from model names (per-provider keys or client auth)")
 
 	// Advanced options
@@ -186,21 +185,19 @@ func runStart(args []string) {
 		tui.SetPlainMode(true)
 	}
 
-	// SECURITY: Load secrets from environment variables using envconfig
-	// Environment variables are preferred over CLI flags (visible in ps auxww)
+	// Save original CLI flag values before LoadSecrets overwrites with auto-generated values.
+	cliAPIKey := *apiKey
+	cliDBKey := *dbKey
+
+	// Load secrets from OS keyring / file fallback, with CLI flag overrides.
 	secrets, err := config.LoadSecretsWithDefaults(*apiKey, *dbKey)
 	if err != nil {
 		tui.PrintError(fmt.Sprintf("Failed to load secrets: %v", err))
 		os.Exit(1)
 	}
 
-	// Use secrets from envconfig (overrides CLI flags if set)
-	if secrets.LLMAPIKey != "" {
-		*apiKey = secrets.LLMAPIKey
-	}
-	if secrets.DBKey != "" {
-		*dbKey = secrets.DBKey
-	}
+	*apiKey = secrets.LLMAPIKey
+	*dbKey = secrets.DBKey
 
 	// Load configuration
 	cfg, err := config.Load(*configPath)
@@ -297,13 +294,19 @@ func runStart(args []string) {
 		daemonArgs = append(daemonArgs, "--block-mode", *blockMode)
 	}
 
-	// SECURITY: Set secrets as env vars so Daemonize() can propagate them
-	// This handles the case where secrets came from CLI flags rather than env vars
-	if startupCfg.APIKey != "" {
-		os.Setenv("LLM_API_KEY", startupCfg.APIKey)
-	}
-	if startupCfg.EncryptionKey != "" {
-		os.Setenv("DB_KEY", startupCfg.EncryptionKey)
+	// Persist secrets to keystore only when the user explicitly provided
+	// values via CLI flags or the TUI prompt. Auto-generated values (DB key)
+	// are already saved by LoadSecrets — re-saving would trigger redundant
+	// OS keychain prompts on macOS.
+	userProvidedSecret := cliAPIKey != "" || cliDBKey != "" || startupCfg.APIKey != *apiKey
+	if userProvidedSecret {
+		if err := config.SaveSecrets(&config.Secrets{
+			LLMAPIKey: startupCfg.APIKey,
+			DBKey:     startupCfg.EncryptionKey,
+		}); err != nil {
+			tui.PrintError(fmt.Sprintf("Failed to save secrets: %v", err))
+			os.Exit(1)
+		}
 	}
 
 	// Launch daemon with progress steps
@@ -777,8 +780,6 @@ func printUsage() {
 
 	fmt.Println(tui.Separator("Environment Variables"))
 	fmt.Print(tui.AlignColumns([][2]string{
-		{"LLM_API_KEY", "API key for the LLM endpoint"},
-		{"DB_KEY", "Database encryption key"},
 		{"NO_COLOR", "Disable colored output (any value)"},
 	}, "  ", 2, tui.StyleCommand, tui.StyleMuted))
 	fmt.Println()
@@ -786,7 +787,7 @@ func printUsage() {
 	fmt.Println(tui.Separator("Examples"))
 	fmt.Print(tui.AlignColumns([][2]string{
 		{"crust start", "Interactive setup"},
-		{"LLM_API_KEY=sk-xxx crust start --endpoint https://openrouter.ai/api/v1", ""},
+		{"crust set-key --api-key sk-xxx && crust start --auto", "Store key, then start"},
 		{"crust start --auto", "Auto mode"},
 		{"crust start --foreground --auto --listen-address 0.0.0.0", "Docker/container mode"},
 		{"crust logs -f", "Follow logs"},
@@ -1124,8 +1125,12 @@ func runMCPDiscover(args []string) {
 	}
 
 	if *restore {
-		mcpdiscover.RestoreAll()
-		tui.PrintSuccess("MCP configs restored from backups")
+		n := mcpdiscover.RestoreAll()
+		if n > 0 {
+			tui.PrintSuccess(fmt.Sprintf("Restored %d MCP config(s) from backups", n))
+		} else {
+			tui.PrintWarning("No MCP config backups found to restore")
+		}
 		return
 	}
 

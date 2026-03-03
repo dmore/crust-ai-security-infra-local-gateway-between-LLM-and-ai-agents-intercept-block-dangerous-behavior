@@ -155,17 +155,26 @@ func RestoreConfig(configPath string) error {
 }
 
 // RestoreAll restores every known client config from its backup.
-func RestoreAll() {
-	RestoreAllWithClients(knownClients)
+// Returns the number of configs successfully restored.
+func RestoreAll() int {
+	return RestoreAllWithClients(knownClients)
 }
 
 // RestoreAllWithClients is the testable variant.
-func RestoreAllWithClients(clients []clientDef) {
+func RestoreAllWithClients(clients []clientDef) int {
+	restored := 0
 	for _, client := range clients {
 		path := client.ConfigPath()
 		if path == "" {
 			continue
 		}
-		_ = RestoreConfig(path) //nolint:errcheck // best-effort restore
+		if err := RestoreConfig(path); err != nil {
+			if !os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "crust: mcp discover: restore %s failed: %v\n", path, err)
+			}
+			continue
+		}
+		restored++
 	}
+	return restored
 }

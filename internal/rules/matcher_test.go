@@ -535,14 +535,14 @@ func TestExpandFileGlobs(t *testing.T) {
 			wantSubstr: "credentials",
 		},
 		{
-			name:      "no-match glob produces empty result",
-			input:     []string{filepath.Join(home, ".x*")},
-			wantEmpty: true,
+			name:       "no-match glob keeps raw path",
+			input:      []string{filepath.Join(home, ".x*")},
+			wantSubstr: ".x*",
 		},
 		{
-			name:      "nonexistent directory glob produces empty",
-			input:     []string{filepath.Join(home, "nonexistent", "*.txt")},
-			wantEmpty: true,
+			name:       "nonexistent directory glob keeps raw path",
+			input:      []string{filepath.Join(home, "nonexistent", "*.txt")},
+			wantSubstr: "*.txt",
 		},
 		{
 			name:       "bashrc glob expands (not a false positive)",

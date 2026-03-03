@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"golang.org/x/sys/unix"
+	"github.com/BakeLens/crust/internal/fileutil"
 )
 
 func TestWritePID_ExclusiveLock(t *testing.T) {
@@ -25,8 +25,8 @@ func TestWritePID_ExclusiveLock(t *testing.T) {
 	}
 	defer f1.Close()
 
-	if err := unix.Flock(int(f1.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		t.Fatalf("first flock: %v", err)
+	if err := fileutil.TryLockExclusive(f1); err != nil {
+		t.Fatalf("first lock: %v", err)
 	}
 
 	// Second attempt should fail (EWOULDBLOCK)
@@ -36,16 +36,16 @@ func TestWritePID_ExclusiveLock(t *testing.T) {
 	}
 	defer f2.Close()
 
-	err = unix.Flock(int(f2.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+	err = fileutil.TryLockExclusive(f2)
 	if err == nil {
-		t.Fatal("second flock should fail when first holds lock")
+		t.Fatal("second lock should fail when first holds lock")
 	}
 
 	// Release first lock
-	unix.Flock(int(f1.Fd()), unix.LOCK_UN)
+	fileutil.Unlock(f1)
 
 	// Now second should succeed
-	if err := unix.Flock(int(f2.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		t.Fatalf("flock after release should succeed: %v", err)
+	if err := fileutil.TryLockExclusive(f2); err != nil {
+		t.Fatalf("lock after release should succeed: %v", err)
 	}
 }

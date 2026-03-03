@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -24,9 +27,6 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
 
-      - name: go vet
-        run: go vet ./...
-
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -37,9 +37,68 @@ jobs:
           go install go.uber.org/nilaway/cmd/nilaway@latest
           nilaway ./...
 
+  security:
+    name: Security Checks
+    needs: [lint-go]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.13'
+
+      - name: Install gitleaks (DLP Tier 2 runtime dependency)
+        run: go install github.com/zricethezav/gitleaks/v8@latest
+
+      - name: Verify PIE binary
+        run: |
+          go build -buildmode=pie -o crust-pie .
+          file crust-pie | grep -qi "pie\|shared object\|position independent"
+          rm crust-pie
+
+      - name: Fuzz tests (critical, 30s each — every PR)
+        run: |
+          go test ./internal/rules/... -fuzz=FuzzEngineBypass -fuzztime=30s -short
+          go test ./internal/rules/... -fuzz=FuzzBuiltinRuleBypass -fuzztime=30s -short
+          go test ./internal/rules/... -fuzz=FuzzNormalizeUnicode -fuzztime=30s -short
+          go test ./internal/rules/... -fuzz=FuzzLoopbackRegex -fuzztime=30s -short
+          go test ./internal/rules/... -fuzz=FuzzMCPToolBypass -fuzztime=30s -short
+          go test ./internal/rules/... -fuzz=FuzzPipeBypass -fuzztime=30s -short
+          go test ./internal/rules/... -fuzz=FuzzConfusableBypass -fuzztime=30s -short
+
+      - name: Fuzz tests (full suite, 10s each — main only)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          go test ./internal/rules/... -fuzz=FuzzNormalizerBypass -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzParseShellCommands -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzMatcherConsistency -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzExtractBashCommand -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzIsSuspiciousInput -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzContainsObfuscation -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzForkBombDetection -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzCommandRegexBypass -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzHostRegexBypass -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzJSONUnicodeEscapeBypass -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzEvasionDetectionBypass -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzGlobCommandBypass -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzPipelineExtraction -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzContentConfusableBypass -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzVariableExpansionEvasion -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzShapeDetectionBypass -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzWebSearchURLBypass -fuzztime=10s -short
+          go test ./internal/rules/... -fuzz=FuzzNormalAgentFalsePositive -fuzztime=10s -short
+          go test ./internal/httpproxy/... -fuzz=FuzzParseSSEEventData -fuzztime=10s -short
+          go test ./internal/httpproxy/... -fuzz=FuzzCopyHeaders -fuzztime=10s -short
+          go test ./internal/httpproxy/... -fuzz=FuzzStripHopByHopHeaders -fuzztime=10s -short
+          go test ./internal/httpproxy/... -fuzz=FuzzParseAnthropicEvent -fuzztime=10s -short
+          go test ./internal/httpproxy/... -fuzz=FuzzParseOpenAIEvent -fuzztime=10s -short
+          go test ./internal/httpproxy/... -fuzz=FuzzParseEvent -fuzztime=10s -short
+          go test ./internal/httpproxy/... -fuzz=FuzzApplyResultToToolCalls -fuzztime=10s -short
 
   test:
     name: Go Test (${{ matrix.os }})
+    needs: [lint-go]
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -51,7 +110,7 @@ jobs:
         with:
           go-version: '1.24.13'
 
-      - name: Install gitleaks (DLP Tier 2)
+      - name: Install gitleaks (DLP Tier 2 runtime dependency)
         run: go install github.com/zricethezav/gitleaks/v8@latest
 
       - name: Build
@@ -60,13 +119,22 @@ jobs:
       - name: Build (notui)
         run: go build -tags notui ./...
 
-      - name: Unit tests (with race detector)
-        run: go test -race ./... -short
+      - name: Unit tests (with race detector and coverage)
+        run: go test -race -short -coverprofile coverage.out -covermode atomic ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.out
+          flags: ${{ matrix.os }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
   # macOS and FreeBSD run only on main to reduce CI costs (macOS is 10x billing).
   test-expensive:
     name: Go Test (${{ matrix.os }})
     if: github.ref == 'refs/heads/main'
+    needs: [lint-go]
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -78,7 +146,7 @@ jobs:
         with:
           go-version: '1.24.13'
 
-      - name: Install gitleaks (DLP Tier 2)
+      - name: Install gitleaks (DLP Tier 2 runtime dependency)
         run: go install github.com/zricethezav/gitleaks/v8@latest
 
       - name: Build
@@ -88,7 +156,7 @@ jobs:
         run: go build -tags notui ./...
 
       - name: Unit tests (with race detector)
-        run: go test -race ./... -short
+        run: go test -race -short ./...
 
   test-freebsd:
     name: Go Test (FreeBSD)
@@ -107,10 +175,11 @@ jobs:
             go version
             go build ./...
             go build -tags notui ./...
-            go test ./... -short
+            go test -short ./...
 
   e2e:
-    name: E2E Tests (MCP stdio + HTTP)
+    name: E2E Tests (MCP stdio + HTTP + ACP)
+    needs: [lint-go]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -128,11 +197,14 @@ jobs:
           npm install -g @modelcontextprotocol/server-filesystem
           npm install -g @modelcontextprotocol/server-everything
 
-      - name: Install gitleaks (DLP Tier 2)
+      - name: Install gitleaks (DLP Tier 2 runtime dependency)
         run: go install github.com/zricethezav/gitleaks/v8@latest
 
-      - name: E2E tests (stdio + HTTP)
-        run: go test ./internal/mcpgateway/... -v -run E2E -timeout 180s
+      - name: MCP E2E tests (stdio + HTTP)
+        run: go test -race ./internal/mcpgateway/... -v -run E2E -timeout 180s
+
+      - name: ACP E2E tests
+        run: go test -race ./internal/acpwrap/... -v -run E2E -timeout 60s
 
   docker-test:
     name: Docker
@@ -143,13 +215,17 @@ jobs:
       - name: Build image
         run: docker build -t crust-test .
 
-      - name: Start container
+      - name: Start container and wait for healthy
         run: |
           docker run -d --name crust-ci -p 9090:9090 crust-test
-          sleep 3
-
-      - name: Health check
-        run: curl -sf http://localhost:9090/health
+          n=0; while [ "$n" -lt 15 ]; do
+            curl -sf http://localhost:9090/health && exit 0
+            sleep 1
+            n=$((n + 1))
+          done
+          echo "Health check failed after 15 attempts"
+          docker logs crust-ci
+          exit 1
 
       - name: Graceful shutdown
         run: |
@@ -160,4 +236,3 @@ jobs:
       - name: Logs on failure
         if: failure()
         run: docker logs crust-ci 2>&1 || true
-

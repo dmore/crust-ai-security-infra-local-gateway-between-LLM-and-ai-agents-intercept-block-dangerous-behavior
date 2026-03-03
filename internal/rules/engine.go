@@ -1209,7 +1209,9 @@ func (e *Engine) incrementHitCount(name string) {
 //   - "tar -C /tmp/*" → filepath.Glob finds /tmp/foo, /tmp/bar → not protected → allowed
 //   - "cat /home/user/.b*" → filepath.Glob finds /home/user/.bashrc → not protected → allowed
 //
-// If a glob matches no files, the path is dropped — there's nothing to protect.
+// SECURITY: If a glob matches no files, the raw path is kept so the rule
+// matcher can still detect malicious intent (e.g., "bat ~/.ssh/id_*00"
+// targets SSH keys even if the glob resolves to nothing on disk).
 // Non-glob paths pass through unchanged.
 func expandFileGlobs(paths []string) []string {
 	fs := pathutil.DefaultFS()
@@ -1221,6 +1223,9 @@ func expandFileGlobs(paths []string) []string {
 		}
 		matches, err := filepath.Glob(p)
 		if err != nil || len(matches) == 0 {
+			// Keep the raw path — dropping it would let an agent bypass
+			// rules by appending glob chars (e.g., "id_*00" to evade "id_*").
+			result = append(result, p)
 			continue
 		}
 		// SECURITY: filepath.Glob returns canonical casing from the filesystem.

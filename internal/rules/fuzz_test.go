@@ -195,7 +195,7 @@ func FuzzEngineBypass(f *testing.F) {
 		// INVARIANT: If the normalized paths contain a blocked path,
 		// the engine MUST match. A false negative here is a bypass.
 		blockedPaths := []string{"/etc/passwd", "/etc/shadow"}
-		sshBlockPrefix := "/home/user/.ssh/id_"
+		sshDir := "/home/user/.ssh"
 
 		for _, np := range normalizedPaths {
 			for _, blocked := range blockedPaths {
@@ -203,12 +203,11 @@ func FuzzEngineBypass(f *testing.F) {
 					t.Errorf("BYPASS: command %q normalized to %q but engine did NOT block", cmd, np)
 				}
 			}
-			// Check SSH key file paths: must start with id_ prefix, must be a file
-			// (not a subdirectory like id_/foo), and must not be .pub.
-			// The glob "id_*" uses '/' as separator so it only matches files, not dirs.
-			if strings.HasPrefix(np, sshBlockPrefix) &&
+			// Check SSH key file paths: file must be directly in ~/.ssh/
+			// with an id_ prefix and must not be .pub.
+			if path.Dir(np) == sshDir &&
+				strings.HasPrefix(path.Base(np), "id_") &&
 				!strings.HasSuffix(np, ".pub") &&
-				!strings.Contains(np[len(sshBlockPrefix):], "/") &&
 				!result.Matched {
 				t.Errorf("BYPASS: command %q normalized to SSH key %q but engine did NOT block", cmd, np)
 			}
