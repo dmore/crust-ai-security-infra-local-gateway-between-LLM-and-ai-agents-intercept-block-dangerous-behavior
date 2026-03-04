@@ -947,14 +947,18 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 			// Bash parse failed. On Windows, try the pwsh worker as the authoritative
 			// PS parser — the command may be valid PowerShell even if bash rejects it.
 			if e.pwshWorker != nil {
-				if psResp, psErr := e.pwshWorker.parse(cmd); psErr == nil && len(psResp.ParseErrors) == 0 && len(psResp.Commands) > 0 {
-					e.extractFromParsedCommandsDepth(info, psResp.Commands, 0, nil)
+				if psResp, psErr := e.pwshWorker.parse(cmd); psErr == nil && len(psResp.ParseErrors) == 0 {
+					if len(psResp.Commands) > 0 {
+						e.extractFromParsedCommandsDepth(info, psResp.Commands, 0, nil)
+					}
+					// Valid PS with zero commands (comment-only, pure assignment, etc.)
+					// is harmless — do not flag as evasive.
 					printed = append(printed, strings.TrimSpace(cmd))
 					continue
 				}
 			}
 			// Unparseable as bash, and either no pwsh worker or pwsh also
-			// rejected it (parse errors) or returned no commands: treat as evasive.
+			// rejected it (parse errors): treat as evasive.
 			info.Evasive = true
 			info.EvasiveReason = "unparseable shell command: " + err.Error()
 			printed = append(printed, strings.TrimSpace(cmd))
@@ -1028,7 +1032,7 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 			} else if len(psResp.ParseErrors) == 0 && len(psResp.Commands) > 0 {
 				e.extractFromParsedCommandsDepth(info, psResp.Commands, 0, nil)
 			}
-			// If psResp.ParseErrors != 0: command is invalid PS but valid bash — allow.
+			// If psResp.ParseErrors != 0 (len > 0): command is invalid PS but valid bash — allow.
 		}
 	}
 

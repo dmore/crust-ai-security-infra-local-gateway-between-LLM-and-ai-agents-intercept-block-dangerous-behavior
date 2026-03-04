@@ -94,6 +94,11 @@ while ($true) {
                                     if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) }
                                 } elseif ($_ -is [System.Management.Automation.Language.CommandParameterAst]) {
                                     $ag.Add('-' + $_.ParameterName)
+                                    # -Flag:value colon syntax: Argument holds the value expression.
+                                    if ($null -ne $_.Argument -and
+                                        $_.Argument -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                                        $ag.Add($_.Argument.Value)
+                                    }
                                 }
                             } catch { $null = $_ }
                         }
@@ -116,13 +121,13 @@ while ($true) {
         # the response MUST be exactly one line.
         # Use -replace with single-quoted regex (no PS backtick escapes needed,
         # which would conflict with Go raw string literal delimiters).
-        ($resp | ConvertTo-Json -Compress -Depth 5) -replace '\r\n|\n', ''
+        ($resp | ConvertTo-Json -Compress -Depth 5) -replace '\r\n|\r|\n', ''
         [Console]::Out.Flush()
     } catch {
         ([PSCustomObject]@{
             commands    = [object[]]@()
             parseErrors = [string[]]@($_.Exception.Message)
-        } | ConvertTo-Json -Compress) -replace '\r\n|\n', ''
+        } | ConvertTo-Json -Compress) -replace '\r\n|\r|\n', ''
         [Console]::Out.Flush()
     }
 }
@@ -239,6 +244,9 @@ func (w *pwshWorker) parse(cmd string) (pwshWorkerResponse, error) {
 }
 
 func (w *pwshWorker) kill() {
+	if w.stdin != nil {
+		w.stdin.Close() // close write end before Kill to avoid fd leak
+	}
 	if w.proc != nil && w.proc.Process != nil {
 		w.proc.Process.Kill()
 		proc := w.proc
@@ -253,10 +261,7 @@ func (w *pwshWorker) kill() {
 func (w *pwshWorker) stop() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.stdin != nil {
-		w.stdin.Close()
-	}
-	w.kill()
+	w.kill() // kill() closes stdin before sending SIGKILL
 }
 
 // encodePSCommand encodes a PowerShell script as base64 UTF-16LE for use
