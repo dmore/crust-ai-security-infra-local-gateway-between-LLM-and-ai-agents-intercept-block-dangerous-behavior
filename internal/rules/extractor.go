@@ -926,8 +926,8 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 		file, err := parser.Parse(strings.NewReader(cmd), "")
 		if err != nil && runtime.GOOS == goosWindows && looksLikePowerShell(cmd) {
 			transformed := normalizePSBackslashPaths(substitutePSVariables(cmd))
-			if f, err2 := parser.Parse(strings.NewReader(transformed), ""); err2 == nil {
-				cmd, file, err = transformed, f, nil
+			if retryFile, retryErr := parser.Parse(strings.NewReader(transformed), ""); retryErr == nil {
+				cmd, file, err = transformed, retryFile, nil
 			}
 		}
 		if err != nil {
