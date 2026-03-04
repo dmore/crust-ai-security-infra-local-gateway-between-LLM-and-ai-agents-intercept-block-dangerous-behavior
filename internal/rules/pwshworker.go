@@ -43,50 +43,64 @@ while ($true) {
         $ast  = [System.Management.Automation.Language.Parser]::ParseInput(
                     $req.command, [ref]$toks, [ref]$errs)
 
-        # Two-pass approach: collect ALL top-level $var = "literal" assignments
-        # first, then process commands. Using top-level (recurse=$false) prevents
-        # assignments inside nested scriptblocks (e.g. ForEach-Object { $p=... })
-        # from polluting the variable table for outer-scope commands.
+        # Walk top-level statements in source order via $block.Statements.
+        # For each statement: record any direct $var = "literal" assignment
+        # FIRST, then extract all CommandAst nodes from that statement.
+        #
+        # This is the correct scoping approach:
+        #   $p = "secret"; Get-Content $p   → $p resolved (assignment precedes use)
+        #   ForEach-Object { $p = "x" }; Get-Content $p → $p NOT resolved
+        #     (inner-scope assignments never pollute the top-level $vars table)
+        #
+        # FindAll($pred, $false) on a ScriptBlockAst root skips its own children
+        # due to PS visitor behavior, so we avoid it for assignment collection and
+        # instead walk $block.Statements directly.
         $vars = @{}
-        $ast.FindAll({
-            param($n)
-            $n -is [System.Management.Automation.Language.AssignmentStatementAst]
-        }, $false) | ForEach-Object {
-            try {
-                $lhs = $_.Left
-                $rhs = $_.Right
-                if ($lhs -is [System.Management.Automation.Language.VariableExpressionAst] -and
-                    $rhs -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
-                    $vars[$lhs.VariablePath.UserPath] = $rhs.Value
-                }
-            } catch {}
-        }
-
         $cmds = [System.Collections.Generic.List[object]]::new()
-        $ast.FindAll({
-            param($n)
-            $n -is [System.Management.Automation.Language.CommandAst]
-        }, $true) | ForEach-Object {
-                $nm = $_.GetCommandName()
-                if ($null -ne $nm) {
-                    $ag = [System.Collections.Generic.List[string]]::new()
-                    $_.CommandElements | Select-Object -Skip 1 | ForEach-Object {
-                        try {
-                            if ($_ -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
-                                $ag.Add($_.Value)
-                            } elseif ($_ -is [System.Management.Automation.Language.VariableExpressionAst]) {
-                                $k = $_.VariablePath.UserPath
-                                if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) }
-                            } elseif ($_ -is [System.Management.Automation.Language.CommandParameterAst]) {
-                                $ag.Add('-' + $_.ParameterName)
-                            }
-                        } catch {}
-                    }
-                    $cmds.Add([PSCustomObject]@{
-                        name = $nm
-                        args = [string[]]$ag.ToArray()
-                    })
+        foreach ($block in @($ast.BeginBlock, $ast.ProcessBlock, $ast.EndBlock)) {
+            if ($null -eq $block) { continue }
+            foreach ($stmt in $block.Statements) {
+                # Record direct-scope $var = "literal" before processing this statement's commands.
+                if ($stmt -is [System.Management.Automation.Language.AssignmentStatementAst]) {
+                    try {
+                        $lhs = $stmt.Left
+                        $rhs = $stmt.Right
+                        if ($lhs -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                            $rhs -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                            $vars[$lhs.VariablePath.UserPath] = $rhs.Value
+                        }
+                    } catch {}
                 }
+                # Extract all CommandAst nodes from this statement, recursing into
+                # nested scriptblocks (pipelines, foreach bodies, etc.).
+                # Called on $stmt (a StatementAst), not the root ScriptBlockAst,
+                # so FindAll with $true works correctly.
+                $stmt.FindAll({
+                    param($n)
+                    $n -is [System.Management.Automation.Language.CommandAst]
+                }, $true) | ForEach-Object {
+                    $nm = $_.GetCommandName()
+                    if ($null -ne $nm) {
+                        $ag = [System.Collections.Generic.List[string]]::new()
+                        $_.CommandElements | Select-Object -Skip 1 | ForEach-Object {
+                            try {
+                                if ($_ -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                                    $ag.Add($_.Value)
+                                } elseif ($_ -is [System.Management.Automation.Language.VariableExpressionAst]) {
+                                    $k = $_.VariablePath.UserPath
+                                    if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) }
+                                } elseif ($_ -is [System.Management.Automation.Language.CommandParameterAst]) {
+                                    $ag.Add('-' + $_.ParameterName)
+                                }
+                            } catch {}
+                        }
+                        $cmds.Add([PSCustomObject]@{
+                            name = $nm
+                            args = [string[]]$ag.ToArray()
+                        })
+                    }
+                }
+            }
         }
 
         $resp = [PSCustomObject]@{
