@@ -412,7 +412,7 @@ func (b *BufferedSSEWriter) flushFilteredAnthropicEvents(blockedIndices, replace
 			if bytes.Contains(event.Data, []byte(`"content_block_delta"`)) && !replacedDeltaSent[eventIndex] {
 				replacedDeltaSent[eventIndex] = true
 				input := buildBlockedReplacement(tc.Name, matchResult)
-				inputJSONBytes, err := json.Marshal(input)
+				inputJSONBytes, err := marshalJSON(input)
 				if err != nil {
 					continue
 				}
@@ -582,7 +582,7 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIEvents(blockedIndices, replacedIn
 							origName = origTC.Name
 						}
 						input := buildBlockedReplacement(origName, matchResult)
-						argBytes, err := json.Marshal(input)
+						argBytes, err := marshalJSON(input)
 						if err == nil {
 							replaced.Function.Arguments = string(argBytes)
 						}
@@ -605,7 +605,7 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIEvents(blockedIndices, replacedIn
 
 			// Need to convert back - just modify in place via JSON marshal/unmarshal dance
 			if modified {
-				filteredJSON, err := json.Marshal(filtered)
+				filteredJSON, err := marshalJSON(filtered)
 				if err != nil {
 					log.Debug("Failed to marshal filtered tool calls: %v", err)
 					continue
@@ -732,7 +732,7 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIResponsesEvents(blockedIndices, r
 					}
 					matchResult := replacedIndices[outputIdx]
 					input := buildBlockedReplacement(tc.Name, matchResult)
-					argBytes, err := json.Marshal(input)
+					argBytes, err := marshalJSON(input)
 					if err != nil {
 						continue
 					}
@@ -757,7 +757,7 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIResponsesEvents(blockedIndices, r
 				}
 				matchResult := replacedIndices[outputIdx]
 				input := buildBlockedReplacement(tc.Name, matchResult)
-				argBytes, err := json.Marshal(input)
+				argBytes, err := marshalJSON(input)
 				if err != nil {
 					continue
 				}
@@ -779,7 +779,7 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIResponsesEvents(blockedIndices, r
 				}
 				matchResult := replacedIndices[outputIdx]
 				input := buildBlockedReplacement(tc.Name, matchResult)
-				argBytes, err := json.Marshal(input)
+				argBytes, err := marshalJSON(input)
 				if err != nil {
 					continue
 				}
@@ -823,9 +823,22 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIResponsesEvents(blockedIndices, r
 	return nil
 }
 
+// marshalJSON encodes v to JSON without HTML escaping (&, <, > are preserved).
+// json.Marshal HTML-escapes these by default, which corrupts user content.
+func marshalJSON(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	b := buf.Bytes()
+	return b[:len(b)-1], nil // strip trailing newline from json.Encoder
+}
+
 // writeSSEEvent marshals data as JSON and writes it as an SSE event with "event: <type>\ndata: ...\n\n" framing.
 func (b *BufferedSSEWriter) writeSSEEvent(eventType string, data any) error {
-	jsonData, err := json.Marshal(data)
+	jsonData, err := marshalJSON(data)
 	if err != nil {
 		log.Warn("Failed to marshal SSE event: %v", err)
 		return err
@@ -842,7 +855,7 @@ func (b *BufferedSSEWriter) writeSSEEvent(eventType string, data any) error {
 
 // writeSSEData writes an SSE event with "data: ...\n\n" framing (no event type line).
 func (b *BufferedSSEWriter) writeSSEData(data any) error {
-	jsonData, err := json.Marshal(data)
+	jsonData, err := marshalJSON(data)
 	if err != nil {
 		log.Warn("Failed to marshal SSE data: %v", err)
 		return err
