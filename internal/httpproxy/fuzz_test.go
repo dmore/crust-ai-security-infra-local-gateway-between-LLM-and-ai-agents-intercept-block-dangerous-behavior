@@ -106,23 +106,27 @@ func FuzzBufferEvent(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, eventType string, data []byte) {
 		w := httptest.NewRecorder()
+		// MaxEvents=3: with 5 iterations below, the 4th call always triggers the
+		// size-limit overflow path, exercising bufferState transitions on overflow.
 		buf := NewBufferedSSEWriter(w,
-			SSEBufferConfig{MaxEvents: 1000, Timeout: 30 * time.Second},
+			SSEBufferConfig{MaxEvents: 3, Timeout: 30 * time.Second},
 			SSERequestContext{TraceID: "t", SessionID: "s", Model: "model", APIType: types.APITypeAnthropic, Tools: nil},
 		)
 
 		raw := append([]byte("data: "), data...)
 		raw = append(raw, '\n', '\n')
 
-		err := buf.BufferEvent(eventType, data, raw)
+		// Call 5 times so the overflow path (len(events) >= maxBufferEvents) is
+		// always reached regardless of the fuzz input.
+		for range 5 {
+			if err := buf.BufferEvent(eventType, data, raw); err != nil {
+				break
+			}
+		}
 
 		// INVARIANT 1: Must not panic (implicit).
 
-		// INVARIANT 2: err must be nil or a well-typed error — never something
-		// that would cause the caller to crash.
-		_ = err
-
-		// INVARIANT 3: After buffering, GetToolCalls must not panic.
+		// INVARIANT 2: After overflow (or any error), GetToolCalls must not panic.
 		_ = buf.GetToolCalls()
 	})
 }
