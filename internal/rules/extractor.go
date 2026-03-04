@@ -953,7 +953,8 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 					continue
 				}
 			}
-			// Unparseable by both parsers (or no pwsh worker): treat as evasive.
+			// Unparseable as bash, and either no pwsh worker or pwsh also
+			// rejected it (parse errors) or returned no commands: treat as evasive.
 			info.Evasive = true
 			info.EvasiveReason = "unparseable shell command: " + err.Error()
 			printed = append(printed, strings.TrimSpace(cmd))
@@ -1125,7 +1126,8 @@ var winBackslashPathRe = regexp.MustCompile(`(?:[A-Za-z]:\\|\\\\)(?:[a-zA-Z0-9_.
 var psVarAssignRe = regexp.MustCompile(`\$([a-zA-Z_]\w*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s;|]+))`)
 
 // looksLikePowerShell returns true if the command string appears to contain
-// PowerShell syntax: Verb-Noun cmdlets or PS-style $var= assignments.
+// PowerShell syntax: Verb-Noun cmdlets, PS-style $var= assignments,
+// the call operator (&), or .NET static method calls ([System.).
 func looksLikePowerShell(cmd string) bool {
 	fields := strings.FieldsFunc(cmd, func(r rune) bool {
 		return r == '|' || r == ';' || r == ' ' || r == '\t'
@@ -1133,7 +1135,16 @@ func looksLikePowerShell(cmd string) bool {
 	if slices.ContainsFunc(fields, isPowerShellCmdlet) {
 		return true
 	}
-	return psVarAssignRe.MatchString(cmd)
+	if psVarAssignRe.MatchString(cmd) {
+		return true
+	}
+	// Call operator: & "executable" or & { scriptblock }
+	trimmed := strings.TrimSpace(cmd)
+	if strings.HasPrefix(trimmed, "& ") || strings.HasPrefix(trimmed, "&{") {
+		return true
+	}
+	// .NET static method invocation: [System. or [Microsoft.
+	return strings.Contains(cmd, "[System.") || strings.Contains(cmd, "[Microsoft.")
 }
 
 // normalizePSBackslashPaths converts Windows backslash paths to forward slashes
