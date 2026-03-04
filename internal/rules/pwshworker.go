@@ -83,7 +83,7 @@ while ($true) {
                     $n -is [System.Management.Automation.Language.CommandAst]
                 }, $true) | ForEach-Object {
                     $nm = $_.GetCommandName()
-                    if ($null -ne $nm) {
+                    if ($nm) {  # filters both $null and "" (e.g. & "" arg)
                         $ag = [System.Collections.Generic.List[string]]::new()
                         $_.CommandElements | Select-Object -Skip 1 | ForEach-Object {
                             try {
