@@ -65,7 +65,7 @@ func BenchmarkInterceptOpenAI(b *testing.B) {
 		}, "")
 		b.ResetTimer()
 		for range b.N {
-			_, _ = interceptor.InterceptOpenAIResponse(resp, "trace-1", "sess-1", "gpt-4", types.APITypeOpenAICompletion, types.BlockModeRemove)
+			_, _ = interceptor.InterceptOpenAIResponse(resp, InterceptionContext{TraceID: "trace-1", SessionID: "sess-1", Model: "gpt-4", APIType: types.APITypeOpenAICompletion, BlockMode: types.BlockModeRemove})
 		}
 	})
 
@@ -86,7 +86,7 @@ func BenchmarkInterceptOpenAI(b *testing.B) {
 		}, "")
 		b.ResetTimer()
 		for range b.N {
-			_, _ = interceptor.InterceptOpenAIResponse(resp, "trace-1", "sess-1", "gpt-4", types.APITypeOpenAICompletion, types.BlockModeRemove)
+			_, _ = interceptor.InterceptOpenAIResponse(resp, InterceptionContext{TraceID: "trace-1", SessionID: "sess-1", Model: "gpt-4", APIType: types.APITypeOpenAICompletion, BlockMode: types.BlockModeRemove})
 		}
 	})
 
@@ -116,7 +116,7 @@ func BenchmarkInterceptOpenAI(b *testing.B) {
 		}, "")
 		b.ResetTimer()
 		for range b.N {
-			_, _ = interceptor.InterceptOpenAIResponse(resp, "trace-1", "sess-1", "gpt-4", types.APITypeOpenAICompletion, types.BlockModeRemove)
+			_, _ = interceptor.InterceptOpenAIResponse(resp, InterceptionContext{TraceID: "trace-1", SessionID: "sess-1", Model: "gpt-4", APIType: types.APITypeOpenAICompletion, BlockMode: types.BlockModeRemove})
 		}
 	})
 }
@@ -138,7 +138,7 @@ func BenchmarkInterceptAnthropic(b *testing.B) {
 		})
 		b.ResetTimer()
 		for range b.N {
-			_, _ = interceptor.InterceptAnthropicResponse(resp, "trace-1", "sess-1", "claude-3-opus", types.APITypeAnthropic, types.BlockModeRemove)
+			_, _ = interceptor.InterceptAnthropicResponse(resp, InterceptionContext{TraceID: "trace-1", SessionID: "sess-1", Model: "claude-3-opus", APIType: types.APITypeAnthropic, BlockMode: types.BlockModeRemove})
 		}
 	})
 
@@ -154,7 +154,7 @@ func BenchmarkInterceptAnthropic(b *testing.B) {
 		})
 		b.ResetTimer()
 		for range b.N {
-			_, _ = interceptor.InterceptAnthropicResponse(resp, "trace-1", "sess-1", "claude-3-opus", types.APITypeAnthropic, types.BlockModeRemove)
+			_, _ = interceptor.InterceptAnthropicResponse(resp, InterceptionContext{TraceID: "trace-1", SessionID: "sess-1", Model: "claude-3-opus", APIType: types.APITypeAnthropic, BlockMode: types.BlockModeRemove})
 		}
 	})
 
@@ -169,7 +169,7 @@ func BenchmarkInterceptAnthropic(b *testing.B) {
 		})
 		b.ResetTimer()
 		for range b.N {
-			_, _ = interceptor.InterceptAnthropicResponse(resp, "trace-1", "sess-1", "claude-3-opus", types.APITypeAnthropic, types.BlockModeRemove)
+			_, _ = interceptor.InterceptAnthropicResponse(resp, InterceptionContext{TraceID: "trace-1", SessionID: "sess-1", Model: "claude-3-opus", APIType: types.APITypeAnthropic, BlockMode: types.BlockModeRemove})
 		}
 	})
 }
@@ -197,7 +197,7 @@ func BenchmarkInterceptOpenAIResponses(b *testing.B) {
 		})
 		b.ResetTimer()
 		for range b.N {
-			_, _ = interceptor.InterceptOpenAIResponsesResponse(resp, "trace-1", "sess-1", "gpt-4o", types.APITypeOpenAIResponses, types.BlockModeRemove)
+			_, _ = interceptor.InterceptOpenAIResponsesResponse(resp, InterceptionContext{TraceID: "trace-1", SessionID: "sess-1", Model: "gpt-4o", APIType: types.APITypeOpenAIResponses, BlockMode: types.BlockModeRemove})
 		}
 	})
 
@@ -208,7 +208,7 @@ func BenchmarkInterceptOpenAIResponses(b *testing.B) {
 		})
 		b.ResetTimer()
 		for range b.N {
-			_, _ = interceptor.InterceptOpenAIResponsesResponse(resp, "trace-1", "sess-1", "gpt-4o", types.APITypeOpenAIResponses, types.BlockModeRemove)
+			_, _ = interceptor.InterceptOpenAIResponsesResponse(resp, InterceptionContext{TraceID: "trace-1", SessionID: "sess-1", Model: "gpt-4o", APIType: types.APITypeOpenAIResponses, BlockMode: types.BlockModeRemove})
 		}
 	})
 }
@@ -228,7 +228,7 @@ func BenchmarkInterceptReplace(b *testing.B) {
 		}, "")
 		b.ResetTimer()
 		for range b.N {
-			_, _ = interceptor.InterceptOpenAIResponse(resp, "trace-1", "sess-1", "gpt-4", types.APITypeOpenAICompletion, types.BlockModeReplace)
+			_, _ = interceptor.InterceptOpenAIResponse(resp, InterceptionContext{TraceID: "trace-1", SessionID: "sess-1", Model: "gpt-4", APIType: types.APITypeOpenAICompletion, BlockMode: types.BlockModeReplace})
 		}
 	})
 
@@ -239,7 +239,7 @@ func BenchmarkInterceptReplace(b *testing.B) {
 		})
 		b.ResetTimer()
 		for range b.N {
-			_, _ = interceptor.InterceptAnthropicResponse(resp, "trace-1", "sess-1", "claude-3-opus", types.APITypeAnthropic, types.BlockModeReplace)
+			_, _ = interceptor.InterceptAnthropicResponse(resp, InterceptionContext{TraceID: "trace-1", SessionID: "sess-1", Model: "claude-3-opus", APIType: types.APITypeAnthropic, BlockMode: types.BlockModeReplace})
 		}
 	})
 }
@@ -254,7 +254,7 @@ func BenchmarkInterceptPassthrough(b *testing.B) {
 		resp := createOpenAIResponse(nil, "Just a text response with no tool calls")
 		b.ResetTimer()
 		for range b.N {
-			_, _ = interceptor.InterceptOpenAIResponse(resp, "trace-1", "sess-1", "gpt-4", types.APITypeOpenAICompletion, types.BlockModeRemove)
+			_, _ = interceptor.InterceptOpenAIResponse(resp, InterceptionContext{TraceID: "trace-1", SessionID: "sess-1", Model: "gpt-4", APIType: types.APITypeOpenAICompletion, BlockMode: types.BlockModeRemove})
 		}
 	})
 
@@ -265,7 +265,7 @@ func BenchmarkInterceptPassthrough(b *testing.B) {
 		})
 		b.ResetTimer()
 		for range b.N {
-			_, _ = interceptor.InterceptAnthropicResponse(resp, "trace-1", "sess-1", "claude-3-opus", types.APITypeAnthropic, types.BlockModeRemove)
+			_, _ = interceptor.InterceptAnthropicResponse(resp, InterceptionContext{TraceID: "trace-1", SessionID: "sess-1", Model: "claude-3-opus", APIType: types.APITypeAnthropic, BlockMode: types.BlockModeRemove})
 		}
 	})
 }

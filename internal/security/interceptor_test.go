@@ -209,11 +209,13 @@ rules:
 
 			result, err := interceptor.InterceptOpenAIResponse(
 				responseBody,
-				"trace-1",
-				"session-1",
-				"gpt-4",
-				types.APITypeOpenAICompletion,
-				tt.blockMode,
+				InterceptionContext{
+					TraceID:   "trace-1",
+					SessionID: "session-1",
+					Model:     "gpt-4",
+					APIType:   types.APITypeOpenAICompletion,
+					BlockMode: tt.blockMode,
+				},
 			)
 
 			if err != nil {
@@ -312,11 +314,13 @@ rules:
 
 	result, err := interceptor.InterceptOpenAIResponse(
 		responseBody,
-		"trace-1",
-		"session-1",
-		"gpt-4",
-		types.APITypeOpenAICompletion,
-		types.BlockModeRemove,
+		InterceptionContext{
+			TraceID:   "trace-1",
+			SessionID: "session-1",
+			Model:     "gpt-4",
+			APIType:   types.APITypeOpenAICompletion,
+			BlockMode: types.BlockModeRemove,
+		},
 	)
 
 	if err != nil {
@@ -386,11 +390,13 @@ func TestInterceptOpenAIResponse_EmptyResponse(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := interceptor.InterceptOpenAIResponse(
 				tt.responseBody,
-				"trace-1",
-				"session-1",
-				"gpt-4",
-				types.APITypeOpenAICompletion,
-				types.BlockModeRemove,
+				InterceptionContext{
+					TraceID:   "trace-1",
+					SessionID: "session-1",
+					Model:     "gpt-4",
+					APIType:   types.APITypeOpenAICompletion,
+					BlockMode: types.BlockModeRemove,
+				},
 			)
 
 			if tt.wantError && err == nil {
@@ -440,11 +446,13 @@ rules:
 
 	result, err := interceptor.InterceptOpenAIResponse(
 		responseBody,
-		"trace-1",
-		"session-1",
-		"gpt-4",
-		types.APITypeOpenAICompletion,
-		types.BlockModeRemove,
+		InterceptionContext{
+			TraceID:   "trace-1",
+			SessionID: "session-1",
+			Model:     "gpt-4",
+			APIType:   types.APITypeOpenAICompletion,
+			BlockMode: types.BlockModeRemove,
+		},
 	)
 
 	if err != nil {
@@ -547,11 +555,13 @@ rules:
 
 			result, err := interceptor.InterceptAnthropicResponse(
 				responseBody,
-				"trace-1",
-				"session-1",
-				"claude-3-opus",
-				types.APITypeAnthropic,
-				tt.blockMode,
+				InterceptionContext{
+					TraceID:   "trace-1",
+					SessionID: "session-1",
+					Model:     "claude-3-opus",
+					APIType:   types.APITypeAnthropic,
+					BlockMode: tt.blockMode,
+				},
 			)
 
 			if err != nil {
@@ -613,11 +623,13 @@ func TestInterceptAnthropicResponse_TextBlockPassThrough(t *testing.T) {
 
 	result, err := interceptor.InterceptAnthropicResponse(
 		responseBody,
-		"trace-1",
-		"session-1",
-		"claude-3-opus",
-		types.APITypeAnthropic,
-		types.BlockModeRemove,
+		InterceptionContext{
+			TraceID:   "trace-1",
+			SessionID: "session-1",
+			Model:     "claude-3-opus",
+			APIType:   types.APITypeAnthropic,
+			BlockMode: types.BlockModeRemove,
+		},
 	)
 
 	if err != nil {
@@ -686,11 +698,13 @@ rules:
 
 	result, err := interceptor.InterceptAnthropicResponse(
 		responseBody,
-		"trace-1",
-		"session-1",
-		"claude-3-opus",
-		types.APITypeAnthropic,
-		types.BlockModeRemove,
+		InterceptionContext{
+			TraceID:   "trace-1",
+			SessionID: "session-1",
+			Model:     "claude-3-opus",
+			APIType:   types.APITypeAnthropic,
+			BlockMode: types.BlockModeRemove,
+		},
 	)
 
 	if err != nil {
@@ -766,11 +780,13 @@ func TestInterceptToolCalls_RoutesToCorrectHandler(t *testing.T) {
 
 			result, err := interceptor.InterceptToolCalls(
 				responseBody,
-				"trace-1",
-				"session-1",
-				"test-model",
-				tt.apiType,
-				types.BlockModeRemove,
+				InterceptionContext{
+					TraceID:   "trace-1",
+					SessionID: "session-1",
+					Model:     "test-model",
+					APIType:   tt.apiType,
+					BlockMode: types.BlockModeRemove,
+				},
 			)
 
 			if err != nil {
@@ -810,11 +826,13 @@ func TestInterceptOpenAIResponse_NilEngine(t *testing.T) {
 
 	result, err := interceptor.InterceptOpenAIResponse(
 		responseBody,
-		"trace-1",
-		"session-1",
-		"gpt-4",
-		types.APITypeOpenAICompletion,
-		types.BlockModeRemove,
+		InterceptionContext{
+			TraceID:   "trace-1",
+			SessionID: "session-1",
+			Model:     "gpt-4",
+			APIType:   types.APITypeOpenAICompletion,
+			BlockMode: types.BlockModeRemove,
+		},
 	)
 
 	if err != nil {
@@ -1034,11 +1052,13 @@ rules:
 
 	result, err := interceptor.InterceptOpenAIResponse(
 		responseBody,
-		"trace-1",
-		"session-1",
-		"gpt-4",
-		types.APITypeOpenAICompletion,
-		types.BlockModeRemove,
+		InterceptionContext{
+			TraceID:   "trace-1",
+			SessionID: "session-1",
+			Model:     "gpt-4",
+			APIType:   types.APITypeOpenAICompletion,
+			BlockMode: types.BlockModeRemove,
+		},
 	)
 
 	if err != nil {
@@ -1091,11 +1111,13 @@ rules:
 
 	result, err := interceptor.InterceptOpenAIResponse(
 		responseBody,
-		"trace-1",
-		"session-1",
-		"gpt-4",
-		types.APITypeOpenAICompletion,
-		types.BlockModeRemove,
+		InterceptionContext{
+			TraceID:   "trace-1",
+			SessionID: "session-1",
+			Model:     "gpt-4",
+			APIType:   types.APITypeOpenAICompletion,
+			BlockMode: types.BlockModeRemove,
+		},
 	)
 
 	// Should not error, just treat as non-matching
@@ -1139,11 +1161,13 @@ rules:
 
 	result, err := interceptor.InterceptAnthropicResponse(
 		responseBody,
-		"trace-1",
-		"session-1",
-		"claude-3-opus",
-		types.APITypeAnthropic,
-		types.BlockModeRemove,
+		InterceptionContext{
+			TraceID:   "trace-1",
+			SessionID: "session-1",
+			Model:     "claude-3-opus",
+			APIType:   types.APITypeAnthropic,
+			BlockMode: types.BlockModeRemove,
+		},
 	)
 
 	if err != nil {
@@ -1180,11 +1204,13 @@ func TestInterceptAnthropicResponse_NilEngine(t *testing.T) {
 
 	result, err := interceptor.InterceptAnthropicResponse(
 		responseBody,
-		"trace-1",
-		"session-1",
-		"claude-3-opus",
-		types.APITypeAnthropic,
-		types.BlockModeRemove,
+		InterceptionContext{
+			TraceID:   "trace-1",
+			SessionID: "session-1",
+			Model:     "claude-3-opus",
+			APIType:   types.APITypeAnthropic,
+			BlockMode: types.BlockModeRemove,
+		},
 	)
 
 	if err != nil {
@@ -1227,11 +1253,13 @@ func TestInterceptAnthropicResponse_EmptyResponse(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := interceptor.InterceptAnthropicResponse(
 				tt.responseBody,
-				"trace-1",
-				"session-1",
-				"claude-3-opus",
-				types.APITypeAnthropic,
-				types.BlockModeRemove,
+				InterceptionContext{
+					TraceID:   "trace-1",
+					SessionID: "session-1",
+					Model:     "claude-3-opus",
+					APIType:   types.APITypeAnthropic,
+					BlockMode: types.BlockModeRemove,
+				},
 			)
 
 			// Should not error
@@ -1279,11 +1307,13 @@ rules:
 
 	result, err := interceptor.InterceptOpenAIResponse(
 		responseBody,
-		"trace-1",
-		"session-1",
-		"gpt-4",
-		types.APITypeOpenAICompletion,
-		types.BlockModeReplace,
+		InterceptionContext{
+			TraceID:   "trace-1",
+			SessionID: "session-1",
+			Model:     "gpt-4",
+			APIType:   types.APITypeOpenAICompletion,
+			BlockMode: types.BlockModeReplace,
+		},
 	)
 
 	if err != nil {
@@ -1332,11 +1362,13 @@ rules:
 
 	result, err := interceptor.InterceptAnthropicResponse(
 		responseBody,
-		"trace-1",
-		"session-1",
-		"claude-3-opus",
-		types.APITypeAnthropic,
-		types.BlockModeReplace,
+		InterceptionContext{
+			TraceID:   "trace-1",
+			SessionID: "session-1",
+			Model:     "claude-3-opus",
+			APIType:   types.APITypeAnthropic,
+			BlockMode: types.BlockModeReplace,
+		},
 	)
 
 	if err != nil {
@@ -1414,11 +1446,13 @@ rules:
 
 	result, err := interceptor.InterceptOpenAIResponse(
 		responseBody,
-		"trace-1",
-		"session-1",
-		"gpt-4",
-		types.APITypeOpenAICompletion,
-		types.BlockModeRemove,
+		InterceptionContext{
+			TraceID:   "trace-1",
+			SessionID: "session-1",
+			Model:     "gpt-4",
+			APIType:   types.APITypeOpenAICompletion,
+			BlockMode: types.BlockModeRemove,
+		},
 	)
 
 	if err != nil {
@@ -1489,11 +1523,13 @@ func FuzzInterceptAnthropicResponse(f *testing.F) {
 	f.Fuzz(func(t *testing.T, body string) {
 		result, err := interceptor.InterceptAnthropicResponse(
 			[]byte(body),
-			types.TraceID("fuzz-trace"),
-			types.SessionID("fuzz-session"),
-			"claude-3",
-			types.APITypeAnthropic,
-			types.BlockModeRemove,
+			InterceptionContext{
+				TraceID:   types.TraceID("fuzz-trace"),
+				SessionID: types.SessionID("fuzz-session"),
+				Model:     "claude-3",
+				APIType:   types.APITypeAnthropic,
+				BlockMode: types.BlockModeRemove,
+			},
 		)
 		// Must not panic (fuzz framework catches).
 		// With nil engine, result is always non-nil and err is nil.

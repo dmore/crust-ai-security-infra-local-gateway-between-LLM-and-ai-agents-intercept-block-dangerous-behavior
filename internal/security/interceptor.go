@@ -67,6 +67,15 @@ type BlockedToolCall struct {
 	MatchResult rules.MatchResult
 }
 
+// InterceptionContext holds request metadata used for evaluation and telemetry.
+type InterceptionContext struct {
+	TraceID   types.TraceID
+	SessionID types.SessionID
+	Model     string
+	APIType   types.APIType
+	BlockMode types.BlockMode
+}
+
 // intercept is the shared implementation for all three Intercept* format methods.
 // It handles the guard check, result initialization, and final marshal.
 // fn receives the result and useReplaceMode, applies format-specific filtering,
@@ -103,11 +112,11 @@ func (i *Interceptor) intercept(
 }
 
 // InterceptOpenAIResponse intercepts tool calls in an OpenAI format response.
-func (i *Interceptor) InterceptOpenAIResponse(responseBody []byte, traceID types.TraceID, sessionID types.SessionID, model string, apiType types.APIType, blockMode types.BlockMode) (*InterceptionResult, error) {
-	return i.intercept(responseBody, blockMode, func(result *InterceptionResult, useReplaceMode bool) (any, bool) {
+func (i *Interceptor) InterceptOpenAIResponse(responseBody []byte, ctx InterceptionContext) (*InterceptionResult, error) {
+	return i.intercept(responseBody, ctx.BlockMode, func(result *InterceptionResult, useReplaceMode bool) (any, bool) {
 		var resp openAIResponse
 		if err := json.Unmarshal(responseBody, &resp); err != nil {
-			log.Warn("[Layer1] Failed to parse %s response: %v", apiType, err)
+			log.Warn("[Layer1] Failed to parse %s response: %v", ctx.APIType, err)
 			return nil, false
 		}
 		modified := false
@@ -119,7 +128,7 @@ func (i *Interceptor) InterceptOpenAIResponse(responseBody []byte, traceID types
 			allowed := make([]openAIToolCall, 0, len(choice.Message.ToolCalls))
 			for _, tc := range choice.Message.ToolCalls {
 				toolCall := telemetry.ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: json.RawMessage(tc.Function.Arguments)}
-				_, blocked := i.evaluateToolCall(result, toolCall, traceID, sessionID, tc.Function.Arguments, apiType, model, useReplaceMode)
+				_, blocked := i.evaluateToolCall(result, toolCall, ctx, tc.Function.Arguments, useReplaceMode)
 				if blocked {
 					modified = true
 				} else {
@@ -147,11 +156,11 @@ func (i *Interceptor) InterceptOpenAIResponse(responseBody []byte, traceID types
 }
 
 // InterceptAnthropicResponse intercepts tool calls in an Anthropic format response.
-func (i *Interceptor) InterceptAnthropicResponse(responseBody []byte, traceID types.TraceID, sessionID types.SessionID, model string, apiType types.APIType, blockMode types.BlockMode) (*InterceptionResult, error) {
-	return i.intercept(responseBody, blockMode, func(result *InterceptionResult, useReplaceMode bool) (any, bool) {
+func (i *Interceptor) InterceptAnthropicResponse(responseBody []byte, ctx InterceptionContext) (*InterceptionResult, error) {
+	return i.intercept(responseBody, ctx.BlockMode, func(result *InterceptionResult, useReplaceMode bool) (any, bool) {
 		var resp anthropicResponse
 		if err := json.Unmarshal(responseBody, &resp); err != nil {
-			log.Warn("[Layer1] Failed to parse %s response: %v", apiType, err)
+			log.Warn("[Layer1] Failed to parse %s response: %v", ctx.APIType, err)
 			return nil, false
 		}
 		allowed := make([]anthropicContentBlock, 0, len(resp.Content))
@@ -162,7 +171,7 @@ func (i *Interceptor) InterceptAnthropicResponse(responseBody []byte, traceID ty
 				continue
 			}
 			tc := telemetry.ToolCall{ID: block.ID, Name: block.Name, Arguments: block.Input}
-			matchResult, blocked := i.evaluateToolCall(result, tc, traceID, sessionID, string(block.Input), apiType, model, useReplaceMode)
+			matchResult, blocked := i.evaluateToolCall(result, tc, ctx, string(block.Input), useReplaceMode)
 			if blocked {
 				modified = true
 				if useReplaceMode {
@@ -183,11 +192,11 @@ func (i *Interceptor) InterceptAnthropicResponse(responseBody []byte, traceID ty
 
 // InterceptOpenAIResponsesResponse intercepts tool calls in an OpenAI Responses API format response.
 // The Responses API uses `output[]` with `type: "function_call"` items.
-func (i *Interceptor) InterceptOpenAIResponsesResponse(responseBody []byte, traceID types.TraceID, sessionID types.SessionID, model string, apiType types.APIType, blockMode types.BlockMode) (*InterceptionResult, error) {
-	return i.intercept(responseBody, blockMode, func(result *InterceptionResult, useReplaceMode bool) (any, bool) {
+func (i *Interceptor) InterceptOpenAIResponsesResponse(responseBody []byte, ctx InterceptionContext) (*InterceptionResult, error) {
+	return i.intercept(responseBody, ctx.BlockMode, func(result *InterceptionResult, useReplaceMode bool) (any, bool) {
 		var resp openAIResponsesResponse
 		if err := json.Unmarshal(responseBody, &resp); err != nil {
-			log.Warn("[Layer1] Failed to parse %s response: %v", apiType, err)
+			log.Warn("[Layer1] Failed to parse %s response: %v", ctx.APIType, err)
 			return nil, false
 		}
 		allowed := make([]openAIResponsesOutputItem, 0, len(resp.Output))
@@ -198,7 +207,7 @@ func (i *Interceptor) InterceptOpenAIResponsesResponse(responseBody []byte, trac
 				continue
 			}
 			tc := telemetry.ToolCall{ID: item.CallID, Name: item.Name, Arguments: json.RawMessage(item.Arguments)}
-			matchResult, blocked := i.evaluateToolCall(result, tc, traceID, sessionID, item.Arguments, apiType, model, useReplaceMode)
+			matchResult, blocked := i.evaluateToolCall(result, tc, ctx, item.Arguments, useReplaceMode)
 			if blocked {
 				modified = true
 				if useReplaceMode {
@@ -223,18 +232,18 @@ func (i *Interceptor) InterceptOpenAIResponsesResponse(responseBody []byte, trac
 	})
 }
 
-// InterceptToolCalls intercepts tool calls based on API type
-// blockMode: types.BlockModeRemove (delete tool calls) or types.BlockModeReplace (substitute with a text warning block)
-func (i *Interceptor) InterceptToolCalls(responseBody []byte, traceID types.TraceID, sessionID types.SessionID, model string, apiType types.APIType, blockMode types.BlockMode) (*InterceptionResult, error) {
-	switch apiType {
+// InterceptToolCalls intercepts tool calls based on API type.
+// ctx.BlockMode: types.BlockModeRemove (delete tool calls) or types.BlockModeReplace (substitute with a text warning block)
+func (i *Interceptor) InterceptToolCalls(responseBody []byte, ctx InterceptionContext) (*InterceptionResult, error) {
+	switch ctx.APIType {
 	case types.APITypeAnthropic:
-		return i.InterceptAnthropicResponse(responseBody, traceID, sessionID, model, apiType, blockMode)
+		return i.InterceptAnthropicResponse(responseBody, ctx)
 	case types.APITypeOpenAIResponses:
-		return i.InterceptOpenAIResponsesResponse(responseBody, traceID, sessionID, model, apiType, blockMode)
+		return i.InterceptOpenAIResponsesResponse(responseBody, ctx)
 	case types.APITypeOpenAICompletion, types.APITypeUnknown:
-		return i.InterceptOpenAIResponse(responseBody, traceID, sessionID, model, apiType, blockMode)
+		return i.InterceptOpenAIResponse(responseBody, ctx)
 	default:
-		panic("unhandled types.APIType: " + apiType.String())
+		panic("unhandled types.APIType: " + ctx.APIType.String())
 	}
 }
 
@@ -244,11 +253,8 @@ func (i *Interceptor) InterceptToolCalls(responseBody []byte, traceID types.Trac
 func (i *Interceptor) evaluateToolCall(
 	result *InterceptionResult,
 	tc telemetry.ToolCall,
-	traceID types.TraceID,
-	sessionID types.SessionID,
+	ctx InterceptionContext,
 	argsString string,
-	apiType types.APIType,
-	model string,
 	useReplaceMode bool,
 ) (rules.MatchResult, bool) {
 	matchResult := i.engine.Evaluate(rules.ToolCall{
@@ -264,12 +270,12 @@ func (i *Interceptor) evaluateToolCall(
 
 	RecordEvent(Event{
 		Layer:      LayerL1,
-		TraceID:    traceID,
-		SessionID:  sessionID,
+		TraceID:    ctx.TraceID,
+		SessionID:  ctx.SessionID,
 		ToolName:   tc.Name,
 		Arguments:  json.RawMessage(argsString),
-		APIType:    apiType,
-		Model:      model,
+		APIType:    ctx.APIType,
+		Model:      ctx.Model,
 		WasBlocked: isBlocked,
 		RuleName:   ruleName,
 	})

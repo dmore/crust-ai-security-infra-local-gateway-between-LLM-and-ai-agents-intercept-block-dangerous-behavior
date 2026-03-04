@@ -464,7 +464,13 @@ func processNonStreamingResponse(
 		interceptor := security.GetGlobalInterceptor()
 		if interceptor != nil && interceptor.IsEnabled() && len(toolCalls) > 0 {
 			secCfg := security.GetInterceptionConfig()
-			result, err := interceptor.InterceptToolCalls(responseBody, traceID, sessionID, model, apiType, secCfg.BlockMode)
+			result, err := interceptor.InterceptToolCalls(responseBody, security.InterceptionContext{
+				TraceID:   traceID,
+				SessionID: sessionID,
+				Model:     model,
+				APIType:   apiType,
+				BlockMode: secCfg.BlockMode,
+			})
 			if err != nil {
 				log.Warn("Security interception error: %v", err)
 			} else {
