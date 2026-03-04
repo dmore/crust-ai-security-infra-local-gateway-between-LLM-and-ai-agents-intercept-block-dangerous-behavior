@@ -71,3 +71,31 @@ Eliminating minPrint in favor of reconstructing `info.Command` from Runner outpu
 ## Environment
 
 The Runner is seeded with the real process environment (`os.Environ()`) so variables like `$HOME` resolve to actual values at extraction time. For testing, `NewExtractorWithEnv` accepts a custom environment map.
+
+## PowerShell (Windows 10/11)
+
+On Windows 10/11, `Bash` tool calls may contain PowerShell commands. The bash parser handles many PS cmdlets correctly (they look like POSIX commands), but fails on PS-specific syntax: `$var="value"` assignments, `C:\path\with\backslashes`, and `\\UNC\paths`.
+
+Crust uses a **dual-parse** strategy on Windows:
+
+```text
+extractBashCommand (Windows path)
+ │
+ ├─ 1. looksLikePowerShell? (psVarAssignRe / PS cmdlet names)
+ │
+ ├─ 2. syntax.Parse (bash AST)
+ │     ├─ Success → extract paths via Runner (step 5 above)
+ │     │             + if looksLikePowerShell: pwsh worker augments results
+ │     │
+ │     └─ Failure → pwsh worker as authoritative PS parser
+ │                   ├─ PS parse OK → extract from PS AST
+ │                   └─ PS parse error / crash → Evasive = true
+ │
+ └─ 3. Results merged: paths/hosts union, highest-severity operation wins
+```
+
+**pwsh worker** (`pwshworker.go`): a persistent `pwsh.exe` (PS 7+, preferred) or `powershell.exe` (5.1, always present on Windows 10/11) subprocess. The bootstrap script uses `[System.Management.Automation.Language.Parser]::ParseInput()` — a pure AST parser, never executes commands. JSON over stdin/stdout; auto-restarts on crash.
+
+**Fallback** (no pwsh worker): heuristic `substitutePSVariables` + `normalizePSBackslashPaths` pre-processing before bash parsing, gated behind `runtime.GOOS == "windows"`.
+
+**Evasion**: a PS-looking command that crashes the worker subprocess is blocked as evasive (fail-closed). A command with PS parse errors but valid bash syntax is allowed — bash extraction stands.
