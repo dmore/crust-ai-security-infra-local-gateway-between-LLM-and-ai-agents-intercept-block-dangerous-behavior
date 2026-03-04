@@ -6,13 +6,26 @@ import (
 
 // MatchResult represents the result of evaluating a rule
 type MatchResult struct {
-	Matched      bool     `json:"matched"`
-	RuleName     string   `json:"rule_name,omitempty"`
-	Severity     Severity `json:"severity,omitempty"`
-	Action       Action   `json:"action,omitempty"` // block, log, alert
-	Message      string   `json:"message,omitempty"`
-	AlertWebhook string   `json:"alert_webhook,omitempty"`
+	Matched  bool     `json:"matched"`
+	RuleName string   `json:"rule_name,omitempty"`
+	Severity Severity `json:"severity,omitempty"`
+	Action   Action   `json:"action,omitempty"` // block, log, alert
+	Message  string   `json:"message,omitempty"`
 }
+
+// NewMatch returns a MatchResult representing a matched rule.
+func NewMatch(ruleName string, severity Severity, action Action, message string) MatchResult {
+	return MatchResult{
+		Matched:  true,
+		RuleName: ruleName,
+		Severity: severity,
+		Action:   action,
+		Message:  message,
+	}
+}
+
+// NoMatch returns the canonical no-match result.
+func NoMatch() MatchResult { return MatchResult{} }
 
 // ToolCall represents a tool call to be evaluated
 type ToolCall struct {

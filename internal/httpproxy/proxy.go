@@ -469,7 +469,7 @@ func processNonStreamingResponse(
 				log.Warn("Security interception error: %v", err)
 			} else {
 				responseBody = result.ModifiedResponse
-				if result.HasBlockedCalls {
+				if len(result.BlockedToolCalls) > 0 {
 					log.Info("Blocked %d tool calls", len(result.BlockedToolCalls))
 				}
 				toolCalls = result.AllowedToolCalls

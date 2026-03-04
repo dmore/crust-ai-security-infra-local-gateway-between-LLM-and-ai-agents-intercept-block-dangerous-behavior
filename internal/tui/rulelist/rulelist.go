@@ -169,7 +169,7 @@ func Render(rulesList []rules.Rule, total int) error {
 	delegate := newRuleDelegate()
 
 	l := list.New(items, delegate, 80, 24)
-	l.Title = tui.BrandGradient("CRUST", true) + " " + tui.BrandGradient("RULES", true) + tui.StyleMuted.Render(fmt.Sprintf("  (%d total)", total))
+	l.Title = tui.BrandGradient("CRUST") + " " + tui.BrandGradient("RULES") + tui.StyleMuted.Render(fmt.Sprintf("  (%d total)", total))
 	l.Styles.Title = lipgloss.NewStyle()
 	l.Styles.FilterPrompt = lipgloss.NewStyle().Foreground(tui.ColorAccent)
 	l.Styles.FilterCursor = lipgloss.NewStyle().Foreground(tui.ColorSuccess)

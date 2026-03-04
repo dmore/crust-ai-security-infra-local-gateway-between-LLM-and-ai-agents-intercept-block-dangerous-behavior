@@ -48,6 +48,14 @@ type parsedCommand struct {
 	RedirInPaths []string `json:"redir_in_paths"` // paths from input redirections (<)
 }
 
+// shellExecResult bundles the three values returned by runShellFile and
+// runShellFileInterp so callers don't need to declare three separate variables.
+type shellExecResult struct {
+	cmds     []parsedCommand
+	sym      map[string]string
+	panicked bool
+}
+
 // normalizeFieldName produces a canonical form for argument field names.
 // It lowercases and strips underscores/hyphens so that "target_file" (Cursor),
 // "TargetFile" (Windsurf PascalCase), and "targetfile" all match the same entry.
@@ -961,7 +969,8 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 				panicked = resp.Panicked
 			}
 		} else {
-			parsed, symtab, panicked = e.runShellFile(file, nil)
+			shellRes := e.runShellFile(file, nil)
+			parsed, symtab, panicked = shellRes.cmds, shellRes.sym, shellRes.panicked
 		}
 		if len(parsed) > 0 {
 			e.extractFromParsedCommandsDepth(info, parsed, 0, symtab)
@@ -2471,8 +2480,8 @@ func (e *Extractor) parseShellCommandsExpand(cmd string, parentSymtab map[string
 		return nil, maps.Clone(parentSymtab)
 	}
 	syntax.Simplify(file)
-	cmds, sym, _ := e.runShellFile(file, parentSymtab)
-	return cmds, sym
+	res := e.runShellFile(file, parentSymtab)
+	return res.cmds, res.sym
 }
 
 // runShellFile runs a pre-parsed, simplified shell AST through a hybrid
@@ -2483,12 +2492,12 @@ func (e *Extractor) parseShellCommandsExpand(cmd string, parentSymtab map[string
 //
 // parentSymtab is merged for propagation across recursive sh -c parses.
 // The Runner is seeded with e.env for real environment values (e.g., $HOME).
-func (e *Extractor) runShellFile(file *syntax.File, parentSymtab map[string]string) (cmds []parsedCommand, sym map[string]string, panicked bool) {
+func (e *Extractor) runShellFile(file *syntax.File, parentSymtab map[string]string) (res shellExecResult) {
 	defer func() {
 		if r := recover(); r != nil {
-			panicked = true
-			if sym == nil {
-				sym = maps.Clone(parentSymtab)
+			res.panicked = true
+			if res.sym == nil {
+				res.sym = maps.Clone(parentSymtab)
 			}
 		}
 	}()
@@ -2511,16 +2520,17 @@ func (e *Extractor) runShellFile(file *syntax.File, parentSymtab map[string]stri
 	// --- Hybrid path: some or all stmts are unsafe ---
 
 	// Phase 1: Run safe stmts through interpreter for commands + symtab.
-	var safeCmds []parsedCommand
 	safeSymtab := make(map[string]string)
 	maps.Copy(safeSymtab, parentSymtab)
+	var safeCmds []parsedCommand
 	if len(safeStmts) > 0 {
 		safeFile := &syntax.File{Stmts: safeStmts}
-		var safePanicked bool
-		safeCmds, safeSymtab, safePanicked = e.runShellFileInterp(safeFile, parentSymtab)
-		if safePanicked {
-			return nil, maps.Clone(parentSymtab), true
+		safeRes := e.runShellFileInterp(safeFile, parentSymtab)
+		if safeRes.panicked {
+			return shellExecResult{sym: maps.Clone(parentSymtab), panicked: true}
 		}
+		safeCmds = safeRes.cmds
+		safeSymtab = safeRes.sym
 	}
 
 	var allCmds []parsedCommand
@@ -2534,10 +2544,10 @@ func (e *Extractor) runShellFile(file *syntax.File, parentSymtab map[string]stri
 		// Strategy (a): defuse and interpret — handles background, fd-dup, heredoc.
 		if defused := defuseStmt(stmt); defused != nil {
 			defusedFile := &syntax.File{Stmts: []*syntax.Stmt{defused}}
-			defusedCmds, defusedSym, defusedPanicked := e.runShellFileInterp(defusedFile, safeSymtab)
-			if !defusedPanicked && len(defusedCmds) > 0 {
-				allCmds = append(allCmds, defusedCmds...)
-				maps.Copy(safeSymtab, defusedSym)
+			defusedRes := e.runShellFileInterp(defusedFile, safeSymtab)
+			if !defusedRes.panicked && len(defusedRes.cmds) > 0 {
+				allCmds = append(allCmds, defusedRes.cmds...)
+				maps.Copy(safeSymtab, defusedRes.sym)
 				continue
 			}
 		}
@@ -2549,10 +2559,10 @@ func (e *Extractor) runShellFile(file *syntax.File, parentSymtab map[string]stri
 		for _, inner := range collectInnerStmts(stmt) {
 			innerFile := &syntax.File{Stmts: []*syntax.Stmt{inner}}
 			if !nodeHasUnsafe(inner) {
-				innerCmds, innerSym, innerPanicked := e.runShellFileInterp(innerFile, safeSymtab)
-				if !innerPanicked && len(innerCmds) > 0 {
-					allCmds = append(allCmds, innerCmds...)
-					maps.Copy(safeSymtab, innerSym)
+				innerRes := e.runShellFileInterp(innerFile, safeSymtab)
+				if !innerRes.panicked && len(innerRes.cmds) > 0 {
+					allCmds = append(allCmds, innerRes.cmds...)
+					maps.Copy(safeSymtab, innerRes.sym)
 					continue
 				}
 			}
@@ -2560,18 +2570,18 @@ func (e *Extractor) runShellFile(file *syntax.File, parentSymtab map[string]stri
 		}
 	}
 
-	return allCmds, safeSymtab, false
+	return shellExecResult{cmds: allCmds, sym: safeSymtab}
 }
 
 // runShellFileInterp runs a pre-checked shell AST through interp.Runner in
 // dry-run mode. The caller should ensure the file contains no unsafe nodes
 // (though a defer/recover still protects against unexpected panics).
-func (e *Extractor) runShellFileInterp(file *syntax.File, parentSymtab map[string]string) (cmds []parsedCommand, sym map[string]string, panicked bool) {
+func (e *Extractor) runShellFileInterp(file *syntax.File, parentSymtab map[string]string) (res shellExecResult) {
 	defer func() {
 		if r := recover(); r != nil {
-			panicked = true
-			if sym == nil {
-				sym = maps.Clone(parentSymtab)
+			res.panicked = true
+			if res.sym == nil {
+				res.sym = maps.Clone(parentSymtab)
 			}
 		}
 	}()
@@ -2640,7 +2650,7 @@ func (e *Extractor) runShellFileInterp(file *syntax.File, parentSymtab map[strin
 		}),
 	)
 	if err != nil {
-		return nil, maps.Clone(parentSymtab), false
+		return shellExecResult{sym: maps.Clone(parentSymtab)}
 	}
 
 	// Timeout prevents infinite loops (e.g., "while ;do a; done") from hanging
@@ -2655,11 +2665,10 @@ func (e *Extractor) runShellFileInterp(file *syntax.File, parentSymtab map[strin
 	// goroutines that are still writing to commands after Run returns (e.g., on
 	// context timeout or process substitution).
 	mu.Lock()
-	result := commands
+	snapshot := commands
 	mu.Unlock()
 
-	symtab := extractRunnerSymtab(runner)
-	return result, symtab, false
+	return shellExecResult{cmds: snapshot, sym: extractRunnerSymtab(runner)}
 }
 
 // mergeEnvArgs extracts KEY=VALUE assignments from a command's arguments

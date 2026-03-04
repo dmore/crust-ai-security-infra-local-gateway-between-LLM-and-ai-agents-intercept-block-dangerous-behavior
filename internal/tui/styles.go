@@ -123,7 +123,7 @@ var brandGradientHex = []string{
 
 // BrandGradient renders text with the banner's cream → amber → rust gradient.
 // In plain mode, returns the text unstyled.
-func BrandGradient(text string, bold bool) string {
+func BrandGradient(text string) string {
 	if IsPlainMode() {
 		return text
 	}
@@ -139,10 +139,7 @@ func BrandGradient(text string, bold bool) string {
 			continue
 		}
 		idx := i * (len(brandGradientHex) - 1) / max(width-1, 1)
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color(brandGradientHex[idx]))
-		if bold {
-			style = style.Bold(true)
-		}
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color(brandGradientHex[idx])).Bold(true)
 		b.WriteString(style.Render(string(r)))
 	}
 	return b.String()

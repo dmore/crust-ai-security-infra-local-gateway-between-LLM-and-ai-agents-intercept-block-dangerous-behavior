@@ -36,13 +36,8 @@ var pathGuards = []pathGuard{
 func checkHardcodedPaths(paths []string) *MatchResult {
 	for _, g := range pathGuards {
 		if blocked, path := g.check(paths); blocked {
-			return &MatchResult{
-				Matched:  true,
-				RuleName: g.rule,
-				Severity: g.severity,
-				Action:   ActionBlock,
-				Message:  g.message(path),
-			}
+			m := NewMatch(g.rule, g.severity, ActionBlock, g.message(path))
+			return &m
 		}
 	}
 	return nil

@@ -170,11 +170,11 @@ func evalShellCommand(req shellWorkerRequest) (resp shellWorkerResponse) {
 	syntax.Simplify(file)
 
 	ext := &Extractor{commandDB: defaultCommandDB(), env: req.Env}
-	cmds, sym, panicked := ext.runShellFile(file, req.ParentSymtab)
+	res := ext.runShellFile(file, req.ParentSymtab)
 
 	return shellWorkerResponse{
-		Commands: cmds,
-		Symtab:   sym,
-		Panicked: panicked,
+		Commands: res.cmds,
+		Symtab:   res.sym,
+		Panicked: res.panicked,
 	}
 }

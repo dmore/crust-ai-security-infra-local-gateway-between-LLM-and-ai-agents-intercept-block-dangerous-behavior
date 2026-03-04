@@ -1127,7 +1127,7 @@ func runMCPDiscover(args []string) {
 	restore := fs.Bool("restore", false, "Restore configs from backups")
 	_ = fs.Parse(args)
 
-	header := tui.BrandGradient("CRUST", true) + " " + tui.BrandGradient("MCP DISCOVER", true)
+	header := tui.BrandGradient("CRUST") + " " + tui.BrandGradient("MCP DISCOVER")
 	if tui.IsPlainMode() {
 		header = "CRUST MCP DISCOVER"
 	}

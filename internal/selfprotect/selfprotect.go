@@ -69,23 +69,13 @@ func Check(rawJSON string) *rules.MatchResult {
 	}
 
 	if selfProtectAPIRegex.MatchString(input) {
-		return &rules.MatchResult{
-			Matched:  true,
-			RuleName: "builtin:protect-crust-api",
-			Severity: rules.SeverityCritical,
-			Action:   rules.ActionBlock,
-			Message:  "Cannot access Crust management API",
-		}
+		m := rules.NewMatch("builtin:protect-crust-api", rules.SeverityCritical, rules.ActionBlock, "Cannot access Crust management API")
+		return &m
 	}
 
 	if selfProtectSocketRegex.MatchString(input) {
-		return &rules.MatchResult{
-			Matched:  true,
-			RuleName: "builtin:protect-crust-socket",
-			Severity: rules.SeverityCritical,
-			Action:   rules.ActionBlock,
-			Message:  "Cannot access Crust management socket",
-		}
+		m := rules.NewMatch("builtin:protect-crust-socket", rules.SeverityCritical, rules.ActionBlock, "Cannot access Crust management socket")
+		return &m
 	}
 
 	return nil

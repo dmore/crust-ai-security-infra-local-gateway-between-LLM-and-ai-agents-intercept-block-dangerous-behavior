@@ -47,7 +47,7 @@ var gradientHex = []string{
 }
 
 // renderGradientLine colors each visible rune using a column-aligned gradient.
-func renderGradientLine(line string, bold bool) string {
+func renderGradientLine(line string) string {
 	runes := []rune(line)
 	if len(runes) == 0 {
 		return ""
@@ -64,17 +64,14 @@ func renderGradientLine(line string, bold bool) string {
 			continue
 		}
 		idx := i * (len(gradientHex) - 1) / max(width-1, 1)
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color(gradientHex[idx]))
-		if bold {
-			style = style.Bold(true)
-		}
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color(gradientHex[idx])).Bold(true)
 		b.WriteString(style.Render(string(r)))
 	}
 	return b.String()
 }
 
 // renderGradientLineShimmer renders a gradient line with a bright shimmer sweep.
-func renderGradientLineShimmer(line string, bold bool, shimmer tui.ShimmerState) string {
+func renderGradientLineShimmer(line string, shimmer tui.ShimmerState) string {
 	runes := []rune(line)
 	if len(runes) == 0 {
 		return ""
@@ -92,11 +89,7 @@ func renderGradientLineShimmer(line string, bold bool, shimmer tui.ShimmerState)
 		}
 		idx := i * (len(gradientHex) - 1) / max(width-1, 1)
 		color := shimmer.ShimmerColor(gradientHex[idx], i)
-
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
-		if bold {
-			style = style.Bold(true)
-		}
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true)
 		b.WriteString(style.Render(string(r)))
 	}
 	return b.String()
@@ -115,7 +108,7 @@ func renderTagline(version string) string {
 func renderBannerContent(version string) string {
 	var coloredLines []string
 	for _, line := range logoLines {
-		coloredLines = append(coloredLines, renderGradientLine(line, true))
+		coloredLines = append(coloredLines, renderGradientLine(line))
 	}
 	inner := strings.Join(coloredLines, "\n")
 	inner += "\n\n" + renderTagline(version)
@@ -126,7 +119,7 @@ func renderBannerContent(version string) string {
 func renderBannerContentWithShimmer(version string, shimmer tui.ShimmerState) string {
 	var coloredLines []string
 	for _, line := range logoLines {
-		coloredLines = append(coloredLines, renderGradientLineShimmer(line, true, shimmer))
+		coloredLines = append(coloredLines, renderGradientLineShimmer(line, shimmer))
 	}
 	inner := strings.Join(coloredLines, "\n")
 	inner += "\n\n" + renderTagline(version)
@@ -273,7 +266,7 @@ func PrintBannerCompact() {
 		PrintBannerCompactPlain()
 		return
 	}
-	name := tui.BrandGradient("Crust", true)
+	name := tui.BrandGradient("Crust")
 	desc := tui.StyleMuted.Render("Secure Gateway for AI Agents")
 	fmt.Printf("  %s  %s\n", name, desc)
 }

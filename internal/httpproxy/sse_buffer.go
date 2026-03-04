@@ -17,6 +17,15 @@ import (
 	"github.com/BakeLens/crust/internal/types"
 )
 
+// bufferState tracks the lifecycle of a BufferedSSEWriter.
+type bufferState int
+
+const (
+	bufferStateActive    bufferState = iota // zero value; buffering in progress
+	bufferStateCompleted                    // FlushAll or FlushModified called
+	bufferStateTimedOut                     // timeout exceeded; buffer rejected
+)
+
 // SSEEvent represents a buffered SSE event
 type SSEEvent struct {
 	EventType string // "message_start", "content_block_start", etc.
@@ -56,8 +65,7 @@ type BufferedSSEWriter struct {
 
 	// State
 	hasToolUse bool
-	completed  bool
-	timedOut   bool
+	state      bufferState
 	startTime  time.Time
 }
 
@@ -120,13 +128,13 @@ func (b *BufferedSSEWriter) BufferEvent(eventType string, data, raw []byte) erro
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.completed {
+	if b.state != bufferStateActive {
 		return errors.New("buffer already completed")
 	}
 
 	// Check timeout
 	if time.Since(b.startTime) > b.timeout {
-		b.timedOut = true
+		b.state = bufferStateTimedOut
 		return errors.New("buffer timeout exceeded")
 	}
 
@@ -190,10 +198,10 @@ func (b *BufferedSSEWriter) FlushAll() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.completed {
+	if b.state != bufferStateActive {
 		return nil
 	}
-	b.completed = true
+	b.state = bufferStateCompleted
 
 	for _, event := range b.events {
 		if err := b.writeRaw(event.Raw); err != nil {
@@ -210,10 +218,10 @@ func (b *BufferedSSEWriter) FlushModified(interceptor *security.Interceptor, blo
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.completed {
+	if b.state != bufferStateActive {
 		return nil
 	}
-	b.completed = true
+	b.state = bufferStateCompleted
 
 	if !b.hasToolUse || interceptor == nil || !interceptor.IsEnabled() {
 		// No tool use or no interceptor, flush as-is

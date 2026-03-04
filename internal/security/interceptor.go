@@ -58,7 +58,6 @@ type InterceptionResult struct {
 	ModifiedResponse []byte
 	BlockedToolCalls []BlockedToolCall
 	AllowedToolCalls []telemetry.ToolCall
-	HasBlockedCalls  bool
 }
 
 // BlockedToolCall represents a tool call that was blocked
@@ -125,7 +124,7 @@ func (i *Interceptor) InterceptOpenAIResponse(responseBody []byte, traceID types
 			}
 			choice.Message.ToolCalls = allowed
 		}
-		if result.HasBlockedCalls && len(resp.Choices) > 0 {
+		if len(result.BlockedToolCalls) > 0 && len(resp.Choices) > 0 {
 			var msg string
 			if useReplaceMode {
 				msg = message.FormatReplaceWarning(toBlockedCalls(result.BlockedToolCalls))
@@ -169,7 +168,7 @@ func (i *Interceptor) InterceptAnthropicResponse(responseBody []byte, traceID ty
 				allowed = append(allowed, block)
 			}
 		}
-		if result.HasBlockedCalls && !useReplaceMode {
+		if len(result.BlockedToolCalls) > 0 && !useReplaceMode {
 			allowed = append(allowed, anthropicContentBlock{Type: "text", Text: message.FormatRemoveWarning(toBlockedCalls(result.BlockedToolCalls))})
 			modified = true
 		}
@@ -208,7 +207,7 @@ func (i *Interceptor) InterceptOpenAIResponsesResponse(responseBody []byte, trac
 				allowed = append(allowed, item)
 			}
 		}
-		if result.HasBlockedCalls && !useReplaceMode {
+		if len(result.BlockedToolCalls) > 0 && !useReplaceMode {
 			allowed = append(allowed, openAIResponsesOutputItem{
 				Type:    "message",
 				Content: []openAIResponsesContent{{Type: "output_text", Text: message.FormatRemoveWarning(toBlockedCalls(result.BlockedToolCalls))}},
@@ -276,7 +275,6 @@ func (i *Interceptor) evaluateToolCall(
 			ToolCall:    tc,
 			MatchResult: matchResult,
 		})
-		result.HasBlockedCalls = true
 		if useReplaceMode {
 			log.Warn("[Layer1] Replaced: %s (rule: %s)", tc.Name, matchResult.RuleName)
 		} else {

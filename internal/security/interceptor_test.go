@@ -221,8 +221,8 @@ rules:
 			}
 
 			// Verify blocked status
-			if result.HasBlockedCalls != tt.wantBlocked {
-				t.Errorf("HasBlockedCalls = %v, want %v", result.HasBlockedCalls, tt.wantBlocked)
+			if (len(result.BlockedToolCalls) > 0) != tt.wantBlocked {
+				t.Errorf("HasBlockedCalls = %v, want %v", len(result.BlockedToolCalls) > 0, tt.wantBlocked)
 			}
 
 			// Verify tool was removed/kept
@@ -457,7 +457,7 @@ rules:
 	}
 
 	// No blocked calls should be recorded
-	if result.HasBlockedCalls {
+	if len(result.BlockedToolCalls) > 0 {
 		t.Error("HasBlockedCalls should be false when interceptor is disabled")
 	}
 }
@@ -558,8 +558,8 @@ rules:
 				t.Fatalf("InterceptAnthropicResponse returned error: %v", err)
 			}
 
-			if result.HasBlockedCalls != tt.wantBlocked {
-				t.Errorf("HasBlockedCalls = %v, want %v", result.HasBlockedCalls, tt.wantBlocked)
+			if (len(result.BlockedToolCalls) > 0) != tt.wantBlocked {
+				t.Errorf("HasBlockedCalls = %v, want %v", len(result.BlockedToolCalls) > 0, tt.wantBlocked)
 			}
 
 			// Parse modified response
@@ -625,7 +625,7 @@ func TestInterceptAnthropicResponse_TextBlockPassThrough(t *testing.T) {
 	}
 
 	// Should not have any blocked calls
-	if result.HasBlockedCalls {
+	if len(result.BlockedToolCalls) > 0 {
 		t.Error("Expected no blocked calls for text-only response")
 	}
 
@@ -1107,7 +1107,7 @@ rules:
 	}
 
 	// Should not block because the pattern can't match invalid JSON
-	if result.HasBlockedCalls {
+	if len(result.BlockedToolCalls) > 0 {
 		t.Error("Should not block tool calls with malformed arguments that don't match pattern")
 	}
 }
@@ -1155,7 +1155,7 @@ rules:
 		t.Error("Expected response to be unchanged when interceptor is disabled")
 	}
 
-	if result.HasBlockedCalls {
+	if len(result.BlockedToolCalls) > 0 {
 		t.Error("HasBlockedCalls should be false when interceptor is disabled")
 	}
 }
@@ -1457,9 +1457,8 @@ rules:
 		t.Errorf("Allowed tool ID = %s, want call_2", allowed.ID)
 	}
 
-	// Check HasBlockedCalls
-	if !result.HasBlockedCalls {
-		t.Error("HasBlockedCalls should be true")
+	if len(result.BlockedToolCalls) == 0 {
+		t.Error("BlockedToolCalls should be non-empty")
 	}
 
 	// Check ModifiedResponse is not empty

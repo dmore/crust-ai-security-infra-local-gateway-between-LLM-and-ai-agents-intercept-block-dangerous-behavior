@@ -288,7 +288,7 @@ func (m model) View() string {
 	d := m.data
 
 	// Shared header: brand title + live status indicator
-	title := tui.BrandGradient("CRUST", true) + " " + tui.BrandGradient("STATUS", true)
+	title := tui.BrandGradient("CRUST") + " " + tui.BrandGradient("STATUS")
 	var statusDot string
 	if d.Running && d.Healthy {
 		statusDot = tui.StyleSuccess.Render(m.spinner.View() + " running")
@@ -583,7 +583,7 @@ func RenderStatic(data StatusData) string {
 		status = tui.StyleError.Render(tui.IconCross + " stopped")
 	}
 
-	sb.WriteString(tui.BrandGradient("CRUST", true) + "  " + status + "\n\n")
+	sb.WriteString(tui.BrandGradient("CRUST") + "  " + status + "\n\n")
 
 	if data.Running {
 		fmt.Fprintf(&sb, "  %s  %d\n", tui.Faint("PID"), data.PID)
