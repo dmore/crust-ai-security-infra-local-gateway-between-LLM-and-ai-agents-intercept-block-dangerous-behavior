@@ -3,6 +3,7 @@ package rules
 import (
 	"encoding/json"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -3049,6 +3050,7 @@ func TestPowerShellGap_RawPipelineSyntax(t *testing.T) {
 		wantHosts   []string
 		wantEvasive bool
 		gap         bool
+		windowsOnly bool // requires PS transform (variable substitution), runs on Windows only
 	}{
 		{
 			// Simple pipe: both sides parse as POSIX commands.
@@ -3086,10 +3088,12 @@ func TestPowerShellGap_RawPipelineSyntax(t *testing.T) {
 		{
 			// PS variable assignment — pre-processed by substitutePSVariables
 			// which replaces $p with the literal value before bash parsing.
-			name:      "PS variable assignment then use",
-			command:   `$p="/home/user/.env"; Get-Content $p`,
-			wantOp:    OpRead,
-			wantPaths: []string{"/home/user/.env"},
+			// Windows-only: the GOOS guard prevents PS transform on Linux/macOS.
+			name:        "PS variable assignment then use",
+			command:     `$p="/home/user/.env"; Get-Content $p`,
+			wantOp:      OpRead,
+			wantPaths:   []string{"/home/user/.env"},
+			windowsOnly: true,
 		},
 		{
 			// PowerShell subexpression — not valid bash
@@ -3104,6 +3108,9 @@ func TestPowerShellGap_RawPipelineSyntax(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.windowsOnly && runtime.GOOS != goosWindows {
+				t.Skip("Windows-only: requires PS transform (variable substitution)")
+			}
 			args, _ := json.Marshal(map[string]string{"command": tt.command})
 			info := extractor.Extract("Bash", json.RawMessage(args))
 
@@ -3332,18 +3339,21 @@ func TestPowerShellGap_WindowsPathFormats(t *testing.T) {
 	})
 
 	tests := []struct {
-		name      string
-		command   string
-		wantOp    Operation
-		wantPaths []string
-		gap       bool
+		name        string
+		command     string
+		wantOp      Operation
+		wantPaths   []string
+		gap         bool
+		windowsOnly bool // requires PS transform (backslash path normalization), runs on Windows only
 	}{
 		{
-			// Backslash paths normalized to forward slashes before bash parsing
-			name:      "Get-Content with Windows backslash path",
-			command:   `Get-Content C:\Users\user\.env`,
-			wantOp:    OpRead,
-			wantPaths: []string{"C:/Users/user/.env"},
+			// Backslash paths normalized to forward slashes before bash parsing.
+			// Windows-only: the GOOS guard prevents PS transform on Linux/macOS.
+			name:        "Get-Content with Windows backslash path",
+			command:     `Get-Content C:\Users\user\.env`,
+			wantOp:      OpRead,
+			wantPaths:   []string{"C:/Users/user/.env"},
+			windowsOnly: true,
 		},
 		{
 			// Forward-slash Windows paths work in both PS and bash
@@ -3353,16 +3363,21 @@ func TestPowerShellGap_WindowsPathFormats(t *testing.T) {
 			wantPaths: []string{"C:/Users/user/.env"},
 		},
 		{
-			// UNC paths normalized to forward slashes before bash parsing
-			name:      "Copy-Item with UNC path",
-			command:   `Copy-Item \\server\share\.env C:\tmp\exfil`,
-			wantOp:    OpCopy,
-			wantPaths: []string{"//server/share/.env"},
+			// UNC paths normalized to forward slashes before bash parsing.
+			// Windows-only: the GOOS guard prevents PS transform on Linux/macOS.
+			name:        "Copy-Item with UNC path",
+			command:     `Copy-Item \\server\share\.env C:\tmp\exfil`,
+			wantOp:      OpCopy,
+			wantPaths:   []string{"//server/share/.env"},
+			windowsOnly: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.windowsOnly && runtime.GOOS != goosWindows {
+				t.Skip("Windows-only: requires PS transform (backslash path normalization)")
+			}
 			args, _ := json.Marshal(map[string]string{"command": tt.command})
 			info := extractor.Extract("Bash", json.RawMessage(args))
 

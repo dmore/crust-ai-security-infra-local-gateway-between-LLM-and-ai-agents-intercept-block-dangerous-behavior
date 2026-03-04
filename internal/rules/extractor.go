@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -915,16 +916,20 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 			info.EvasiveReason = "blocked: " + strings.Join(reasons, ", ") + ": " + cmd
 		}
 
-		// Pre-process PowerShell commands before bash parsing:
-		// 1. Substitute $var references with their assigned values
-		// 2. Normalize Windows backslash paths to forward slashes
-		// This prevents the bash parser from mangling PS-specific syntax.
-		if looksLikePowerShell(cmd) {
-			cmd = substitutePSVariables(cmd)
-			cmd = normalizePSBackslashPaths(cmd)
-		}
-
+		// Try parsing as bash. On Windows only, if bash parsing fails and the
+		// command looks like PowerShell, apply PS pre-processing (substitute
+		// $var references, normalize backslash paths) and retry. PowerShell
+		// commands only run on Windows, so the transformation is intentionally
+		// a no-op on Linux/macOS — this also prevents a bypass where the broad
+		// psVarAssignRe regex matches bash-like $var="value" syntax on non-Windows
+		// hosts and rescues a malformed command from the evasion check.
 		file, err := parser.Parse(strings.NewReader(cmd), "")
+		if err != nil && runtime.GOOS == goosWindows && looksLikePowerShell(cmd) {
+			transformed := normalizePSBackslashPaths(substitutePSVariables(cmd))
+			if f, err2 := parser.Parse(strings.NewReader(transformed), ""); err2 == nil {
+				cmd, file, err = transformed, f, nil
+			}
+		}
 		if err != nil {
 			// Unparseable non-empty commands are treated as evasive: the rule
 			// engine cannot analyze what it cannot parse, so blocking is the
@@ -1241,7 +1246,10 @@ func extractFlagValue(args []string, flag string) string {
 	return ""
 }
 
-const maxShellRecursionDepth = 3
+const (
+	maxShellRecursionDepth = 3
+	goosWindows            = "windows"
+)
 
 func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands []parsedCommand, depth int, parentSymtab map[string]string) {
 	for cmdIdx, pc := range commands {

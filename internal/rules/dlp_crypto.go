@@ -162,7 +162,7 @@ func cryptoDataDir(home, chain string) string {
 	lower := string(unicode.ToLower(rune(chain[0]))) + chain[1:]
 
 	switch runtime.GOOS {
-	case "windows":
+	case goosWindows:
 		appData := os.Getenv("LOCALAPPDATA")
 		if appData == "" {
 			appData = os.Getenv("APPDATA")
