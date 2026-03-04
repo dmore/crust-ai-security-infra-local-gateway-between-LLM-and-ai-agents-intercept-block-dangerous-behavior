@@ -127,6 +127,23 @@ jobs:
       - name: Unit tests (with race detector and coverage)
         run: go test -race -short -coverprofile coverage.out -covermode atomic ./...
 
+      - name: PSScriptAnalyzer — lint pwsh bootstrap script (Windows only)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+          # Extract the bootstrap script from the Go raw string literal.
+          # Single-quoted regex: backtick is literal in PS single-quoted strings.
+          $src = Get-Content 'internal\rules\pwshworker.go' -Raw
+          $m = [regex]::Match($src, '(?s)psBootstrapScript\s*=\s*`\n([\s\S]+?)\n`')
+          if (-not $m.Success) { Write-Error 'Could not extract psBootstrapScript'; exit 1 }
+          $tmp = [IO.Path]::ChangeExtension([IO.Path]::GetTempFileName(), '.ps1')
+          Set-Content $tmp $m.Groups[1].Value -Encoding UTF8
+          $results = Invoke-ScriptAnalyzer -Path $tmp -Severity Warning,Error
+          Remove-Item $tmp -ErrorAction SilentlyContinue
+          if ($results) { $results | Format-Table; exit 1 }
+          Write-Host 'PSScriptAnalyzer: no issues'
+
       - name: PS worker fuzz tests (Windows only — pwsh is available on windows-latest)
         if: matrix.os == 'windows-latest'
         run: |

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"os/exec"
 	"sync"
 	"unicode/utf16"
@@ -44,25 +43,30 @@ while ($true) {
         $ast  = [System.Management.Automation.Language.Parser]::ParseInput(
                     $req.command, [ref]$toks, [ref]$errs)
 
-        # Track simple $var = "literal" assignments for variable resolution.
+        # Two-pass approach: collect ALL top-level $var = "literal" assignments
+        # first, then process commands. Using top-level (recurse=$false) prevents
+        # assignments inside nested scriptblocks (e.g. ForEach-Object { $p=... })
+        # from polluting the variable table for outer-scope commands.
         $vars = @{}
-        $cmds = [System.Collections.Generic.List[object]]::new()
-
         $ast.FindAll({
             param($n)
-            $n -is [System.Management.Automation.Language.AssignmentStatementAst] -or
+            $n -is [System.Management.Automation.Language.AssignmentStatementAst]
+        }, $false) | ForEach-Object {
+            try {
+                $lhs = $_.Left
+                $rhs = $_.Right
+                if ($lhs -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                    $rhs -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                    $vars[$lhs.VariablePath.UserPath] = $rhs.Value
+                }
+            } catch {}
+        }
+
+        $cmds = [System.Collections.Generic.List[object]]::new()
+        $ast.FindAll({
+            param($n)
             $n -is [System.Management.Automation.Language.CommandAst]
         }, $true) | ForEach-Object {
-            if ($_ -is [System.Management.Automation.Language.AssignmentStatementAst]) {
-                try {
-                    $lhs = $_.Left
-                    $rhs = $_.Right
-                    if ($lhs -is [System.Management.Automation.Language.VariableExpressionAst] -and
-                        $rhs -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
-                        $vars[$lhs.VariablePath.UserPath] = $rhs.Value
-                    }
-                } catch {}
-            } else {
                 $nm = $_.GetCommandName()
                 if ($null -ne $nm) {
                     $ag = [System.Collections.Generic.List[string]]::new()
@@ -83,7 +87,6 @@ while ($true) {
                         args = [string[]]$ag.ToArray()
                     })
                 }
-            }
         }
 
         $resp = [PSCustomObject]@{
@@ -129,8 +132,9 @@ type pwshWorker struct {
 	proc     *exec.Cmd
 	stdin    io.WriteCloser
 	scanner  *bufio.Scanner
-	pwshPath string // path to pwsh.exe or powershell.exe
-	encoded  string // base64 UTF-16LE encoded bootstrap script
+	encoder  *json.Encoder // reused across parse() calls to avoid per-call allocation
+	pwshPath string        // path to pwsh.exe or powershell.exe
+	encoded  string        // base64 UTF-16LE encoded bootstrap script
 }
 
 // FindPwsh returns the path to pwsh.exe or powershell.exe, preferring the
@@ -161,8 +165,6 @@ func newPwshWorker(pwshPath string) (*pwshWorker, error) {
 func (w *pwshWorker) start() error {
 	proc := exec.CommandContext(context.Background(), w.pwshPath, //nolint:gosec // pwshPath comes from exec.LookPath, not user input
 		"-NoProfile", "-NonInteractive", "-EncodedCommand", w.encoded)
-	proc.Env = append(os.Environ(), "_CRUST_PWSH_WORKER=1")
-
 	stdin, err := proc.StdinPipe()
 	if err != nil {
 		return err
@@ -181,6 +183,7 @@ func (w *pwshWorker) start() error {
 
 	w.proc = proc
 	w.stdin = stdin
+	w.encoder = json.NewEncoder(stdin)
 	w.scanner = bufio.NewScanner(stdout)
 	w.scanner.Buffer(make([]byte, 1<<20), 1<<20)
 	return nil
@@ -199,7 +202,7 @@ func (w *pwshWorker) parse(cmd string) (pwshWorkerResponse, error) {
 		}
 	}
 
-	if err := json.NewEncoder(w.stdin).Encode(pwshWorkerRequest{Command: cmd}); err != nil {
+	if err := w.encoder.Encode(pwshWorkerRequest{Command: cmd}); err != nil {
 		w.kill()
 		return pwshWorkerResponse{}, err
 	}
@@ -226,6 +229,7 @@ func (w *pwshWorker) kill() {
 	}
 	w.proc = nil
 	w.stdin = nil
+	w.encoder = nil
 	w.scanner = nil
 }
 

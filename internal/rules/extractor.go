@@ -165,9 +165,10 @@ func (e *Extractor) EnableSubprocessIsolation(exePath string) error {
 }
 
 // EnablePSWorker starts a persistent pwsh subprocess for accurate PowerShell
-// command analysis on Windows. pwshPath must be the path to pwsh.exe or
-// powershell.exe. Safe to call on non-Windows (no-op). Falls back to the
-// heuristic PS transform if this method is not called or returns an error.
+// command analysis. pwshPath must be the path to pwsh.exe or powershell.exe.
+// Only call this on Windows — the subprocess is real, not a no-op. The call
+// site in engine.go is gated behind runtime.GOOS == "windows". Falls back to
+// the heuristic PS transform if this method is not called or returns an error.
 func (e *Extractor) EnablePSWorker(pwshPath string) error {
 	w, err := newPwshWorker(pwshPath)
 	if err != nil {
@@ -1231,7 +1232,15 @@ func (e *Extractor) parsePowerShellInnerCommand(info *ExtractedInfo, innerCmd st
 		return
 	}
 
-	// Attempt 2: regex heuristic extraction from the raw string
+	// Attempt 2: pwsh worker — authoritative PS AST parser (Windows only).
+	if e.pwshWorker != nil {
+		if psResp, psErr := e.pwshWorker.parse(innerCmd); psErr == nil && len(psResp.ParseErrors) == 0 && len(psResp.Commands) > 0 {
+			e.extractFromParsedCommandsDepth(info, psResp.Commands, depth+1, nil)
+			return
+		}
+	}
+
+	// Attempt 3: regex heuristic extraction from the raw string
 	paths := extractPathsFromInterpreterCode(innerCmd)
 	paths = append(paths, unquotedAbsPathRe.FindAllString(innerCmd, -1)...)
 	hosts := extractHosts(strings.Fields(innerCmd))
@@ -1243,7 +1252,7 @@ func (e *Extractor) parsePowerShellInnerCommand(info *ExtractedInfo, innerCmd st
 		return
 	}
 
-	// Attempt 3: flag as evasive — we can't analyze the inner command
+	// Attempt 4: flag as evasive — we can't analyze the inner command
 	info.Evasive = true
 	info.EvasiveReason = "PowerShell command is too complex to verify as safe: " + innerCmd
 }
