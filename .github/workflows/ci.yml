@@ -29,9 +29,9 @@ jobs:
 
       - name: go fix (check for pending modernizations)
         run: |
-          go fix -diff ./... 2>&1 | tee /tmp/gofix.diff
+          go tool fix -diff ./... 2>&1 | tee /tmp/gofix.diff
           if [ -s /tmp/gofix.diff ]; then
-            echo "go fix found pending modernizations — run 'go fix -fix ./...' locally and commit the changes"
+            echo "go fix found pending modernizations — run 'go fix ./...' locally and commit the changes"
             exit 1
           fi
 
