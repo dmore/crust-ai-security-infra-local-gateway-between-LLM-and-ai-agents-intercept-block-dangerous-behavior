@@ -786,18 +786,22 @@ func (p *Proxy) retryAsNonStreaming(ctx *RequestContext) (responseBody json.RawM
 }
 
 // forceNonStreaming returns a copy of the JSON body with "stream" set to false.
-// Preserves all other fields exactly via json.RawMessage.
+// Preserves all other fields byte-for-byte via json.RawMessage.
+// Uses SetEscapeHTML(false) so characters like & < > are not mangled.
 func forceNonStreaming(body []byte) []byte {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil || raw == nil {
 		return body // best-effort: return unchanged on parse failure or JSON null
 	}
 	raw["stream"] = json.RawMessage("false")
-	result, err := json.Marshal(raw)
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(raw); err != nil {
 		return body
 	}
-	return result
+	b := buf.Bytes()
+	return b[:len(b)-1] // strip trailing newline added by json.Encoder
 }
 
 // stripAPIPrefix removes a leading "/api" segment from the request path.
