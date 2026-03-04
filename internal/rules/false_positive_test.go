@@ -48,10 +48,10 @@ func TestOpenClawEvasiveCommands(t *testing.T) {
 	}
 }
 
-// TestUnparseableCommandNotEvasive verifies that commands which fail to parse
-// are NOT flagged as evasive. OS sandboxing is the enforcement layer; blocking
-// parse failures causes false positives on legitimate but unusual syntax.
-func TestUnparseableCommandNotEvasive(t *testing.T) {
+// TestUnparseableCommandEvasive verifies that commands which fail to parse
+// ARE flagged as evasive. The rule engine cannot analyze unparseable input,
+// so fail-closed (block) is the safe default to prevent bypass via malformed syntax.
+func TestUnparseableCommandEvasive(t *testing.T) {
 	ext := NewExtractor()
 
 	cmds := []struct {
@@ -64,15 +64,15 @@ func TestUnparseableCommandNotEvasive(t *testing.T) {
 		{"broken_syntax", "if then fi"},
 		{"lone_semicolons", "; ; ;"},
 		{"broken_parens", "(((("},
+		{"lone_bang", "!"},
 	}
 
 	for _, tt := range cmds {
 		t.Run(tt.name, func(t *testing.T) {
 			info := ext.Extract("Bash", json.RawMessage(
 				`{"command":`+mustJSON(tt.cmd)+`}`))
-			if info.Evasive {
-				t.Errorf("unparseable command should not be evasive: %q → reason: %s",
-					tt.cmd, info.EvasiveReason)
+			if !info.Evasive {
+				t.Errorf("unparseable command should be evasive (fail-closed): %q", tt.cmd)
 			}
 		})
 	}

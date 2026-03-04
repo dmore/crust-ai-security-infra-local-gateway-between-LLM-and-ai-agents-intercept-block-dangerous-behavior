@@ -918,6 +918,11 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 
 		file, err := parser.Parse(strings.NewReader(cmd), "")
 		if err != nil {
+			// Unparseable non-empty commands are treated as evasive: the rule
+			// engine cannot analyze what it cannot parse, so blocking is the
+			// safe default to prevent bypass via malformed shell syntax.
+			info.Evasive = true
+			info.EvasiveReason = "unparseable shell command: " + err.Error()
 			printed = append(printed, strings.TrimSpace(cmd))
 			continue
 		}

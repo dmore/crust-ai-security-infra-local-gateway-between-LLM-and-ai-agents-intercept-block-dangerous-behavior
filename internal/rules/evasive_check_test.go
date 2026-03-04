@@ -19,7 +19,7 @@ func TestEvasiveMarkingOnSecondaryFields(t *testing.T) {
 			name:        "safe command + broken script (unclosed quote)",
 			toolName:    "mcp_tool",
 			args:        map[string]any{"command": "echo safe", "script": "this has an unclosed 'quote"},
-			wantEvasive: false, // expectation: should NOT be evasive if at least one field parses
+			wantEvasive: true, // fail-closed: any unparseable field triggers evasive
 		},
 		{
 			name:        "safe command only",
@@ -37,13 +37,13 @@ func TestEvasiveMarkingOnSecondaryFields(t *testing.T) {
 			name:        "text starting with shell keyword if",
 			toolName:    "helper",
 			args:        map[string]any{"script": "if you want to delete, use rm"},
-			wantEvasive: false, // unparseable commands are NOT evasive — OS sandboxing is the enforcement layer
+			wantEvasive: true, // fail-closed: unparseable input is blocked
 		},
 		{
 			name:        "safe command + text starting with if keyword",
 			toolName:    "mcp_tool",
 			args:        map[string]any{"command": "echo safe", "script": "if you want to delete, use rm"},
-			wantEvasive: false, // should NOT be evasive — first field parsed successfully
+			wantEvasive: true, // fail-closed: unparseable script field triggers evasive even with valid command field
 		},
 	}
 
