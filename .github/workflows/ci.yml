@@ -127,6 +127,12 @@ jobs:
       - name: Unit tests (with race detector and coverage)
         run: go test -race -short -coverprofile coverage.out -covermode atomic ./...
 
+      - name: PS worker fuzz tests (Windows only — pwsh is available on windows-latest)
+        if: matrix.os == 'windows-latest'
+        run: |
+          go test ./internal/rules/... -fuzz=FuzzPSWorker_NoCrash -fuzztime=30s -short
+          go test ./internal/rules/... -fuzz=FuzzExtractor_PSCommand -fuzztime=30s -short
+
 
   # macOS and FreeBSD full tests run only on main to reduce CI costs (macOS is 10x billing).
   # The jobs always complete (SUCCESS) so they can be listed as required status checks;
