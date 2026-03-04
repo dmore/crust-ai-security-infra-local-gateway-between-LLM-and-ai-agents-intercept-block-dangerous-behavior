@@ -665,8 +665,14 @@ func patternKind(pattern string) string {
 	return "glob"
 }
 
+// Glob separators used by compilePattern.
+const (
+	pathGlobSeparator rune = '/'
+	hostGlobSeparator rune = '.'
+)
+
 // compilePattern compiles a pattern as either a regex (if "re:" prefixed) or a glob.
-// The separator is used for glob compilation ('/' for paths, '.' for hosts).
+// The separator is used for glob compilation (pathGlobSeparator for paths, hostGlobSeparator for hosts).
 func compilePattern(pattern string, separator rune) (*regexp.Regexp, glob.Glob, error) {
 	if strings.HasPrefix(pattern, "re:") {
 		re, err := compileRegex(pattern[3:])
@@ -956,7 +962,7 @@ func compileMatchPattern(m *Match) (*CompiledMatch, error) {
 
 	// Compile Path (regex or glob)
 	if m.Path != "" {
-		re, g, err := compilePattern(m.Path, '/')
+		re, g, err := compilePattern(m.Path, pathGlobSeparator)
 		if err != nil {
 			return nil, fmt.Errorf("match.path %s %q: %w", patternKind(m.Path), m.Path, err)
 		}
@@ -974,7 +980,7 @@ func compileMatchPattern(m *Match) (*CompiledMatch, error) {
 
 	// Compile Host (regex or glob)
 	if m.Host != "" {
-		re, g, err := compilePattern(m.Host, '.')
+		re, g, err := compilePattern(m.Host, hostGlobSeparator)
 		if err != nil {
 			return nil, fmt.Errorf("match.host %s %q: %w", patternKind(m.Host), m.Host, err)
 		}

@@ -26,6 +26,23 @@ const (
 	bufferStateTimedOut                     // timeout exceeded; buffer rejected
 )
 
+// SSE event type strings for Anthropic and OpenAI Responses APIs.
+const (
+	// Anthropic streaming event types.
+	sseContentBlockStart = "content_block_start"
+	sseContentBlockDelta = "content_block_delta"
+	sseContentBlockStop  = "content_block_stop"
+	sseMessageStop       = "message_stop"
+
+	// OpenAI Responses API streaming event types.
+	sseResponseOutputItemAdded            = "response.output_item.added"
+	sseResponseFunctionCallArgumentsDelta = "response.function_call_arguments.delta"
+	sseResponseFunctionCallArgumentsDone  = "response.function_call_arguments.done"
+	sseResponseOutputItemDone             = "response.output_item.done"
+	sseResponseCompleted                  = "response.completed"
+	sseResponseOutputTextDelta            = "response.output_text.delta"
+)
+
 // SSEEvent represents a buffered SSE event
 type SSEEvent struct {
 	EventType string // "message_start", "content_block_start", etc.
@@ -340,7 +357,7 @@ func (b *BufferedSSEWriter) flushFilteredAnthropicEvents(blockedIndices, replace
 		shouldReplace := false
 		eventIndex := -1
 
-		if bytes.Contains(event.Data, []byte(`"content_block_start"`)) {
+		if bytes.Contains(event.Data, []byte(`"`+sseContentBlockStart+`"`)) {
 			var evt AnthropicContentBlockStart
 			if err := json.Unmarshal(event.Data, &evt); err == nil {
 				eventIndex = evt.Index
@@ -350,7 +367,7 @@ func (b *BufferedSSEWriter) flushFilteredAnthropicEvents(blockedIndices, replace
 					shouldReplace = true
 				}
 			}
-		} else if bytes.Contains(event.Data, []byte(`"content_block_delta"`)) {
+		} else if bytes.Contains(event.Data, []byte(`"`+sseContentBlockDelta+`"`)) {
 			var evt AnthropicContentBlockDelta
 			if err := json.Unmarshal(event.Data, &evt); err == nil {
 				eventIndex = evt.Index
@@ -360,7 +377,7 @@ func (b *BufferedSSEWriter) flushFilteredAnthropicEvents(blockedIndices, replace
 					shouldReplace = true
 				}
 			}
-		} else if bytes.Contains(event.Data, []byte(`"content_block_stop"`)) {
+		} else if bytes.Contains(event.Data, []byte(`"`+sseContentBlockStop+`"`)) {
 			var evt AnthropicContentBlockStop
 			if err := json.Unmarshal(event.Data, &evt); err == nil {
 				eventIndex = evt.Index
@@ -394,10 +411,10 @@ func (b *BufferedSSEWriter) flushFilteredAnthropicEvents(blockedIndices, replace
 			}
 
 			// Handle content_block_start
-			if bytes.Contains(event.Data, []byte(`"content_block_start"`)) && !replacedStartSent[eventIndex] {
+			if bytes.Contains(event.Data, []byte(`"`+sseContentBlockStart+`"`)) && !replacedStartSent[eventIndex] {
 				replacedStartSent[eventIndex] = true
-				if err := b.writeSSEEvent("content_block_start", map[string]any{
-					"type":  "content_block_start",
+				if err := b.writeSSEEvent(sseContentBlockStart, map[string]any{
+					"type":  sseContentBlockStart,
 					"index": eventIndex,
 					"content_block": map[string]any{
 						"type": "tool_use", "id": tc.ID, "name": shellToolName, "input": map[string]any{},
@@ -409,15 +426,15 @@ func (b *BufferedSSEWriter) flushFilteredAnthropicEvents(blockedIndices, replace
 			}
 
 			// Handle content_block_delta
-			if bytes.Contains(event.Data, []byte(`"content_block_delta"`)) && !replacedDeltaSent[eventIndex] {
+			if bytes.Contains(event.Data, []byte(`"`+sseContentBlockDelta+`"`)) && !replacedDeltaSent[eventIndex] {
 				replacedDeltaSent[eventIndex] = true
 				input := buildBlockedReplacement(tc.Name, matchResult)
 				inputJSONBytes, err := marshalJSON(input)
 				if err != nil {
 					continue
 				}
-				if err := b.writeSSEEvent("content_block_delta", map[string]any{
-					"type":  "content_block_delta",
+				if err := b.writeSSEEvent(sseContentBlockDelta, map[string]any{
+					"type":  sseContentBlockDelta,
 					"index": eventIndex,
 					"delta": map[string]any{
 						"type":         "input_json_delta",
@@ -430,13 +447,13 @@ func (b *BufferedSSEWriter) flushFilteredAnthropicEvents(blockedIndices, replace
 			}
 
 			// Skip subsequent deltas for the same replaced block
-			if bytes.Contains(event.Data, []byte(`"content_block_delta"`)) {
+			if bytes.Contains(event.Data, []byte(`"`+sseContentBlockDelta+`"`)) {
 				continue
 			}
 		}
 
 		// Inject warning before message_stop (for both remove and replace modes if not already sent via text block)
-		if !warningInjected && bytes.Contains(event.Data, []byte(`"message_stop"`)) {
+		if !warningInjected && bytes.Contains(event.Data, []byte(`"`+sseMessageStop+`"`)) {
 			// Only inject for remove mode; replace mode already has text blocks
 			if len(blockedIndices) > 0 {
 				if err := b.injectWarning(blockedCalls); err != nil {
@@ -473,22 +490,22 @@ func (b *BufferedSSEWriter) injectWarning(blockedCalls []security.BlockedToolCal
 func (b *BufferedSSEWriter) injectAnthropicWarning(blockedCalls []security.BlockedToolCall) error {
 	warning := security.BuildWarningContent(blockedCalls)
 
-	if err := b.writeSSEEvent("content_block_start", map[string]any{
-		"type":          "content_block_start",
+	if err := b.writeSSEEvent(sseContentBlockStart, map[string]any{
+		"type":          sseContentBlockStart,
 		"index":         WarningBlockIndex,
 		"content_block": map[string]any{"type": "text", "text": ""},
 	}); err != nil {
 		return err
 	}
-	if err := b.writeSSEEvent("content_block_delta", map[string]any{
-		"type":  "content_block_delta",
+	if err := b.writeSSEEvent(sseContentBlockDelta, map[string]any{
+		"type":  sseContentBlockDelta,
 		"index": WarningBlockIndex,
 		"delta": map[string]any{"type": "text_delta", "text": warning},
 	}); err != nil {
 		return err
 	}
-	return b.writeSSEEvent("content_block_stop", map[string]any{
-		"type":  "content_block_stop",
+	return b.writeSSEEvent(sseContentBlockStop, map[string]any{
+		"type":  sseContentBlockStop,
 		"index": WarningBlockIndex,
 	})
 }
@@ -699,7 +716,7 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIResponsesEvents(blockedIndices, r
 			}
 
 			switch event.EventType {
-			case "response.output_item.added":
+			case sseResponseOutputItemAdded:
 				if !replacedItemSent[outputIdx] {
 					replacedItemSent[outputIdx] = true
 					tc := b.toolCalls[outputIdx]
@@ -708,7 +725,7 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIResponsesEvents(blockedIndices, r
 					}
 					// Emit replacement output_item.added with shell tool name
 					replacedEvent := map[string]any{
-						"type":         "response.output_item.added",
+						"type":         sseResponseOutputItemAdded,
 						"output_index": outputIdx,
 						"item": map[string]any{
 							"type":    "function_call",
@@ -723,7 +740,7 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIResponsesEvents(blockedIndices, r
 				}
 				continue
 
-			case "response.function_call_arguments.delta":
+			case sseResponseFunctionCallArgumentsDelta:
 				if !replacedArgsSent[outputIdx] {
 					replacedArgsSent[outputIdx] = true
 					tc := b.toolCalls[outputIdx]
@@ -738,7 +755,7 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIResponsesEvents(blockedIndices, r
 					}
 					// Emit single delta with full replacement arguments
 					replacedEvent := map[string]any{
-						"type":         "response.function_call_arguments.delta",
+						"type":         sseResponseFunctionCallArgumentsDelta,
 						"output_index": outputIdx,
 						"delta":        string(argBytes),
 					}
@@ -749,7 +766,7 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIResponsesEvents(blockedIndices, r
 				// Skip subsequent argument deltas
 				continue
 
-			case "response.function_call_arguments.done":
+			case sseResponseFunctionCallArgumentsDone:
 				// Emit done with the full replacement arguments
 				tc := b.toolCalls[outputIdx]
 				if tc == nil {
@@ -762,7 +779,7 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIResponsesEvents(blockedIndices, r
 					continue
 				}
 				replacedEvent := map[string]any{
-					"type":         "response.function_call_arguments.done",
+					"type":         sseResponseFunctionCallArgumentsDone,
 					"output_index": outputIdx,
 					"arguments":    string(argBytes),
 				}
@@ -771,7 +788,7 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIResponsesEvents(blockedIndices, r
 				}
 				continue
 
-			case "response.output_item.done":
+			case sseResponseOutputItemDone:
 				// Emit done with the replaced item
 				tc := b.toolCalls[outputIdx]
 				if tc == nil {
@@ -784,7 +801,7 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIResponsesEvents(blockedIndices, r
 					continue
 				}
 				replacedEvent := map[string]any{
-					"type":         "response.output_item.done",
+					"type":         sseResponseOutputItemDone,
 					"output_index": outputIdx,
 					"item": map[string]any{
 						"type":      "function_call",
@@ -806,7 +823,7 @@ func (b *BufferedSSEWriter) flushFilteredOpenAIResponsesEvents(blockedIndices, r
 		}
 
 		// Inject warning before response.completed (for remove mode)
-		if !warningInjected && event.EventType == "response.completed" {
+		if !warningInjected && event.EventType == sseResponseCompleted {
 			if len(blockedIndices) > 0 {
 				if err := b.injectWarning(blockedCalls); err != nil {
 					log.Warn("Failed to inject Responses API warning: %v", err)
@@ -883,8 +900,8 @@ func (b *BufferedSSEWriter) writeRaw(raw []byte) error {
 
 func (b *BufferedSSEWriter) injectOpenAIResponsesWarning(blockedCalls []security.BlockedToolCall) error {
 	warning := security.BuildWarningContent(blockedCalls)
-	return b.writeSSEEvent("response.output_text.delta", map[string]any{
-		"type":          "response.output_text.delta",
+	return b.writeSSEEvent(sseResponseOutputTextDelta, map[string]any{
+		"type":          sseResponseOutputTextDelta,
 		"output_index":  WarningBlockIndex,
 		"content_index": 0,
 		"delta":         warning,
