@@ -1,6 +1,7 @@
 package security
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -1511,14 +1512,30 @@ func FuzzInterceptAnthropicResponse(f *testing.F) {
 	f.Add(`{"id":"msg_2","type":"message","role":"assistant","content":[{"type":"text","text":"<tag>"}]}`)
 	f.Add(`{"id":"msg_3","type":"message","role":"assistant","content":[{"type":"text","text":"a > b"}]}`)
 	f.Add(`{"id":"msg_4","type":"message","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"echo a&b"}}]}`)
+	// Blocked Bash tool + text with & in same message — exercises re-serialization + HTML escaping invariant.
+	f.Add(`{"id":"msg_5","type":"message","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}},{"type":"text","text":"running a & b"}]}`)
 	// Normal content
-	f.Add(`{"id":"msg_5","type":"message","role":"assistant","content":[{"type":"text","text":"hello"}]}`)
+	f.Add(`{"id":"msg_6","type":"message","role":"assistant","content":[{"type":"text","text":"hello"}]}`)
 	// Edge cases
 	f.Add(`{}`)
 	f.Add(`[]`)
 	f.Add(``)
 
-	interceptor := NewInterceptor(nil, nil)
+	// Use a real engine that blocks Bash so tool calls are actually intercepted
+	// and re-serialized — making the HTML-escaping invariants non-trivial.
+	rulesDir := f.TempDir()
+	blockBashYAML := "rules:\n  - name: block-bash\n    match:\n      tool: [Bash]\n    message: \"Bash blocked\"\n"
+	if err := os.WriteFile(filepath.Join(rulesDir, "fuzz-rules.yaml"), []byte(blockBashYAML), 0644); err != nil {
+		f.Fatalf("Failed to write fuzz rules: %v", err)
+	}
+	engine, err := rules.NewEngine(rules.EngineConfig{
+		UserRulesDir:   rulesDir,
+		DisableBuiltin: true,
+	})
+	if err != nil {
+		f.Fatalf("Failed to create engine: %v", err)
+	}
+	interceptor := NewInterceptor(engine, nil) // nil storage is safe: record.go guards nil
 
 	f.Fuzz(func(t *testing.T, body string) {
 		result, err := interceptor.InterceptAnthropicResponse(
@@ -1531,13 +1548,29 @@ func FuzzInterceptAnthropicResponse(f *testing.F) {
 				BlockMode: types.BlockModeRemove,
 			},
 		)
-		// Must not panic (fuzz framework catches).
-		// With nil engine, result is always non-nil and err is nil.
+		// INVARIANT 1: Must not panic (implicit — fuzz framework catches panics).
+
+		// INVARIANT 2: result and err must not both be nil.
 		if result == nil && err == nil {
 			t.Error("both result and err are nil")
 		}
 		if result != nil && len(result.ModifiedResponse) == 0 && len(body) > 0 {
 			t.Errorf("non-empty input produced empty ModifiedResponse: input=%q", body)
+		}
+
+		// INVARIANT 3: If the response was re-serialized (output ≠ input), the
+		// output must not contain HTML-escaped characters. Regression for the
+		// json.Marshal HTML-escaping bug (& → \u0026, < → \u003c, > → \u003e).
+		if result != nil && string(result.ModifiedResponse) != body {
+			if bytes.Contains(result.ModifiedResponse, []byte(`\u0026`)) {
+				t.Errorf("re-serialized output contains HTML-escaped & (\\u0026): %q", result.ModifiedResponse)
+			}
+			if bytes.Contains(result.ModifiedResponse, []byte(`\u003c`)) {
+				t.Errorf("re-serialized output contains HTML-escaped < (\\u003c): %q", result.ModifiedResponse)
+			}
+			if bytes.Contains(result.ModifiedResponse, []byte(`\u003e`)) {
+				t.Errorf("re-serialized output contains HTML-escaped > (\\u003e): %q", result.ModifiedResponse)
+			}
 		}
 	})
 }

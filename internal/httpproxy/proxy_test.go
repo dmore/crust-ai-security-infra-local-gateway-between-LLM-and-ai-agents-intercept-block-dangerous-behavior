@@ -1357,6 +1357,53 @@ func TestRetryAsNonStreaming_RespectsClientContext(t *testing.T) {
 	}
 }
 
+// TestRetryAsNonStreaming_ErrorStatusCodes verifies that retryAsNonStreaming
+// propagates non-2xx upstream status codes (e.g. 429, 500) to the caller.
+func TestRetryAsNonStreaming_ErrorStatusCodes(t *testing.T) {
+	tests := []struct {
+		name           string
+		upstreamStatus int
+	}{
+		{"upstream 429", http.StatusTooManyRequests},
+		{"upstream 500", http.StatusInternalServerError},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "error from upstream", tt.upstreamStatus)
+			}))
+			defer upstream.Close()
+
+			proxy, err := NewProxy(upstream.URL, "", 30*time.Second, nil, false)
+			if err != nil {
+				t.Fatalf("NewProxy: %v", err)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"stream":true}`))
+			req.Header.Set("Content-Type", "application/json")
+			upstreamReq, err := http.NewRequestWithContext(req.Context(), http.MethodPost, upstream.URL+"/v1/messages",
+				strings.NewReader(`{"stream":false}`))
+			if err != nil {
+				t.Fatalf("NewRequest: %v", err)
+			}
+
+			rctx := &RequestContext{
+				Writer:      httptest.NewRecorder(),
+				Request:     req,
+				UpstreamReq: upstreamReq,
+				RequestBody: []byte(`{"stream":true}`),
+				APIType:     types.APITypeAnthropic,
+			}
+
+			_, _, _, _, statusCode := proxy.retryAsNonStreaming(rctx)
+			if statusCode != tt.upstreamStatus {
+				t.Errorf("expected status %d, got %d", tt.upstreamStatus, statusCode)
+			}
+		})
+	}
+}
+
 // Bug 2a: extractUsageAndBody leaves stale Content-Encoding: gzip in
 // resp.Header when gzip.NewReader fails (invalid gzip data).
 // The client then receives Content-Encoding: gzip with an empty body.
