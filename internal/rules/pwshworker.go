@@ -24,7 +24,8 @@ import (
 //   - AssignmentStatementAst tracking — resolves simple $var = "value" assignments
 //   - CommandAst extraction — yields command names and their string arguments
 //
-// Compatible with Windows PowerShell 5.1 and PowerShell 7+.
+// Supported platforms: Windows 10/11 (powershell.exe 5.1 always present;
+// pwsh.exe 7+ used when available).
 const psBootstrapScript = `
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
@@ -134,6 +135,8 @@ type pwshWorker struct {
 
 // FindPwsh returns the path to pwsh.exe or powershell.exe, preferring the
 // newer pwsh (PowerShell 7+) over legacy powershell (Windows PowerShell 5.1).
+// On supported Windows 10/11 systems, powershell.exe is always present so
+// this should always succeed.
 func FindPwsh() (string, bool) {
 	for _, name := range []string{"pwsh.exe", "powershell.exe"} {
 		if p, err := exec.LookPath(name); err == nil {
