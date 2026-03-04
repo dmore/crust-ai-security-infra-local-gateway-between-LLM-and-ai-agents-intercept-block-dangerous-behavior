@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -180,6 +181,14 @@ func NewEngineWithNormalizer(cfg EngineConfig, normalizer *Normalizer) (*Engine,
 		if exe, err := os.Executable(); err == nil {
 			if err := e.extractor.EnableSubprocessIsolation(exe); err != nil {
 				log.Warn("Shell worker failed to start (falling back to in-process): %v", err)
+			}
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		if pwshPath, ok := FindPwsh(); ok {
+			if err := e.extractor.EnablePSWorker(pwshPath); err != nil {
+				log.Warn("PS worker failed to start (falling back to heuristic PS transform): %v", err)
 			}
 		}
 	}
