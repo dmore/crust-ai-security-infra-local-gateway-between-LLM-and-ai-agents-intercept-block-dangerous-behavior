@@ -41,6 +41,8 @@ func (s DoctorStatus) String() string {
 		return "PATH"
 	case StatusConnError:
 		return "CONN"
+	case StatusOtherError:
+		return "ERR"
 	default:
 		return "ERR"
 	}

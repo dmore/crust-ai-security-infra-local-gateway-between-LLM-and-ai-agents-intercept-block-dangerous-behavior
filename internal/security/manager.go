@@ -66,7 +66,7 @@ func Init(cfg Config) (*Manager, error) {
 
 	// Default block mode to "remove" if not specified
 	blockMode := cfg.BlockMode
-	if blockMode == "" {
+	if blockMode == types.BlockModeUnset {
 		blockMode = types.BlockModeRemove
 	}
 

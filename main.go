@@ -415,7 +415,12 @@ func runDaemon(cfg *config.Config, logLevel string, disableBuiltin bool, endpoin
 		cfg.Telemetry.RetentionDays = retentionDays
 	}
 	if blockMode != "" {
-		cfg.Security.BlockMode = types.BlockMode(blockMode)
+		parsed, err := types.ParseBlockMode(blockMode)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: invalid --block-mode %q: must be 'remove' or 'replace'\n", blockMode)
+			os.Exit(1)
+		}
+		cfg.Security.BlockMode = parsed
 	}
 
 	// Validate config AFTER all CLI overrides have been applied
@@ -1386,7 +1391,7 @@ func runDoctor(args []string) {
 			okCount++
 		case httpproxy.StatusAuthError:
 			warnCount++
-		default:
+		case httpproxy.StatusPathError, httpproxy.StatusConnError, httpproxy.StatusOtherError:
 			errCount++
 		}
 	}
@@ -1433,7 +1438,7 @@ func printDoctorResult(r httpproxy.DoctorResult) {
 	case httpproxy.StatusAuthError:
 		icon = tui.IconWarning
 		style = tui.StyleWarning
-	default:
+	case httpproxy.StatusPathError, httpproxy.StatusConnError, httpproxy.StatusOtherError:
 		icon = tui.IconCross
 		style = tui.StyleError
 	}

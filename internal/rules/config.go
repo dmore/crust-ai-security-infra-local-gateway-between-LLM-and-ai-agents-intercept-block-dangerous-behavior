@@ -12,7 +12,7 @@ import (
 type StringOrArray []string
 
 func (s *StringOrArray) UnmarshalYAML(node *yaml.Node) error {
-	switch node.Kind {
+	switch node.Kind { //nolint:exhaustive // default returns error for all non-scalar/non-sequence node types
 	case yaml.ScalarNode:
 		if node.Value == "" {
 			return errors.New("empty pattern not allowed")

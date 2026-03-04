@@ -9,6 +9,16 @@ repos:
         files: \.go$
         pass_filenames: true
 
+  # Go modernization fixes (auto-applies stdlib improvements, iterator rewrites, etc.)
+  - repo: local
+    hooks:
+      - id: go-fix
+        name: go fix
+        entry: bash -c 'go fix ./...'
+        language: system
+        files: \.go$
+        pass_filenames: false
+
   # Go linting
   - repo: local
     hooks:

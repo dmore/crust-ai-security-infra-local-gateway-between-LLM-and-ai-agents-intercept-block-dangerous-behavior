@@ -632,7 +632,9 @@ func (s *Storage) GetSessionEvents(sessionID string, limit int) ([]ToolCallLog, 
 		if argsStr != nil {
 			l.ToolArguments = json.RawMessage(*argsStr)
 		}
-		l.APIType = types.APIType(derefStr(apiType))
+		if parsed, err := types.ParseAPIType(derefStr(apiType)); err == nil {
+			l.APIType = parsed
+		}
 		l.WasBlocked = derefBool(wasBlocked)
 		l.BlockedByRule = derefStr(blockedByRule)
 		l.Model = derefStr(model)
@@ -666,7 +668,7 @@ func (s *Storage) LogToolCall(toolLog ToolCallLog) error {
 		SessionID:     strPtr(toolLog.SessionID),
 		ToolName:      toolLog.ToolName,
 		ToolArguments: argsStr,
-		ApiType:       strPtr(string(toolLog.APIType)),
+		ApiType:       strPtr(toolLog.APIType.String()),
 		WasBlocked:    &toolLog.WasBlocked,
 		BlockedByRule: strPtr(toolLog.BlockedByRule),
 		Model:         strPtr(toolLog.Model),
@@ -874,7 +876,12 @@ func dbToolCallLogToToolCallLog(l *db.ToolCallLog) ToolCallLog {
 		SessionID:     derefStr(l.SessionID),
 		ToolName:      l.ToolName,
 		ToolArguments: args,
-		APIType:       types.APIType(derefStr(l.ApiType)),
+		APIType: func() types.APIType {
+			if parsed, err := types.ParseAPIType(derefStr(l.ApiType)); err == nil {
+				return parsed
+			}
+			return types.APITypeUnknown
+		}(),
 		WasBlocked:    derefBool(l.WasBlocked),
 		BlockedByRule: derefStr(l.BlockedByRule),
 		Model:         derefStr(l.Model),

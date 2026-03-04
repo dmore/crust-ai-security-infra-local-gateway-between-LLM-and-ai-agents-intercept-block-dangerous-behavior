@@ -134,7 +134,7 @@ type SecurityConfig struct {
 // Validate validates the SecurityConfig and sets defaults.
 func (c *SecurityConfig) Validate() error {
 	// Validate and default BlockMode
-	if c.BlockMode == "" {
+	if c.BlockMode == types.BlockModeUnset {
 		c.BlockMode = types.BlockModeRemove
 	} else if !c.BlockMode.Valid() {
 		return fmt.Errorf("invalid block_mode %q: must be 'remove' or 'replace'", c.BlockMode)

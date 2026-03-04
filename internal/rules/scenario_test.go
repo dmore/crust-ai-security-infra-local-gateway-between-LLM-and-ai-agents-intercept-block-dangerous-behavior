@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -26,8 +25,7 @@ type ScenarioFile struct {
 
 // getTestDataPath returns the path to the testdata directory
 func getTestDataPath() string {
-	_, filename, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(filename), "testdata")
+	return filepath.Join(packageDir(), "testdata")
 }
 
 // loadScenarios loads scenarios from a YAML file

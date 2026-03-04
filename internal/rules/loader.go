@@ -1,6 +1,7 @@
 package rules
 
 import (
+	sha30 "crypto/sha3"
 	"embed"
 	"encoding/hex"
 	"errors"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/BakeLens/crust/internal/fileutil"
 	"github.com/BakeLens/crust/internal/pathutil"
-	"golang.org/x/crypto/sha3"
 	"gopkg.in/yaml.v3"
 )
 
@@ -143,7 +143,7 @@ func (l *Loader) LoadUser() ([]Rule, error) {
 		}
 
 		// Compute SHA3-256 checksum from the bytes we just read
-		hash := sha3.Sum256(data)
+		hash := sha30.Sum256(data)
 		checksum := hex.EncodeToString(hash[:])
 
 		// If we have a previous checksum for this file, verify it matches.
@@ -363,7 +363,7 @@ func (l *Loader) VerifyIntegrity() []string {
 			tampered = append(tampered, path+" (missing)")
 			continue
 		}
-		hash := sha3.Sum256(content)
+		hash := sha30.Sum256(content)
 		if hex.EncodeToString(hash[:]) != expectedHash {
 			tampered = append(tampered, path+" (modified)")
 		}

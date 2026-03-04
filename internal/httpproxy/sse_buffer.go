@@ -302,8 +302,10 @@ func (b *BufferedSSEWriter) flushFilteredEvents(blockedIndices, replacedIndices 
 		return b.flushFilteredOpenAIEvents(blockedIndices, replacedIndices, blockedCalls)
 	case types.APITypeOpenAIResponses:
 		return b.flushFilteredOpenAIResponsesEvents(blockedIndices, replacedIndices, blockedCalls)
-	default:
+	case types.APITypeUnknown:
 		return b.flushEventsUnlocked()
+	default:
+		panic("unhandled types.APIType: " + b.apiType.String())
 	}
 }
 
@@ -453,8 +455,10 @@ func (b *BufferedSSEWriter) injectWarning(blockedCalls []security.BlockedToolCal
 		return b.injectOpenAIWarning(blockedCalls)
 	case types.APITypeOpenAIResponses:
 		return b.injectOpenAIResponsesWarning(blockedCalls)
-	default:
+	case types.APITypeUnknown:
 		return nil
+	default:
+		panic("unhandled types.APIType: " + b.apiType.String())
 	}
 }
 

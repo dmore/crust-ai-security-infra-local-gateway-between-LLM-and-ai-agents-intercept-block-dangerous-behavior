@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/BakeLens/crust/internal/telemetry"
+	"github.com/BakeLens/crust/internal/types"
 )
 
 func TestSSEReader_AnthropicToolUse(t *testing.T) {
@@ -40,7 +41,7 @@ data: {"type":"message_stop"}
 	var capturedToolCalls []telemetry.ToolCall
 	var capturedInput, capturedOutput int64
 
-	reader := NewSSEReaderWithSecurity(body, "anthropic", "trace-1", "session-1", "claude-3", func(in, out int64, content string, toolCalls []telemetry.ToolCall) {
+	reader := NewSSEReaderWithSecurity(body, types.APITypeAnthropic, "trace-1", "session-1", "claude-3", func(in, out int64, content string, toolCalls []telemetry.ToolCall) {
 		capturedInput = in
 		capturedOutput = out
 		capturedToolCalls = toolCalls
@@ -121,7 +122,7 @@ data: {"type":"message_stop"}
 	var capturedContent string
 	var capturedToolCalls []telemetry.ToolCall
 
-	reader := NewSSEReaderWithSecurity(body, "anthropic", "trace-1", "session-1", "claude-3", func(in, out int64, content string, toolCalls []telemetry.ToolCall) {
+	reader := NewSSEReaderWithSecurity(body, types.APITypeAnthropic, "trace-1", "session-1", "claude-3", func(in, out int64, content string, toolCalls []telemetry.ToolCall) {
 		capturedContent = content
 		capturedToolCalls = toolCalls
 	})
@@ -165,7 +166,7 @@ data: [DONE]
 
 	var capturedToolCalls []telemetry.ToolCall
 
-	reader := NewSSEReaderWithSecurity(body, "openai", "trace-1", "session-1", "gpt-4", func(in, out int64, content string, toolCalls []telemetry.ToolCall) {
+	reader := NewSSEReaderWithSecurity(body, types.APITypeOpenAICompletion, "trace-1", "session-1", "gpt-4", func(in, out int64, content string, toolCalls []telemetry.ToolCall) {
 		capturedToolCalls = toolCalls
 	})
 

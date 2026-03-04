@@ -27,6 +27,14 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
 
+      - name: go fix (check for pending modernizations)
+        run: |
+          go fix -diff ./... 2>&1 | tee /tmp/gofix.diff
+          if [ -s /tmp/gofix.diff ]; then
+            echo "go fix found pending modernizations — run 'go fix -fix ./...' locally and commit the changes"
+            exit 1
+          fi
+
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest

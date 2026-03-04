@@ -105,7 +105,7 @@ linters:
       locale: US
 
     exhaustive:
-      default-signifies-exhaustive: true
+      default-signifies-exhaustive: false
 
     goconst:
       min-len: 3

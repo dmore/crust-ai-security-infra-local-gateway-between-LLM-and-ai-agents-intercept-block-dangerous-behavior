@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/BakeLens/crust/internal/config"
+	"github.com/BakeLens/crust/internal/types"
 )
 
 func TestResolveProvider_SlashSplit(t *testing.T) {
@@ -159,7 +160,7 @@ func TestRequestContext_String(t *testing.T) {
 	ctx := &RequestContext{
 		Model:          "gpt-4o",
 		TargetURL:      "https://api.openai.com/v1/chat/completions",
-		APIType:        "openai",
+		APIType:        types.APITypeOpenAICompletion,
 		ProviderAPIKey: "sk-secret-key-12345",
 	}
 	s := ctx.String()

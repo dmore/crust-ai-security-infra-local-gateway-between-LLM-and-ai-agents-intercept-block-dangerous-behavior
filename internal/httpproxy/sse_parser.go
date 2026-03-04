@@ -290,8 +290,10 @@ func (p *SSEParser) ParseEvent(eventType string, data []byte, apiType types.APIT
 		return p.ParseOpenAIEvent(data)
 	case types.APITypeOpenAIResponses:
 		return p.ParseOpenAIResponsesEvent(eventType, data)
-	default:
+	case types.APITypeUnknown:
 		return ParseResult{}
+	default:
+		panic("unhandled types.APIType: " + apiType.String())
 	}
 }
 

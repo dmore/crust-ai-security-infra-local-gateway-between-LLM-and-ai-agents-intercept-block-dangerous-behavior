@@ -67,242 +67,171 @@ type BlockedToolCall struct {
 	MatchResult rules.MatchResult
 }
 
-// InterceptOpenAIResponse intercepts tool calls in an OpenAI format response
-// blockMode: types.BlockModeRemove (delete tool calls) or types.BlockModeReplace (substitute with echo command)
-func (i *Interceptor) InterceptOpenAIResponse(responseBody []byte, traceID, sessionID, model string, apiType types.APIType, blockMode types.BlockMode) (*InterceptionResult, error) {
+// intercept is the shared implementation for all three Intercept* format methods.
+// It handles the guard check, result initialization, and final marshal.
+// fn receives the result and useReplaceMode, applies format-specific filtering,
+// and returns the (possibly modified) response value and whether it changed.
+// Returning (nil, false) — e.g. on JSON parse failure — passes the original body through.
+// Returning (nil, true) is treated the same way (silent passthrough); fn must not
+// return modified=true with a nil response.
+func (i *Interceptor) intercept(
+	responseBody []byte,
+	blockMode types.BlockMode,
+	fn func(result *InterceptionResult, useReplaceMode bool) (any, bool),
+) (*InterceptionResult, error) {
 	if !i.enabled.Load() || i.engine == nil {
 		return &InterceptionResult{ModifiedResponse: responseBody}, nil
 	}
-
-	var resp openAIResponse
-	if err := json.Unmarshal(responseBody, &resp); err != nil {
-		log.Warn("[Layer1] Failed to parse %s response: %v", apiType, err)
-		return &InterceptionResult{ModifiedResponse: responseBody}, nil
-	}
-
 	result := &InterceptionResult{
 		BlockedToolCalls: make([]BlockedToolCall, 0),
 		AllowedToolCalls: make([]telemetry.ToolCall, 0),
 	}
-
-	useReplaceMode := blockMode.IsReplace()
-
-	modified := false
-	for choiceIdx := range resp.Choices {
-		choice := &resp.Choices[choiceIdx]
-		if choice.Message.ToolCalls == nil {
-			continue
-		}
-
-		allowedToolCalls := make([]openAIToolCall, 0, len(choice.Message.ToolCalls))
-		for _, tc := range choice.Message.ToolCalls {
-			toolCall := telemetry.ToolCall{
-				ID:        tc.ID,
-				Name:      tc.Function.Name,
-				Arguments: json.RawMessage(tc.Function.Arguments),
-			}
-
-			_, blocked := i.evaluateToolCall(result, toolCall, traceID, sessionID, tc.Function.Arguments, apiType, model, useReplaceMode)
-			if blocked {
-				modified = true
-			} else {
-				allowedToolCalls = append(allowedToolCalls, tc)
-			}
-		}
-
-		choice.Message.ToolCalls = allowedToolCalls
-	}
-
-	// Inject message for blocked tool calls
-	if result.HasBlockedCalls && len(resp.Choices) > 0 {
-		var msg string
-		if useReplaceMode {
-			msg = message.FormatReplaceWarning(toBlockedCalls(result.BlockedToolCalls))
-		} else {
-			msg = message.FormatRemoveWarning(toBlockedCalls(result.BlockedToolCalls))
-		}
-		if resp.Choices[0].Message.Content == "" {
-			resp.Choices[0].Message.Content = msg
-		} else {
-			resp.Choices[0].Message.Content += "\n\n" + msg
-		}
-		modified = true
-	}
-
-	if modified {
-		modifiedBody, err := json.Marshal(resp)
-		if err != nil {
-			return &InterceptionResult{ModifiedResponse: responseBody}, err
-		}
-		result.ModifiedResponse = modifiedBody
-	} else {
+	resp, modified := fn(result, blockMode.IsReplace())
+	if !modified || resp == nil {
 		result.ModifiedResponse = responseBody
+		return result, nil
 	}
-
+	b, err := json.Marshal(resp)
+	if err != nil {
+		return &InterceptionResult{ModifiedResponse: responseBody}, err
+	}
+	result.ModifiedResponse = b
 	return result, nil
 }
 
-// InterceptAnthropicResponse intercepts tool calls in an Anthropic format response
-// blockMode: types.BlockModeRemove (delete tool calls) or types.BlockModeReplace (substitute with echo command)
-func (i *Interceptor) InterceptAnthropicResponse(responseBody []byte, traceID, sessionID, model string, apiType types.APIType, blockMode types.BlockMode) (*InterceptionResult, error) {
-	if !i.enabled.Load() || i.engine == nil {
-		return &InterceptionResult{ModifiedResponse: responseBody}, nil
-	}
-
-	var resp anthropicResponse
-	if err := json.Unmarshal(responseBody, &resp); err != nil {
-		log.Warn("[Layer1] Failed to parse %s response: %v", apiType, err)
-		return &InterceptionResult{ModifiedResponse: responseBody}, nil
-	}
-
-	result := &InterceptionResult{
-		BlockedToolCalls: make([]BlockedToolCall, 0),
-		AllowedToolCalls: make([]telemetry.ToolCall, 0),
-	}
-
-	useReplaceMode := blockMode.IsReplace()
-
-	allowedContent := make([]anthropicContentBlock, 0, len(resp.Content))
-	modified := false
-
-	for _, block := range resp.Content {
-		if block.Type != contentTypeToolUse {
-			allowedContent = append(allowedContent, block)
-			continue
+// InterceptOpenAIResponse intercepts tool calls in an OpenAI format response.
+func (i *Interceptor) InterceptOpenAIResponse(responseBody []byte, traceID, sessionID, model string, apiType types.APIType, blockMode types.BlockMode) (*InterceptionResult, error) {
+	return i.intercept(responseBody, blockMode, func(result *InterceptionResult, useReplaceMode bool) (any, bool) {
+		var resp openAIResponse
+		if err := json.Unmarshal(responseBody, &resp); err != nil {
+			log.Warn("[Layer1] Failed to parse %s response: %v", apiType, err)
+			return nil, false
 		}
-
-		toolCall := telemetry.ToolCall{
-			ID:        block.ID,
-			Name:      block.Name,
-			Arguments: block.Input,
-		}
-
-		matchResult, blocked := i.evaluateToolCall(result, toolCall, traceID, sessionID, string(block.Input), apiType, model, useReplaceMode)
-		if blocked {
-			modified = true
-			if useReplaceMode {
-				allowedContent = append(allowedContent, anthropicContentBlock{
-					Type: "text",
-					Text: message.FormatReplaceInline(block.Name, matchResult),
-				})
+		modified := false
+		for choiceIdx := range resp.Choices {
+			choice := &resp.Choices[choiceIdx]
+			if choice.Message.ToolCalls == nil {
+				continue
 			}
-		} else {
-			allowedContent = append(allowedContent, block)
+			allowed := make([]openAIToolCall, 0, len(choice.Message.ToolCalls))
+			for _, tc := range choice.Message.ToolCalls {
+				toolCall := telemetry.ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: json.RawMessage(tc.Function.Arguments)}
+				_, blocked := i.evaluateToolCall(result, toolCall, traceID, sessionID, tc.Function.Arguments, apiType, model, useReplaceMode)
+				if blocked {
+					modified = true
+				} else {
+					allowed = append(allowed, tc)
+				}
+			}
+			choice.Message.ToolCalls = allowed
 		}
-	}
-
-	// Only inject warning in remove mode
-	if result.HasBlockedCalls && !useReplaceMode {
-		allowedContent = append(allowedContent, anthropicContentBlock{
-			Type: "text",
-			Text: message.FormatRemoveWarning(toBlockedCalls(result.BlockedToolCalls)),
-		})
-		modified = true
-	}
-
-	resp.Content = allowedContent
-
-	if modified {
-		modifiedBody, err := json.Marshal(resp)
-		if err != nil {
-			return &InterceptionResult{ModifiedResponse: responseBody}, err
+		if result.HasBlockedCalls && len(resp.Choices) > 0 {
+			var msg string
+			if useReplaceMode {
+				msg = message.FormatReplaceWarning(toBlockedCalls(result.BlockedToolCalls))
+			} else {
+				msg = message.FormatRemoveWarning(toBlockedCalls(result.BlockedToolCalls))
+			}
+			if resp.Choices[0].Message.Content == "" {
+				resp.Choices[0].Message.Content = msg
+			} else {
+				resp.Choices[0].Message.Content += "\n\n" + msg
+			}
+			modified = true
 		}
-		result.ModifiedResponse = modifiedBody
-	} else {
-		result.ModifiedResponse = responseBody
-	}
+		return resp, modified
+	})
+}
 
-	return result, nil
+// InterceptAnthropicResponse intercepts tool calls in an Anthropic format response.
+func (i *Interceptor) InterceptAnthropicResponse(responseBody []byte, traceID, sessionID, model string, apiType types.APIType, blockMode types.BlockMode) (*InterceptionResult, error) {
+	return i.intercept(responseBody, blockMode, func(result *InterceptionResult, useReplaceMode bool) (any, bool) {
+		var resp anthropicResponse
+		if err := json.Unmarshal(responseBody, &resp); err != nil {
+			log.Warn("[Layer1] Failed to parse %s response: %v", apiType, err)
+			return nil, false
+		}
+		allowed := make([]anthropicContentBlock, 0, len(resp.Content))
+		modified := false
+		for _, block := range resp.Content {
+			if block.Type != contentTypeToolUse {
+				allowed = append(allowed, block)
+				continue
+			}
+			tc := telemetry.ToolCall{ID: block.ID, Name: block.Name, Arguments: block.Input}
+			matchResult, blocked := i.evaluateToolCall(result, tc, traceID, sessionID, string(block.Input), apiType, model, useReplaceMode)
+			if blocked {
+				modified = true
+				if useReplaceMode {
+					allowed = append(allowed, anthropicContentBlock{Type: "text", Text: message.FormatReplaceInline(block.Name, matchResult)})
+				}
+			} else {
+				allowed = append(allowed, block)
+			}
+		}
+		if result.HasBlockedCalls && !useReplaceMode {
+			allowed = append(allowed, anthropicContentBlock{Type: "text", Text: message.FormatRemoveWarning(toBlockedCalls(result.BlockedToolCalls))})
+			modified = true
+		}
+		resp.Content = allowed
+		return resp, modified
+	})
 }
 
 // InterceptOpenAIResponsesResponse intercepts tool calls in an OpenAI Responses API format response.
 // The Responses API uses `output[]` with `type: "function_call"` items.
 func (i *Interceptor) InterceptOpenAIResponsesResponse(responseBody []byte, traceID, sessionID, model string, apiType types.APIType, blockMode types.BlockMode) (*InterceptionResult, error) {
-	if !i.enabled.Load() || i.engine == nil {
-		return &InterceptionResult{ModifiedResponse: responseBody}, nil
-	}
-
-	var resp openAIResponsesResponse
-	if err := json.Unmarshal(responseBody, &resp); err != nil {
-		log.Warn("[Layer1] Failed to parse %s response: %v", apiType, err)
-		return &InterceptionResult{ModifiedResponse: responseBody}, nil
-	}
-
-	result := &InterceptionResult{
-		BlockedToolCalls: make([]BlockedToolCall, 0),
-		AllowedToolCalls: make([]telemetry.ToolCall, 0),
-	}
-
-	useReplaceMode := blockMode.IsReplace()
-
-	allowedOutput := make([]openAIResponsesOutputItem, 0, len(resp.Output))
-	modified := false
-
-	for _, item := range resp.Output {
-		if item.Type != contentTypeFunctionCall {
-			allowedOutput = append(allowedOutput, item)
-			continue
+	return i.intercept(responseBody, blockMode, func(result *InterceptionResult, useReplaceMode bool) (any, bool) {
+		var resp openAIResponsesResponse
+		if err := json.Unmarshal(responseBody, &resp); err != nil {
+			log.Warn("[Layer1] Failed to parse %s response: %v", apiType, err)
+			return nil, false
 		}
-
-		toolCall := telemetry.ToolCall{
-			ID:        item.CallID,
-			Name:      item.Name,
-			Arguments: json.RawMessage(item.Arguments),
-		}
-
-		matchResult, blocked := i.evaluateToolCall(result, toolCall, traceID, sessionID, item.Arguments, apiType, model, useReplaceMode)
-		if blocked {
-			modified = true
-			if useReplaceMode {
-				allowedOutput = append(allowedOutput, openAIResponsesOutputItem{
-					Type: "message",
-					ID:   item.ID,
-					Content: []openAIResponsesContent{
-						{Type: "output_text", Text: message.FormatReplaceInline(item.Name, matchResult)},
-					},
-				})
+		allowed := make([]openAIResponsesOutputItem, 0, len(resp.Output))
+		modified := false
+		for _, item := range resp.Output {
+			if item.Type != contentTypeFunctionCall {
+				allowed = append(allowed, item)
+				continue
 			}
-		} else {
-			allowedOutput = append(allowedOutput, item)
+			tc := telemetry.ToolCall{ID: item.CallID, Name: item.Name, Arguments: json.RawMessage(item.Arguments)}
+			matchResult, blocked := i.evaluateToolCall(result, tc, traceID, sessionID, item.Arguments, apiType, model, useReplaceMode)
+			if blocked {
+				modified = true
+				if useReplaceMode {
+					allowed = append(allowed, openAIResponsesOutputItem{
+						Type: "message", ID: item.ID,
+						Content: []openAIResponsesContent{{Type: "output_text", Text: message.FormatReplaceInline(item.Name, matchResult)}},
+					})
+				}
+			} else {
+				allowed = append(allowed, item)
+			}
 		}
-	}
-
-	// Inject warning in remove mode
-	if result.HasBlockedCalls && !useReplaceMode {
-		allowedOutput = append(allowedOutput, openAIResponsesOutputItem{
-			Type: "message",
-			Content: []openAIResponsesContent{
-				{Type: "output_text", Text: message.FormatRemoveWarning(toBlockedCalls(result.BlockedToolCalls))},
-			},
-		})
-		modified = true
-	}
-
-	resp.Output = allowedOutput
-
-	if modified {
-		modifiedBody, err := json.Marshal(resp)
-		if err != nil {
-			return &InterceptionResult{ModifiedResponse: responseBody}, err
+		if result.HasBlockedCalls && !useReplaceMode {
+			allowed = append(allowed, openAIResponsesOutputItem{
+				Type:    "message",
+				Content: []openAIResponsesContent{{Type: "output_text", Text: message.FormatRemoveWarning(toBlockedCalls(result.BlockedToolCalls))}},
+			})
+			modified = true
 		}
-		result.ModifiedResponse = modifiedBody
-	} else {
-		result.ModifiedResponse = responseBody
-	}
-
-	return result, nil
+		resp.Output = allowed
+		return resp, modified
+	})
 }
 
 // InterceptToolCalls intercepts tool calls based on API type
-// blockMode: types.BlockModeRemove (delete tool calls) or types.BlockModeReplace (substitute with echo command)
+// blockMode: types.BlockModeRemove (delete tool calls) or types.BlockModeReplace (substitute with a text warning block)
 func (i *Interceptor) InterceptToolCalls(responseBody []byte, traceID, sessionID, model string, apiType types.APIType, blockMode types.BlockMode) (*InterceptionResult, error) {
 	switch apiType {
 	case types.APITypeAnthropic:
 		return i.InterceptAnthropicResponse(responseBody, traceID, sessionID, model, apiType, blockMode)
 	case types.APITypeOpenAIResponses:
 		return i.InterceptOpenAIResponsesResponse(responseBody, traceID, sessionID, model, apiType, blockMode)
-	default:
+	case types.APITypeOpenAICompletion, types.APITypeUnknown:
 		return i.InterceptOpenAIResponse(responseBody, traceID, sessionID, model, apiType, blockMode)
+	default:
+		panic("unhandled types.APIType: " + apiType.String())
 	}
 }
 

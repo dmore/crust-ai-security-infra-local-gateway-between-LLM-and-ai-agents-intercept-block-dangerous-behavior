@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/BakeLens/crust/internal/rules"
+	"github.com/BakeLens/crust/internal/types"
 )
 
 func TestBufferedSSEWriter_AnthropicToolUse(t *testing.T) {
@@ -15,7 +16,7 @@ func TestBufferedSSEWriter_AnthropicToolUse(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	// Create buffered writer
-	buffer := NewBufferedSSEWriter(w, 100, 30*time.Second, "trace-1", "session-1", "claude-3", "anthropic", nil)
+	buffer := NewBufferedSSEWriter(w, 100, 30*time.Second, "trace-1", "session-1", "claude-3", types.APITypeAnthropic, nil)
 
 	// Simulate Anthropic SSE events for a tool_use
 	events := []struct {
@@ -63,7 +64,7 @@ func TestBufferedSSEWriter_AnthropicToolUse(t *testing.T) {
 
 func TestBufferedSSEWriter_OpenAIToolUse(t *testing.T) {
 	w := httptest.NewRecorder()
-	buffer := NewBufferedSSEWriter(w, 100, 30*time.Second, "trace-1", "session-1", "gpt-4", "openai", nil)
+	buffer := NewBufferedSSEWriter(w, 100, 30*time.Second, "trace-1", "session-1", "gpt-4", types.APITypeOpenAICompletion, nil)
 
 	// Simulate OpenAI SSE events for a tool call
 	events := []struct {
@@ -100,7 +101,7 @@ func TestBufferedSSEWriter_OpenAIToolUse(t *testing.T) {
 
 func TestBufferedSSEWriter_FlushAll(t *testing.T) {
 	w := httptest.NewRecorder()
-	buffer := NewBufferedSSEWriter(w, 100, 30*time.Second, "trace-1", "session-1", "claude-3", "anthropic", nil)
+	buffer := NewBufferedSSEWriter(w, 100, 30*time.Second, "trace-1", "session-1", "claude-3", types.APITypeAnthropic, nil)
 
 	// Add some events
 	event1 := []byte("data: {\"type\":\"message_start\"}\n\n")
@@ -127,7 +128,7 @@ func TestBufferedSSEWriter_FlushAll(t *testing.T) {
 
 func TestBufferedSSEWriter_BufferSizeLimit(t *testing.T) {
 	w := httptest.NewRecorder()
-	buffer := NewBufferedSSEWriter(w, 2, 30*time.Second, "trace-1", "session-1", "claude-3", "anthropic", nil)
+	buffer := NewBufferedSSEWriter(w, 2, 30*time.Second, "trace-1", "session-1", "claude-3", types.APITypeAnthropic, nil)
 
 	// Add events up to limit
 	_ = buffer.BufferEvent("event1", []byte("{}"), []byte("data: {}\n\n"))
@@ -143,7 +144,7 @@ func TestBufferedSSEWriter_BufferSizeLimit(t *testing.T) {
 func TestBufferedSSEWriter_Timeout(t *testing.T) {
 	w := httptest.NewRecorder()
 	// Very short timeout
-	buffer := NewBufferedSSEWriter(w, 100, 1*time.Millisecond, "trace-1", "session-1", "claude-3", "anthropic", nil)
+	buffer := NewBufferedSSEWriter(w, 100, 1*time.Millisecond, "trace-1", "session-1", "claude-3", types.APITypeAnthropic, nil)
 
 	// Wait for timeout
 	time.Sleep(10 * time.Millisecond)
@@ -192,7 +193,7 @@ func TestBufferedSSEWriter_ReplaceModeNoShellTool_FallsBackToRemove(t *testing.T
 		{Name: "Read", InputSchema: json.RawMessage(`{"type":"object"}`)},
 	}
 	buffer := NewBufferedSSEWriter(w, 100, 30*time.Second,
-		"trace-1", "session-1", "claude-3", "anthropic", tools)
+		"trace-1", "session-1", "claude-3", types.APITypeAnthropic, tools)
 
 	// Buffer Anthropic events with a tool_use
 	events := []struct {

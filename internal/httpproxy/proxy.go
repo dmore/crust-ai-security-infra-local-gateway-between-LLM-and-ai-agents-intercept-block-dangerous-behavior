@@ -959,6 +959,8 @@ func extractUsageAndBody(resp *http.Response, apiType types.APIType) (inputToken
 	case types.APITypeOpenAICompletion:
 		inputTokens = respData.Usage.PromptTokens
 		outputTokens = respData.Usage.CompletionTokens
+	case types.APITypeUnknown:
+		// no usage data for unknown types
 	}
 
 	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
@@ -1043,6 +1045,9 @@ func extractToolCalls(bodyBytes []byte, apiType types.APIType) []telemetry.ToolC
 				}
 			}
 		}
+
+	case types.APITypeUnknown:
+		// no tool calls for unknown types
 	}
 
 	return toolCalls

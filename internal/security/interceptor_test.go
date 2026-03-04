@@ -746,7 +746,7 @@ func TestInterceptToolCalls_RoutesToCorrectHandler(t *testing.T) {
 		},
 		{
 			name:    "defaults to OpenAI for unknown",
-			apiType: types.APIType("unknown"),
+			apiType: types.APITypeUnknown,
 		},
 	}
 
@@ -819,6 +819,9 @@ func TestInterceptOpenAIResponse_NilEngine(t *testing.T) {
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected non-nil result")
 	}
 
 	// Should pass through unchanged when engine is nil
@@ -1099,6 +1102,9 @@ rules:
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
 
 	// Should not block because the pattern can't match invalid JSON
 	if result.HasBlockedCalls {
@@ -1183,6 +1189,9 @@ func TestInterceptAnthropicResponse_NilEngine(t *testing.T) {
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected non-nil result")
 	}
 
 	// Should pass through unchanged when engine is nil

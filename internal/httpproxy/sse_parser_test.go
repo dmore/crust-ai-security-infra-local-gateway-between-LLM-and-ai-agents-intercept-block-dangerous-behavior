@@ -316,7 +316,7 @@ func TestParseEvent_APITypeRouting(t *testing.T) {
 	}
 
 	// Unknown API type
-	result = parser.ParseEvent("", []byte(anthropicData), types.APIType("unknown"))
+	result = parser.ParseEvent("", []byte(anthropicData), types.APITypeUnknown)
 	if result.InputTokens != 0 || result.OutputTokens != 0 {
 		t.Error("Unknown API type should return empty result")
 	}
@@ -877,7 +877,7 @@ func FuzzParseEvent(f *testing.F) {
 		case 1:
 			apiType = types.APITypeOpenAICompletion
 		default:
-			apiType = types.APIType("unknown")
+			apiType = types.APITypeUnknown
 		}
 
 		result := parser.ParseEvent("", data, apiType)

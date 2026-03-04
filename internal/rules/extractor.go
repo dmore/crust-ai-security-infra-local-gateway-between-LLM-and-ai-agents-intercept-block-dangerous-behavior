@@ -2391,8 +2391,12 @@ func nodeHasUnsafe(root syntax.Node) bool {
 				// context doesn't support them. Skip interpreter for safety.
 				found = true
 				return false
+			case syntax.RdrInOut, syntax.ClbOut, syntax.RdrAll, syntax.AppAll:
+				// Not supported by the interpreter — mark as unsafe.
+				found = true
+				return false
 			default:
-				// Unhandled redirect operator (e.g., <> RdrAll) — would panic
+				// Unhandled redirect operator — would panic
 				found = true
 				return false
 			}
@@ -2684,6 +2688,8 @@ func operationPriority(op Operation) int {
 		return 2
 	case OpRead:
 		return 1
+	case OpNone:
+		return 0
 	default:
 		return 0
 	}

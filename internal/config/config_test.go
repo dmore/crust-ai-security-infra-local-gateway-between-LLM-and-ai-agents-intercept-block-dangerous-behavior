@@ -28,7 +28,7 @@ func TestSecurityConfig_Validate_BufferStreamingDisabled(t *testing.T) {
 	cfg := SecurityConfig{
 		Enabled:         true,
 		BufferStreaming: false,
-		BlockMode:       "remove",
+		BlockMode:       types.BlockModeRemove,
 	}
 	err := cfg.Validate()
 	// Should not fail (user choice to disable), but logs a warning
@@ -43,7 +43,7 @@ func TestSecurityConfig_Validate_InvalidBlockMode(t *testing.T) {
 		BufferStreaming: true,
 		MaxBufferEvents: 1000,
 		BufferTimeout:   60,
-		BlockMode:       "invalid",
+		BlockMode:       types.BlockMode(99),
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Error("expected error for invalid block_mode")
@@ -77,7 +77,7 @@ func TestSecurityConfig_Validate_SecurityDisabledNoBufferCheck(t *testing.T) {
 	cfg := SecurityConfig{
 		Enabled:         false,
 		BufferStreaming: false,
-		BlockMode:       "remove",
+		BlockMode:       types.BlockModeRemove,
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("unexpected error when security disabled: %v", err)
@@ -264,7 +264,7 @@ func TestValidate_ProviderURL(t *testing.T) {
 
 func TestValidate_BlockMode(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Security.BlockMode = types.BlockMode("garbage")
+	cfg.Security.BlockMode = types.BlockMode(99)
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "block_mode") {
 		t.Errorf("invalid block_mode should fail: %v", err)
