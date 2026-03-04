@@ -29,11 +29,8 @@ jobs:
 
       - name: go fix (check for pending modernizations)
         run: |
-          go tool fix -diff ./... 2>&1 | tee /tmp/gofix.diff
-          if [ -s /tmp/gofix.diff ]; then
-            echo "go fix found pending modernizations — run 'go fix ./...' locally and commit the changes"
-            exit 1
-          fi
+          go fix ./...
+          git diff --exit-code || { echo "go fix found pending modernizations — run 'go fix ./...' locally and commit the changes"; exit 1; }
 
       - name: govulncheck
         run: |
