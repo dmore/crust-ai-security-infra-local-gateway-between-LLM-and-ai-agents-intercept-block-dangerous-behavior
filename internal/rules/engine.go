@@ -480,6 +480,12 @@ func (e *Engine) getMergedRules() []CompiledRule {
 func (e *Engine) matchRules(info *ExtractedInfo, allPaths []string, toolName string) MatchResult {
 	rules := e.getMergedRules()
 
+	// Ensure Operations is populated — callers that build ExtractedInfo directly
+	// (e.g., tests) may only set Operation without Operations.
+	if info.Operation != OpNone && len(info.Operations) == 0 {
+		info.Operations = []Operation{info.Operation}
+	}
+
 	// Step 11: Evaluate operation-based rules (for known tools).
 	if info.Operation != OpNone {
 		if result := e.evaluateOperationRules(rules, *info, allPaths, toolName); result.Matched {
@@ -498,7 +504,7 @@ func (e *Engine) matchRules(info *ExtractedInfo, allPaths []string, toolName str
 		}
 		if compiled.Rule.IsContentOnly() && contentForRules != "" {
 			// Respect actions filter; OpNone (unknown/MCP tools) always matches.
-			if info.Operation != OpNone && !compiled.Rule.HasAction(info.Operation) {
+			if info.Operation != OpNone && !compiled.Rule.HasAnyAction(info.Operations) {
 				continue
 			}
 			contentMatched := false
@@ -528,8 +534,8 @@ func (e *Engine) evaluateOperationRules(rules []CompiledRule, info ExtractedInfo
 			continue
 		}
 
-		// Skip if rule doesn't apply to this operation
-		if !compiled.Rule.HasAction(info.Operation) {
+		// Skip if rule doesn't apply to any of this command's operations
+		if !compiled.Rule.HasAnyAction(info.Operations) {
 			continue
 		}
 
