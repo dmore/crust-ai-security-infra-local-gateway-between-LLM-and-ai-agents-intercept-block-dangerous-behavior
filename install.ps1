@@ -98,8 +98,7 @@ function Get-Platform {
         "X64"   { return "amd64" }
         "Arm64" { return "arm64" }
         default {
-            Write-Host "Error: Unsupported architecture: $arch" -ForegroundColor Red
-            exit 1
+            throw "Unsupported architecture: $arch"
         }
     }
 }
@@ -121,9 +120,7 @@ function Install-Gitleaks {
         }
     } catch {}
 
-    Write-Host "Error: Failed to install gitleaks" -ForegroundColor Red
-    Write-Host "Install manually: go install github.com/gitleaks/gitleaks/v8@latest" -ForegroundColor Red
-    exit 1
+    throw "Failed to install gitleaks. Install manually: go install github.com/gitleaks/gitleaks/v8@latest"
 }
 
 function Install-NerdFont {
@@ -265,7 +262,7 @@ try {
     # Use Start-Process to avoid $ErrorActionPreference="Stop" killing on git stderr
     $gitResult = Start-Process -FilePath "git" -ArgumentList "clone","--depth","1","--branch",$Version,$CloneUrl,$TmpDir -Wait -NoNewWindow -PassThru 2>$null
     if ($gitResult.ExitCode -ne 0) {
-        & git clone --depth 1 $CloneUrl $TmpDir 2>$null
+        & git clone --depth 1 --branch $Version $CloneUrl $TmpDir 2>$null
     }
 
     # Build Go binary
