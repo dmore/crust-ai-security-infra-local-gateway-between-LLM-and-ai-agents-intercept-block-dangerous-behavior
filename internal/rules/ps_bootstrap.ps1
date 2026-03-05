@@ -14,7 +14,9 @@ while ($true) {
 
         $vars   = @{}
         $htVars = @{}
+        $objVars = @{}
         $cmds = [System.Collections.Generic.List[object]]::new()
+        $addExp = {param($e,$tg)$nx=@($e.NestedExpressions);if($nx.Count-eq 0){$tg.Add($e.Value)}elseif($nx.Count-eq 1-and$nx[0]-is[VariableExpressionAst]){$k=$nx[0].VariablePath.UserPath;if($vars.ContainsKey($k)){$tg.Add($vars[$k])}}}
         foreach ($block in @($ast.BeginBlock, $ast.ProcessBlock, $ast.EndBlock)) {
             if ($null -eq $block) { continue }
             foreach ($stmt in $block.Statements) {
@@ -23,23 +25,22 @@ while ($true) {
                     try {
                         $lhs = $stmt.Left
                         $rhs = $stmt.Right
-                        if ($rhs -is [CommandExpressionAst] -and
-                            $rhs.Expression -is [StringConstantExpressionAst]) {
-                            if ($lhs -is [VariableExpressionAst]) {
-                                $vars[$lhs.VariablePath.UserPath] = $rhs.Expression.Value
-                            } elseif ($lhs -is [ConvertExpressionAst] -and
-                                      $lhs.Child -is [VariableExpressionAst]) {
-                                $vars[$lhs.Child.VariablePath.UserPath] = $rhs.Expression.Value
-                            }
-                        } elseif ($rhs -is [CommandExpressionAst] -and $rhs.Expression -is [HashtableAst]) {
-                            $vn = if ($lhs -is [VariableExpressionAst]) { $lhs.VariablePath.UserPath }
-                                  elseif ($lhs -is [ConvertExpressionAst] -and $lhs.Child -is [VariableExpressionAst]) { $lhs.Child.VariablePath.UserPath }
-                            if ($vn) {
+                        $vn = if ($lhs -is [VariableExpressionAst]) { $lhs.VariablePath.UserPath }
+                              elseif ($lhs -is [ConvertExpressionAst] -and $lhs.Child -is [VariableExpressionAst]) { $lhs.Child.VariablePath.UserPath }
+                        if ($vn) {
+                            if ($rhs -is [CommandExpressionAst] -and $rhs.Expression -is [StringConstantExpressionAst]) {
+                                $vars[$vn] = $rhs.Expression.Value
+                            } elseif ($rhs -is [CommandExpressionAst] -and $rhs.Expression -is [HashtableAst]) {
                                 $hv = [System.Collections.Generic.List[string]]::new()
                                 foreach ($kvp in $rhs.Expression.KeyValuePairs) {
                                     $kvp.Item2.FindAll({ param($n) $n -is [StringConstantExpressionAst] }, $false) | ForEach-Object { $hv.Add($_.Value) }
                                 }
                                 $htVars[$vn] = $hv.ToArray()
+                            } elseif ($rhs -is [PipelineAst] -and $rhs.PipelineElements.Count -eq 1 -and $rhs.PipelineElements[0] -is [CommandAst]) {
+                                $c = $rhs.PipelineElements[0]
+                                if ($c.GetCommandName() -ieq 'New-Object' -and $c.CommandElements.Count -ge 2 -and $c.CommandElements[1] -is [StringConstantExpressionAst]) {
+                                    $objVars[$vn] = $c.CommandElements[1].Value.ToLower()
+                                }
                             }
                         }
                     } catch { $null = $_ }
@@ -47,7 +48,8 @@ while ($true) {
                 # CommandAst nodes (cmdlets) — recurse into nested scriptblocks.
                 $stmt.FindAll({ param($n) $n -is [CommandAst] }, $true) | ForEach-Object {
                     $nm = $_.GetCommandName()
-                    if ($nm) {  # filters $null and "" (e.g. & "" arg)
+                    if (-not $nm) { $fe=$_.CommandElements[0]; if ($fe -is [VariableExpressionAst]) { $k=$fe.VariablePath.UserPath; if ($vars.ContainsKey($k)) { $nm=$vars[$k] } } }
+                    if ($nm) {
                         $ag = [System.Collections.Generic.List[string]]::new()
                         $_.CommandElements | Select-Object -Skip 1 | ForEach-Object {
                             try {
@@ -58,21 +60,13 @@ while ($true) {
                                     if ($_.Splatted) { if ($htVars.ContainsKey($k)) { foreach ($v in $htVars[$k]) { $ag.Add($v) } } }
                                     else { if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) } }
                                 } elseif ($_ -is [ExpandableStringExpressionAst]) {
-                                    # Literal expandable string (no vars) or single $var.
-                                    $nx = @($_.NestedExpressions)
-                                    if ($nx.Count -eq 0) { $ag.Add($_.Value) }
-                                    elseif ($nx.Count -eq 1 -and $nx[0] -is [VariableExpressionAst]) {
-                                        $k = $nx[0].VariablePath.UserPath
-                                        if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) }
-                                    }
+                                    & $addExp $_ $ag
                                 } elseif ($_ -is [ArrayExpressionAst] -or $_ -is [ArrayLiteralAst]) {
-                                    # @("a","b") or "a","b" — extract literal strings only.
-                                    # $false: don't descend into $(cmd) subexpressions.
+                                    # Extract literal strings; $false: don't descend into $(cmd) subexpressions.
                                     $_.FindAll({ param($n) $n -is [StringConstantExpressionAst] }, $false) |
                                         ForEach-Object { $ag.Add($_.Value) }
                                 } elseif ($_ -is [CommandParameterAst]) {
                                     $ag.Add('-' + $_.ParameterName)
-                                    # -Flag:value colon syntax.
                                     if ($null -ne $_.Argument) {
                                         if ($_.Argument -is [StringConstantExpressionAst]) {
                                             $ag.Add($_.Argument.Value)
@@ -80,12 +74,7 @@ while ($true) {
                                             $k = $_.Argument.VariablePath.UserPath
                                             if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) }
                                         } elseif ($_.Argument -is [ExpandableStringExpressionAst]) {
-                                            $nx = @($_.Argument.NestedExpressions)
-                                            if ($nx.Count -eq 0) { $ag.Add($_.Argument.Value) }
-                                            elseif ($nx.Count -eq 1 -and $nx[0] -is [VariableExpressionAst]) {
-                                                $k = $nx[0].VariablePath.UserPath
-                                                if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) }
-                                            }
+                                            & $addExp $_.Argument $ag
                                         } elseif ($_.Argument -is [ArrayExpressionAst] -or
                                                   $_.Argument -is [ArrayLiteralAst]) {
                                             $_.Argument.FindAll({ param($n) $n -is [StringConstantExpressionAst] }, $false) |
@@ -108,12 +97,7 @@ while ($true) {
                                         if ($e -is [StringConstantExpressionAst]) {
                                             $ag.Add($e.Value)
                                         } elseif ($e -is [ExpandableStringExpressionAst]) {
-                                            $nx = @($e.NestedExpressions)
-                                            if ($nx.Count -eq 0) { $ag.Add($e.Value) }
-                                            elseif ($nx.Count -eq 1 -and $nx[0] -is [VariableExpressionAst]) {
-                                                $k = $nx[0].VariablePath.UserPath
-                                                if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) }
-                                            }
+                                            & $addExp $e $ag
                                         } elseif ($e -is [VariableExpressionAst]) {
                                             $k = $e.VariablePath.UserPath
                                             if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) }
@@ -161,6 +145,7 @@ while ($true) {
                 # .NET static calls: [Type]::Method(args) — emitted as "Type::Method".
                 # Go normalizes names containing '::' to lowercase for DB lookup.
                 $stmt.FindAll({param($n)$n-is[InvokeMemberExpressionAst]-and$n.Static},$true)|ForEach-Object{try{if($_.Expression-is[TypeExpressionAst]-and$_.Member-is[StringConstantExpressionAst]){$da=[System.Collections.Generic.List[string]]::new();foreach($a in $_.Arguments){if($a-is[StringConstantExpressionAst]){$da.Add($a.Value)}};$cmds.Add([PSCustomObject]@{name=$_.Expression.TypeName.FullName+'::'+$_.Member.Value;args=[string[]]$da.ToArray();redir_paths=[string[]]@();redir_in_paths=[string[]]@();has_subst=$false})}}catch{$null=$_}}
+                $stmt.FindAll({param($n)$n-is[InvokeMemberExpressionAst]-and-not$n.Static},$true)|ForEach-Object{try{$tn=$null;if($_.Expression-is[VariableExpressionAst]){$k=$_.Expression.VariablePath.UserPath;if($objVars.ContainsKey($k)){$tn=$objVars[$k]}}elseif($_.Expression-is[ParenExpressionAst]){$ip=$_.Expression.Pipeline;if($ip-is[PipelineAst]-and$ip.PipelineElements.Count-eq 1-and$ip.PipelineElements[0]-is[CommandAst]){$ic=$ip.PipelineElements[0];if($ic.GetCommandName()-ieq'New-Object'-and$ic.CommandElements.Count-ge 2-and$ic.CommandElements[1]-is[StringConstantExpressionAst]){$tn=$ic.CommandElements[1].Value.ToLower()}}};if($tn-and$_.Member-is[StringConstantExpressionAst]){$da=[System.Collections.Generic.List[string]]::new();$hs=$false;foreach($a in $_.Arguments){if($a-is[StringConstantExpressionAst]){$da.Add($a.Value)}elseif(-not $hs){$hs=$true}};$cmds.Add([PSCustomObject]@{name=$tn+'::'+$_.Member.Value;args=[string[]]$da.ToArray();redir_paths=[string[]]@();redir_in_paths=[string[]]@();has_subst=$hs})}}catch{$null=$_}}
             }
         }
 

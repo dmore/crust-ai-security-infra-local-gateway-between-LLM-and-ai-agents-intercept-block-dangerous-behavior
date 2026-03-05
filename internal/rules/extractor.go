@@ -812,6 +812,7 @@ func defaultCommandDB() map[string]CommandInfo {
 		"icm":                    {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-ScriptBlock", "-FilePath"}},
 		"Import-Module":          {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-Name"}},
 		"ipmo":                   {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-Name"}},
+		"Add-Type":               {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-Path", "-AssemblyName"}},
 		"Register-ScheduledTask": {Operation: OpExecute, PathArgIndex: []int{0}},
 		"Start-Job":              {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-ScriptBlock", "-FilePath"}},
 
@@ -848,6 +849,14 @@ func defaultCommandDB() map[string]CommandInfo {
 		"system.net.dns::resolve":          {Operation: OpNetwork, PathArgIndex: []int{0}},
 		// System.Diagnostics.Process
 		"system.diagnostics.process::start": {Operation: OpExecute, PathArgIndex: []int{0}},
+		// Instance methods via New-Object (keys lowercased, :: separator)
+		"system.net.webclient::downloadfile":    {Operation: OpWrite, PathArgIndex: []int{1}},
+		"system.net.webclient::downloadstring":  {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.webclient::uploadfile":      {Operation: OpRead, PathArgIndex: []int{1}},
+		"system.net.webclient::uploadstring":    {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.webclient::openread":        {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.http.httpclient::getasync":  {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.http.httpclient::postasync": {Operation: OpNetwork, PathArgIndex: []int{0}},
 	}
 }
 

