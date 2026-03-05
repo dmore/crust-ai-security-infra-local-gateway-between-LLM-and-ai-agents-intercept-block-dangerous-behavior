@@ -1,20 +1,18 @@
 package rules
 
-import (
-	"os"
-	"runtime"
+import "github.com/BakeLens/crust/internal/platform"
+
+// ShellEnv and its constants are re-exported from internal/platform for use
+// within this package without a qualifier.
+type ShellEnv = platform.ShellEnv
+
+const (
+	EnvUnix          = platform.Unix
+	EnvWSL           = platform.WSL
+	EnvWindowsNative = platform.WindowsNative
+	EnvMSYS2         = platform.MSYS2
+	EnvCygwin        = platform.Cygwin
 )
 
-// isNativeWindowsEnv returns true when the process is running in a native
-// Windows shell environment (cmd.exe or PowerShell) where .NET APIs and
-// PowerShell syntax work as expected.
-//
-// It returns false on Unix-like emulation layers that report GOOS=windows
-// but use a bash-compatible shell (MSYS2, Cygwin, Git Bash). These
-// environments set the MSYSTEM or CYGWIN environment variables.
-func isNativeWindowsEnv() bool {
-	if runtime.GOOS != "windows" {
-		return false
-	}
-	return os.Getenv("MSYSTEM") == "" && os.Getenv("CYGWIN") == ""
-}
+// ShellEnvironment returns the detected shell/platform environment.
+func ShellEnvironment() ShellEnv { return platform.Get() }

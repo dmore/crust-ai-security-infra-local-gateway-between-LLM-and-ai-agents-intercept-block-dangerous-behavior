@@ -1240,7 +1240,13 @@ func FuzzPipelineExtraction(f *testing.F) {
 					strings.Contains(host, ".") { // Skip bare IPv6 — extractHostFromURL requires brackets
 					hostLower := strings.ToLower(host)
 					normalizedHost := normalizeIPHost(hostLower)
-					found := slices.Contains(info.Hosts, hostLower) || slices.Contains(info.Hosts, normalizedHost)
+					// extractHostFromURL strips trailing dots (FQDN "A." → "a",
+					// "0X0." → "0x0" → "0.0.0.0"), so also check stripped and
+					// normalized-stripped forms.
+					strippedHost := strings.TrimRight(hostLower, ".")
+					normalizedStripped := normalizeIPHost(strippedHost)
+					found := slices.Contains(info.Hosts, hostLower) || slices.Contains(info.Hosts, normalizedHost) ||
+						slices.Contains(info.Hosts, strippedHost) || slices.Contains(info.Hosts, normalizedStripped)
 					if !found && !info.Evasive {
 						t.Errorf("BYPASS: 'nc %s' in pipeline but host not extracted from %q (hosts=%v)", host, cmd, info.Hosts)
 					}

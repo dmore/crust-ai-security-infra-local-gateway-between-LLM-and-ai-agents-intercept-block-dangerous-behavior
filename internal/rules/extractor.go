@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -1106,7 +1107,9 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 		// When the pwsh worker is available (Windows), use dual-parse:
 		// bash parser + PS native AST. The heuristic transform (substitutePSVariables
 		// + normalizePSBackslashPaths) is the fallback when pwsh is not available.
-		if isNativeWindowsEnv() && e.pwshWorker == nil && looksLikePowerShell(cmd) {
+		// HasPwsh() covers both native Windows and MSYS2/Git Bash, where users
+		// can invoke pwsh.exe directly even from a bash-compatible shell.
+		if ShellEnvironment().HasPwsh() && e.pwshWorker == nil && looksLikePowerShell(cmd) {
 			cmd = substitutePSVariables(cmd)
 			cmd = normalizePSBackslashPaths(cmd)
 		}
@@ -2999,6 +3002,15 @@ func (e *Extractor) runShellFileInterp(file *syntax.File, parentSymtab map[strin
 			pendingRedirIn = nil
 			commands = append(commands, pc)
 			mu.Unlock()
+			// Prevent the source/dot builtin from calling scriptFromPathDir →
+			// findFile → checkStat → os.Stat, which can block for ~14s on
+			// Windows when the path looks like a UNC network share (e.g.
+			// "//hostname/share"). Returning an error stops the builtin without
+			// affecting our analysis — the command name and args are already
+			// captured above.
+			if cmdNorm == "." || cmdNorm == "source" {
+				return nil, errors.New("dry-run: skip source builtin")
+			}
 			return args, nil
 		}),
 		// ExecHandler: prevent actual execution of external commands.
@@ -3103,7 +3115,11 @@ func extractHosts(tokens []string) []string {
 		// This handles: "https://evil.com/path", "evil.com:8080/path",
 		// "evil.com", "host:port", and bare hostnames uniformly.
 		host := extractHostFromURL(token)
-		if host != "" && looksLikeHost(host) {
+		// extractHostFromURL strips trailing dots (FQDN form: "A." → "a"), which
+		// can cause looksLikeHost to reject a single-label FQDN. Fall back to
+		// checking the raw token so "A." is accepted when the token itself looks
+		// like a host.
+		if host != "" && (looksLikeHost(host) || looksLikeHost(token)) {
 			hosts = append(hosts, host)
 		}
 	}
