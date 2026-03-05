@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/BakeLens/crust/internal/pathutil"
-	"github.com/BakeLens/crust/internal/platform"
 	"github.com/BakeLens/crust/internal/rules/pwsh"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
@@ -1768,15 +1767,29 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 			e.applyCommandSpecificExtraction(info, cmdName, args)
 		}
 
-		// On Windows environments (native, MSYS2, Cygwin), unknown commands may
-		// receive Windows absolute paths (C:\..., \\server\..., //server/...) as
-		// positional arguments. Commands in commandDB use PathArgIndex for precise
-		// extraction; unknown commands fall back to this heuristic so
+		// On Windows-family environments (native, MSYS2, Cygwin) unknown commands
+		// may receive Windows absolute paths (C:\..., \\server\..., //server/...)
+		// as positional arguments. WSL also surfaces UNC //server/share paths when
+		// accessing Windows network shares. Commands in commandDB use PathArgIndex
+		// for precise extraction; unknown commands fall back to this heuristic so
 		// "myTool C:\Users\user\.env" is not silently ignored.
-		if !found && ShellEnvironment().IsWindows() {
-			for _, arg := range args {
-				if !strings.HasPrefix(arg, "-") && platform.IsWindowsAbsPath(arg) {
-					info.Paths = append(info.Paths, arg)
+		// Note: plain Unix NFS/CIFS //nas/share paths are intentionally out of
+		// scope; the heuristic only applies to Windows-hosted environments.
+		if !found {
+			env := ShellEnvironment()
+			if env.IsWindows() || env == EnvWSL {
+				for _, arg := range args {
+					if strings.HasPrefix(arg, "-") {
+						continue
+					}
+					// Drive-letter paths only appear on Windows-family environments.
+					// UNC //server/share paths also appear on WSL when accessing
+					// Windows network shares. Drive-letter paths are not valid on WSL.
+					if env.IsWindows() && pathutil.IsWindowsAbsPath(arg) {
+						info.Paths = append(info.Paths, arg)
+					} else if env == EnvWSL && pathutil.IsUNCPath(arg) {
+						info.Paths = append(info.Paths, arg)
+					}
 				}
 			}
 		}

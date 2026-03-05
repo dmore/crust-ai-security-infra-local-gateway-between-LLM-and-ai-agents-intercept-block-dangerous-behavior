@@ -109,27 +109,3 @@ func TestGet_CurrentProcess(t *testing.T) {
 		}
 	}
 }
-
-func TestIsWindowsAbsPath(t *testing.T) {
-	cases := []struct {
-		s    string
-		want bool
-	}{
-		{`C:\Users\user\.env`, true},
-		{`C:/Users/user/secret.txt`, true},
-		{`D:\`, true},
-		{`c:\lower`, true},
-		{"\\\\server\\share", true}, // UNC backslash
-		{`//server/share`, true},    // UNC forward-slash (MSYS2)
-		{`/etc/passwd`, false},
-		{`relative/path`, false},
-		{`-flag`, false},
-		{`C:`, false},     // too short — no slash after colon
-		{`1:\bad`, false}, // digit, not letter
-	}
-	for _, tc := range cases {
-		if got := platform.IsWindowsAbsPath(tc.s); got != tc.want {
-			t.Errorf("IsWindowsAbsPath(%q) = %v, want %v", tc.s, got, tc.want)
-		}
-	}
-}

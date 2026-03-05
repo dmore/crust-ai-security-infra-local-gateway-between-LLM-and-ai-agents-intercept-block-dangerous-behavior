@@ -57,18 +57,6 @@ func detect() ShellEnv {
 	}
 }
 
-// IsWindowsAbsPath reports whether s looks like a Windows absolute path:
-// a drive-letter path (C:\... or C:/...) or a UNC path (\\server\share or
-// //server/share as used by MSYS2).
-func IsWindowsAbsPath(s string) bool {
-	if len(s) >= 3 && s[1] == ':' && (s[2] == '/' || s[2] == '\\') {
-		c := s[0]
-		return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
-	}
-	// UNC: backslash (\\server) or MSYS2 forward-slash (//server)
-	return strings.HasPrefix(s, `\\`) || strings.HasPrefix(s, "//")
-}
-
 // isWSLKernel is a fallback WSL detector that reads /proc/version.
 // Used when WSL env vars are absent (e.g. inside a sub-process that did not
 // inherit them).

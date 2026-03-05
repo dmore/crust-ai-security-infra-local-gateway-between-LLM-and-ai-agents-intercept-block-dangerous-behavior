@@ -106,8 +106,9 @@ func IsDriverLetter(c byte) bool {
 	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
 }
 
-// IsDrivePath returns true if path starts with a Windows drive letter prefix
-// (e.g., "C:/", "c:\", "D:"). Recognizes both forward and back slashes.
+// IsDrivePath returns true if path starts with a Windows drive letter and colon
+// (e.g., "C:", "C:/Users", "c:\Windows"). It does NOT require a following slash,
+// so it matches both absolute ("C:/foo") and drive-relative ("C:foo") paths.
 func IsDrivePath(p string) bool {
 	if len(p) < 2 {
 		return false
@@ -183,6 +184,23 @@ func HasPathPrefix(p, dir string) bool {
 		return strings.HasPrefix(p, dir+`\`)
 	}
 	return false
+}
+
+// IsUNCPath reports whether s is a UNC path: \\server (Windows) or //server
+// (MSYS2/Git Bash/WSL forward-slash form).
+func IsUNCPath(s string) bool {
+	return strings.HasPrefix(s, `\\`) || strings.HasPrefix(s, "//")
+}
+
+// IsWindowsAbsPath reports whether s looks like a Windows absolute path:
+// a drive-letter path (C:\... or C:/...) or a UNC path (\\server\share or
+// //server/share as used by MSYS2).
+func IsWindowsAbsPath(s string) bool {
+	// Drive-letter absolute: C:/ or C:\ (bare C: is drive-relative, not absolute)
+	if IsDrivePath(s) && len(s) >= 3 && (s[2] == '/' || s[2] == '\\') {
+		return true
+	}
+	return IsUNCPath(s)
 }
 
 // StripFileURIDriveLetter strips a leading "/" before a Windows drive letter
