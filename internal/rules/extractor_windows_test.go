@@ -119,8 +119,9 @@ func TestPSScriptAnalyzerCodeStyle(t *testing.T) {
 		t.Skip("PSScriptAnalyzer not installed: run Install-Module PSScriptAnalyzer")
 	}
 	// Skip if the specific rules are not available in this PSScriptAnalyzer version.
+	// Import-Module is required: -NoProfile suppresses auto-import of CurrentUser modules.
 	checkRules := exec.Command(pwshPath, "-NoProfile", "-NonInteractive", "-Command",
-		"if (Get-ScriptAnalyzerRule -RuleName PSAvoidSemicolonsAsLineTerminators) { exit 0 } else { exit 1 }")
+		"Import-Module PSScriptAnalyzer; if (Get-ScriptAnalyzerRule -Name PSAvoidSemicolonsAsLineTerminators) { exit 0 } else { exit 1 }")
 	if err := checkRules.Run(); err != nil {
 		t.Skip("PSAvoidSemicolonsAsLineTerminators not available in this PSScriptAnalyzer version")
 	}
