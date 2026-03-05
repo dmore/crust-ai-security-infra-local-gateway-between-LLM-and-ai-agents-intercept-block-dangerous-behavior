@@ -25,13 +25,13 @@
   <a href="https://github.com/BakeLens/crust/releases"><img src="https://img.shields.io/github/v/release/BakeLens/crust" alt="Release" /></a>
   <img src="https://img.shields.io/github/go-mod/go-version/BakeLens/crust" alt="Go Version" />
   <img src="https://img.shields.io/badge/License-Elastic%202.0-blue.svg" alt="License" />
-  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows%2010%2F11%20%7C%20FreeBSD-lightgrey" alt="Platform" />
+  <img src="https://img.shields.io/badge/Platform-macOS%2011%2B%20%7C%20Linux%20%7C%20Windows%2010%2B%20%7C%20FreeBSD%2014%2B-lightgrey" alt="Platform" />
 </p>
 
 <p align="center">
   <a href="https://github.com/BakeLens/crust/blob/main/SECURITY.md"><img src="https://img.shields.io/badge/Security%20Policy-Responsible%20Disclosure-green" alt="Security Policy" /></a>
   <img src="https://img.shields.io/badge/SAST-gosec%20%7C%20semgrep-blueviolet" alt="SAST" />
-  <img src="https://img.shields.io/badge/Fuzz%20Tested-32%20targets-orange" alt="Fuzz Tested" />
+  <img src="https://img.shields.io/badge/Fuzz%20Tested-37%20targets-orange" alt="Fuzz Tested" />
   <img src="https://img.shields.io/badge/Secrets-govulncheck%20%7C%20gitleaks-critical" alt="Secret Scanning" />
 </p>
 
@@ -218,7 +218,7 @@ A security tool must protect itself first. Crust is built to resist tampering �
 | **Logs are encrypted** | Activity logs are stored in an encrypted database; the key never appears in command history |
 | **Oversized requests are rejected** | Abnormally large inputs are dropped before processing to prevent abuse |
 | **Connections are encrypted** | All traffic to LLM providers uses modern encryption (TLS 1.2+) |
-| **Every code change is scanned** | 10 automated security checks run on every commit — vulnerability scanning, secret detection, race condition testing |
+| **Every code change is scanned** | 14 automated security checks run on every commit — vulnerability scanning, secret detection, race condition testing |
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
@@ -244,7 +244,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## Build from Source
 
-Requires Go 1.24+ and a C compiler (CGO is needed for SQLite).
+Requires Go 1.24.13+ and a C compiler (CGO is needed for SQLite).
 
 ```bash
 git clone https://github.com/BakeLens/crust.git

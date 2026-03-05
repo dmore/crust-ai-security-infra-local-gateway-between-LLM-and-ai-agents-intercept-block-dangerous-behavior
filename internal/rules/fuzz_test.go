@@ -1045,7 +1045,15 @@ func FuzzEvasionDetectionBypass(f *testing.F) {
 			// see these as globs in the command name. Check the extractor's resolved
 			// command for $+glob patterns to avoid FP.
 			hasDollarGlob := strings.ContainsAny(info.Command, "$") && strings.ContainsAny(info.Command, "*?[@")
-			if !hasDollarGlob && !suspicious && parseErr == nil && !hasGlobCmd && info.Evasive {
+			// Commands with $() or backtick substitution are legitimately flagged
+			// evasive when the runner cannot statically resolve the substitution
+			// (e.g., the subcommand contains null bytes or otherwise fails to expand).
+			hasSubst := strings.Contains(jsonCmd, "$(") || strings.Contains(jsonCmd, "`")
+			// hasGlobCmd covers top-level command names with glob chars, but eval/exec
+			// cause inner arguments to become command names at runtime — check the
+			// evasive reason directly for the wildcard case.
+			hasGlobEvasion := strings.Contains(info.EvasiveReason, "wildcard")
+			if !hasDollarGlob && !suspicious && parseErr == nil && !hasGlobCmd && !hasGlobEvasion && !hasSubst && info.Evasive {
 				t.Errorf("FALSE POSITIVE: clean command flagged as evasive: %q reason=%q", actualCmd, info.EvasiveReason)
 			}
 		}

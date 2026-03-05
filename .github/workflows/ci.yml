@@ -64,42 +64,42 @@ jobs:
 
       - name: Fuzz tests (critical, 30s each — every PR)
         run: |
-          go test ./internal/rules/... -fuzz=FuzzEngineBypass -fuzztime=30s -short
-          go test ./internal/rules/... -fuzz=FuzzBuiltinRuleBypass -fuzztime=30s -short
-          go test ./internal/rules/... -fuzz=FuzzNormalizeUnicode -fuzztime=30s -short
-          go test ./internal/rules/... -fuzz=FuzzLoopbackRegex -fuzztime=30s -short
-          go test ./internal/rules/... -fuzz=FuzzMCPToolBypass -fuzztime=30s -short
-          go test ./internal/rules/... -fuzz=FuzzPipeBypass -fuzztime=30s -short
-          go test ./internal/rules/... -fuzz=FuzzConfusableBypass -fuzztime=30s -short
+          go test ./internal/rules/ -fuzz=FuzzEngineBypass -fuzztime=30s -short
+          go test ./internal/rules/ -fuzz=FuzzBuiltinRuleBypass -fuzztime=30s -short
+          go test ./internal/rules/ -fuzz=FuzzNormalizeUnicode -fuzztime=30s -short
+          go test ./internal/rules/ -fuzz=FuzzLoopbackRegex -fuzztime=30s -short
+          go test ./internal/rules/ -fuzz=FuzzMCPToolBypass -fuzztime=30s -short
+          go test ./internal/rules/ -fuzz=FuzzPipeBypass -fuzztime=30s -short
+          go test ./internal/rules/ -fuzz=FuzzConfusableBypass -fuzztime=30s -short
 
       - name: Fuzz tests (full suite, 10s each — main only)
         if: github.ref == 'refs/heads/main'
         run: |
-          go test ./internal/rules/... -fuzz=FuzzNormalizerBypass -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzParseShellCommands -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzMatcherConsistency -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzExtractBashCommand -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzIsSuspiciousInput -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzContainsObfuscation -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzForkBombDetection -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzCommandRegexBypass -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzHostRegexBypass -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzJSONUnicodeEscapeBypass -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzEvasionDetectionBypass -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzGlobCommandBypass -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzPipelineExtraction -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzContentConfusableBypass -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzVariableExpansionEvasion -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzShapeDetectionBypass -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzWebSearchURLBypass -fuzztime=10s -short
-          go test ./internal/rules/... -fuzz=FuzzNormalAgentFalsePositive -fuzztime=10s -short
-          go test ./internal/httpproxy/... -fuzz=FuzzParseSSEEventData -fuzztime=10s -short
-          go test ./internal/httpproxy/... -fuzz=FuzzCopyHeaders -fuzztime=10s -short
-          go test ./internal/httpproxy/... -fuzz=FuzzStripHopByHopHeaders -fuzztime=10s -short
-          go test ./internal/httpproxy/... -fuzz=FuzzParseAnthropicEvent -fuzztime=10s -short
-          go test ./internal/httpproxy/... -fuzz=FuzzParseOpenAIEvent -fuzztime=10s -short
-          go test ./internal/httpproxy/... -fuzz=FuzzParseEvent -fuzztime=10s -short
-          go test ./internal/httpproxy/... -fuzz=FuzzApplyResultToToolCalls -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzNormalizerBypass -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzParseShellCommands -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzMatcherConsistency -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzExtractBashCommand -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzIsSuspiciousInput -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzContainsObfuscation -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzForkBombDetection -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzCommandRegexBypass -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzHostRegexBypass -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzJSONUnicodeEscapeBypass -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzEvasionDetectionBypass -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzGlobCommandBypass -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzPipelineExtraction -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzContentConfusableBypass -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzVariableExpansionEvasion -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzShapeDetectionBypass -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzWebSearchURLBypass -fuzztime=10s -short
+          go test ./internal/rules/ -fuzz=FuzzNormalAgentFalsePositive -fuzztime=10s -short
+          go test ./internal/httpproxy/ -fuzz=FuzzParseSSEEventData -fuzztime=10s -short
+          go test ./internal/httpproxy/ -fuzz=FuzzCopyHeaders -fuzztime=10s -short
+          go test ./internal/httpproxy/ -fuzz=FuzzStripHopByHopHeaders -fuzztime=10s -short
+          go test ./internal/httpproxy/ -fuzz=FuzzParseAnthropicEvent -fuzztime=10s -short
+          go test ./internal/httpproxy/ -fuzz=FuzzParseOpenAIEvent -fuzztime=10s -short
+          go test ./internal/httpproxy/ -fuzz=FuzzParseEvent -fuzztime=10s -short
+          go test ./internal/httpproxy/ -fuzz=FuzzApplyResultToToolCalls -fuzztime=10s -short
 
   test:
     name: Go Test (${{ matrix.os }})
@@ -140,8 +140,8 @@ jobs:
       - name: PS worker fuzz tests (Windows only — pwsh is available on windows-latest)
         if: matrix.os == 'windows-latest'
         run: |
-          go test ./internal/rules/... -fuzz=FuzzPSWorker_NoCrash -fuzztime=30s -short
-          go test ./internal/rules/... -fuzz=FuzzExtractor_PSCommand -fuzztime=30s -short
+          go test ./internal/rules/ -fuzz=FuzzPSWorker_NoCrash -fuzztime=30s -short
+          go test ./internal/rules/ -fuzz=FuzzExtractor_PSCommand -fuzztime=30s -short
 
 
   # macOS and FreeBSD full tests run only on main to reduce CI costs (macOS is 10x billing).

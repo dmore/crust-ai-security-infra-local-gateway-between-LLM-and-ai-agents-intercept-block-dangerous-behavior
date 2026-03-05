@@ -119,6 +119,16 @@ repos:
         pass_filenames: false
         files: (internal/rules/builtin/security\.yaml|internal/rules/.*_test\.go)$
 
+  # Doc consistency — fast check that README counts match source (rule counts, etc.)
+  - repo: local
+    hooks:
+      - id: doc-consistency
+        name: doc consistency
+        entry: bash -c 'go test ./internal/rules/ -run=TestDocConsistency -short'
+        language: system
+        pass_filenames: false
+        files: (internal/rules/builtin/security\.yaml|internal/rules/.*\.go|README\.md|docs/cli\.md)$
+
   # Go unit tests
   - repo: local
     hooks:

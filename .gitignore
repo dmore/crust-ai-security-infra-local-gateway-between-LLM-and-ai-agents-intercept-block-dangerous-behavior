@@ -32,3 +32,10 @@ tests/agents/config.local.yaml
 
 # Fuzz test corpus (generated locally; not for VCS)
 **/testdata/fuzz/
+
+# Test artifacts
+.hypothesis/
+cover*.out
+cover.html
+e2e_stderr.log
+test_e2e_acp.sh

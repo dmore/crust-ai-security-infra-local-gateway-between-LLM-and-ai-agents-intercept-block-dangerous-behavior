@@ -2,7 +2,6 @@ package rules
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
 )
 
@@ -51,7 +50,7 @@ func TestEvasiveMarkingOnSecondaryFields(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			argsJSON, _ := json.Marshal(tc.args)
 			info := ext.Extract(tc.toolName, argsJSON)
-			fmt.Printf("  %s: Evasive=%v Reason=%q Op=%v\n", tc.name, info.Evasive, info.EvasiveReason, info.Operation)
+			t.Logf("Evasive=%v Reason=%q Op=%v", info.Evasive, info.EvasiveReason, info.Operation)
 			if info.Evasive != tc.wantEvasive {
 				t.Errorf("Evasive = %v, want %v (reason: %s)", info.Evasive, tc.wantEvasive, info.EvasiveReason)
 			}

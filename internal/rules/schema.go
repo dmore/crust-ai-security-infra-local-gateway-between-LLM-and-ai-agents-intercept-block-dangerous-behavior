@@ -217,6 +217,16 @@ func (r *Rule) HasAction(op Operation) bool {
 	return slices.Contains(r.Actions, op)
 }
 
+// HasAnyAction returns true if any of the given operations matches this rule's actions.
+func (r *Rule) HasAnyAction(ops []Operation) bool {
+	for _, op := range ops {
+		if slices.Contains(r.Actions, op) {
+			return true
+		}
+	}
+	return false
+}
+
 // GetName returns the rule name.
 func (r *Rule) GetName() string { return r.Name }
 

