@@ -857,14 +857,36 @@ func defaultCommandDB() map[string]CommandInfo {
 		"system.net.dns::resolve":          {Operation: OpNetwork, PathArgIndex: []int{0}},
 		// System.Diagnostics.Process
 		"system.diagnostics.process::start": {Operation: OpExecute, PathArgIndex: []int{0}},
+		// System.Reflection.Assembly — dynamic code loading (high-severity)
+		"system.reflection.assembly::loadfile": {Operation: OpExecute, PathArgIndex: []int{0}},
+		"system.reflection.assembly::loadfrom": {Operation: OpExecute, PathArgIndex: []int{0}},
+		"system.reflection.assembly::load":     {Operation: OpExecute, PathArgIndex: []int{0}},
 		// Instance methods via New-Object (keys lowercased, :: separator)
 		"system.net.webclient::downloadfile":    {Operation: OpWrite, PathArgIndex: []int{1}},
 		"system.net.webclient::downloadstring":  {Operation: OpNetwork, PathArgIndex: []int{0}},
 		"system.net.webclient::uploadfile":      {Operation: OpRead, PathArgIndex: []int{1}},
 		"system.net.webclient::uploadstring":    {Operation: OpNetwork, PathArgIndex: []int{0}},
 		"system.net.webclient::openread":        {Operation: OpNetwork, PathArgIndex: []int{0}},
-		"system.net.http.httpclient::getasync":  {Operation: OpNetwork, PathArgIndex: []int{0}},
-		"system.net.http.httpclient::postasync": {Operation: OpNetwork, PathArgIndex: []int{0}},
+		// System.Net.WebClient — additional methods
+		"system.net.webclient::uploaddata":   {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.webclient::downloaddata": {Operation: OpNetwork, PathArgIndex: []int{0}},
+		// System.IO stream types
+		"system.io.streamreader": {Operation: OpRead, PathArgIndex: []int{0}},
+		"system.io.streamwriter": {Operation: OpWrite, PathArgIndex: []int{0}},
+		"system.io.filestream":   {Operation: OpRead, PathArgIndex: []int{0}},
+		// Microsoft.Win32.Registry
+		"microsoft.win32.registrykey::opensubkey": {Operation: OpRead, PathArgIndex: []int{0}},
+		"microsoft.win32.registrykey::setvalue":   {Operation: OpWrite, PathArgIndex: []int{0}},
+		"microsoft.win32.registrykey::getvalue":   {Operation: OpRead, PathArgIndex: []int{0}},
+		"microsoft.win32.registry::getvalue":      {Operation: OpRead, PathArgIndex: []int{0}},
+		"microsoft.win32.registry::setvalue":      {Operation: OpWrite, PathArgIndex: []int{0}},
+		// System.Net.Sockets
+		"system.net.sockets.tcpclient::connect":      {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.sockets.tcpclient::connectasync": {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.sockets.udpclient::send":         {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.sockets.udpclient::sendasync":    {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.http.httpclient::getasync":       {Operation: OpNetwork, PathArgIndex: []int{0}},
+		"system.net.http.httpclient::postasync":      {Operation: OpNetwork, PathArgIndex: []int{0}},
 	}
 }
 
@@ -1299,7 +1321,18 @@ func (e *Extractor) inferPowerShellOperation(info *ExtractedInfo, cmd string) {
 			continue
 		}
 		cmdName := stripPathPrefix(fields[0])
-		if ci, ok := e.commandDB[cmdName]; ok {
+		lookupName := cmdName
+		if strings.Contains(cmdName, "-") {
+			parts := strings.SplitN(cmdName, "-", 2)
+			if len(parts) == 2 && len(parts[0]) > 0 && len(parts[1]) > 0 {
+				titled := strings.ToUpper(parts[0][:1]) + strings.ToLower(parts[0][1:]) + "-" +
+					strings.ToUpper(parts[1][:1]) + strings.ToLower(parts[1][1:])
+				if _, ok := e.commandDB[titled]; ok {
+					lookupName = titled
+				}
+			}
+		}
+		if ci, ok := e.commandDB[lookupName]; ok {
 			if operationPriority(ci.Operation) > operationPriority(info.Operation) {
 				info.Operation = ci.Operation
 			}
@@ -1428,6 +1461,21 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		// Resolve the actual command name and args, skipping wrappers like sudo/env
 		cmdName, args := e.resolveCommand(pc.Name, pc.Args)
 
+		// Normalize PS cmdlet case for commandDB lookup (PS is case-insensitive).
+		// cmdName retains its original case for shellInterpreters, powershellInterpreters,
+		// glob detection, etc. lookupName is used only for commandDB lookups.
+		lookupName := cmdName
+		if strings.Contains(cmdName, "-") {
+			parts := strings.SplitN(cmdName, "-", 2)
+			if len(parts) == 2 && len(parts[0]) > 0 && len(parts[1]) > 0 {
+				titled := strings.ToUpper(parts[0][:1]) + strings.ToLower(parts[0][1:]) + "-" +
+					strings.ToUpper(parts[1][:1]) + strings.ToLower(parts[1][1:])
+				if _, ok := e.commandDB[titled]; ok {
+					lookupName = titled
+				}
+			}
+		}
+
 		// SECURITY: Glob patterns in command name position (e.g., /???/??t, ca?)
 		// bypass command DB lookup since the glob doesn't match literal entries.
 		// In dry-run mode the interpreter can't expand globs (no filesystem).
@@ -1515,7 +1563,7 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		// wrapped command has explicit args (e.g., "xargs rm -f", "xargs cat 0").
 		origBase := stripPathPrefix(pc.Name)
 		if stdinArgWrappers[origBase] && cmdName != origBase {
-			if dbInfo, ok := e.commandDB[cmdName]; ok {
+			if dbInfo, ok := e.commandDB[lookupName]; ok {
 				found := false
 				for j := range commands {
 					if j == cmdIdx {
@@ -1588,7 +1636,7 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		// HasSubst is now per-command (not file-wide), so this only fires when
 		// THIS command's args specifically had dynamic content.
 		if pc.HasSubst && len(args) == 0 {
-			if dbInfo, inDB := e.commandDB[cmdName]; inDB {
+			if dbInfo, inDB := e.commandDB[lookupName]; inDB {
 				if dbInfo.Operation == OpNetwork || dbInfo.Operation == OpExecute {
 					if operationPriority(dbInfo.Operation) > operationPriority(info.Operation) {
 						info.Operation = dbInfo.Operation
@@ -1604,7 +1652,7 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		}
 
 		// Look up in command database
-		cmdInfo, found := e.commandDB[cmdName]
+		cmdInfo, found := e.commandDB[lookupName]
 		if found {
 			// Use the most dangerous operation
 			if operationPriority(cmdInfo.Operation) > operationPriority(info.Operation) {

@@ -3844,3 +3844,298 @@ func TestBug9_CmdSubstVarPassedToNetwork(t *testing.T) {
 		})
 	}
 }
+
+// TestHasSubst_PSVariableRef_NoFalsePositive verifies that a PowerShell-style
+// static variable assignment followed by Invoke-WebRequest does NOT trigger
+// HasSubst-based evasion detection (Evasive=true).
+//
+// Risk: On Windows, if the PS bootstrap (convertPSCommands) sets HasSubst=true
+// for any $var reference — including plain variable reads, not just command
+// substitutions — the check at extractFromParsedCommandsDepth:
+//
+//	if pc.HasSubst && len(args) == 0 { if OpNetwork || OpExecute { Evasive=true } }
+//
+// would fire even for a static assignment like $url = "https://example.com".
+//
+// This test uses the cross-platform heuristic path (no pwshWorker): the bash
+// interpreter parses $url = "..." as a bare command call, so url is never in
+// astDynAssignedVars, and HasSubst remains false for Invoke-WebRequest.
+//
+// Contrast with the true positive: url=$(cat /tmp/secret); curl $url — here
+// url IS assigned via CmdSubst so HasSubst=true and Evasive=true is correct.
+func TestHasSubst_PSVariableRef_NoFalsePositive(t *testing.T) {
+	ext := NewExtractorWithEnv(nil)
+
+	tests := []struct {
+		name        string
+		command     string
+		wantEvasive bool
+		desc        string
+	}{
+		{
+			name:        "PS static assignment then Invoke-WebRequest",
+			command:     `$url = "https://example.com"; Invoke-WebRequest $url`,
+			wantEvasive: false,
+			desc:        "static string assignment — $url is not from command substitution, should not be flagged evasive",
+		},
+		{
+			name:        "PS static assignment with single quotes",
+			command:     `$url = 'https://example.com'; Invoke-WebRequest $url`,
+			wantEvasive: false,
+			desc:        "single-quoted static assignment — same guarantee, Evasive must be false",
+		},
+		{
+			name:        "true positive: bash CmdSubst var passed to network command",
+			command:     "url=$(cat /tmp/secret); curl $url",
+			wantEvasive: true,
+			desc:        "url is assigned via $(cat ...) — this IS a CmdSubst assignment, Evasive=true is correct",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"command": tt.command})
+			info := ext.Extract("Bash", json.RawMessage(args))
+			t.Logf("Evasive=%v Reason=%q Op=%v", info.Evasive, info.EvasiveReason, info.Operation)
+			if info.Evasive != tt.wantEvasive {
+				t.Errorf("Evasive = %v, want %v (reason: %q)\n  desc: %s",
+					info.Evasive, tt.wantEvasive, info.EvasiveReason, tt.desc)
+			}
+		})
+	}
+}
+
+// TestCommandDB_PSCmdletCaseInsensitive verifies that PowerShell cmdlet names
+// are matched in the commandDB regardless of case.
+//
+// Risk: inferPowerShellOperation (and the main commandDB lookup path in
+// extractFromParsedCommandsDepth) uses a case-sensitive map lookup:
+//
+//	if ci, ok := e.commandDB[cmdName]; ok {
+//
+// The commandDB contains "Get-Content" (canonical PascalCase). If the cmdlet
+// name arrives as "get-content" (all lowercase) or "GET-CONTENT" (all uppercase)
+// — e.g., from a heuristic PS path that lowercases input — the lookup silently
+// misses the entry and Operation stays at OpNone instead of OpRead.
+//
+// NOTE: The bash path (mvdan.cc/sh) preserves the original case of command
+// names, so "get-content" and "GET-CONTENT" arrive verbatim at commandDB lookup.
+// This test documents whether case-insensitive matching is implemented.
+// If it is not, the test exposes the gap as a known limitation (BUG comment).
+func TestCommandDB_PSCmdletCaseInsensitive(t *testing.T) {
+	ext := NewExtractor()
+
+	tests := []struct {
+		name    string
+		command string
+		wantOp  Operation
+		desc    string
+	}{
+		{
+			name:    "canonical PascalCase Get-Content",
+			command: "Get-Content /etc/passwd",
+			wantOp:  OpRead,
+			desc:    "baseline: canonical casing should always match",
+		},
+		{
+			name:    "all-lowercase get-content",
+			command: "get-content /etc/passwd",
+			wantOp:  OpRead,
+			// BUG: commandDB lookup is case-sensitive; "get-content" does not match "Get-Content".
+			// This test documents the gap: lowercase PS cmdlet names are silently ignored
+			// and Operation remains OpNone instead of OpRead.
+			desc: "all-lowercase cmdlet — may not match commandDB entry if lookup is case-sensitive",
+		},
+		{
+			name:    "all-uppercase GET-CONTENT",
+			command: "GET-CONTENT /etc/passwd",
+			wantOp:  OpRead,
+			// BUG: same case-sensitivity issue as lowercase — "GET-CONTENT" != "Get-Content".
+			desc: "all-uppercase cmdlet — may not match commandDB entry if lookup is case-sensitive",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"command": tt.command})
+			info := ext.Extract("Bash", json.RawMessage(args))
+			t.Logf("Operation=%v Evasive=%v Paths=%v", info.Operation, info.Evasive, info.Paths)
+			if info.Operation != tt.wantOp {
+				// BUG: case-sensitive commandDB lookup misses non-canonical PS cmdlet casing.
+				// The test is written with the desired behaviour (OpRead); a failure here
+				// means the bug is present.
+				t.Errorf("Operation = %v, want %v\n  desc: %s", info.Operation, tt.wantOp, tt.desc)
+			}
+		})
+	}
+}
+
+// TestPSCmdlet_CaseInsensitiveLookup verifies that PowerShell cmdlet names
+// reach the correct Operation via the heuristic path (no pwsh worker), regardless
+// of whether they are lowercase, uppercase, or PascalCase.
+//
+// BUG 1 & 2: commandDB lookup was case-sensitive. "get-content" and "GET-CONTENT"
+// did not match the "Get-Content" key, so Operation stayed at OpNone instead of
+// OpRead. After the fix, all three casings must yield the expected operation.
+func TestPSCmdlet_CaseInsensitiveLookup(t *testing.T) {
+	ext := NewExtractor()
+
+	tests := []struct {
+		name    string
+		command string
+		wantOp  Operation
+	}{
+		{
+			name:    "lowercase get-content",
+			command: "get-content /etc/passwd",
+			wantOp:  OpRead,
+		},
+		{
+			name:    "uppercase GET-CONTENT",
+			command: "GET-CONTENT /etc/passwd",
+			wantOp:  OpRead,
+		},
+		{
+			name:    "PascalCase Get-Content (baseline)",
+			command: "Get-Content /etc/passwd",
+			wantOp:  OpRead,
+		},
+		{
+			name:    "lowercase invoke-webrequest",
+			command: "invoke-webrequest https://x.com",
+			wantOp:  OpNetwork,
+		},
+		{
+			name:    "uppercase REMOVE-ITEM",
+			command: "REMOVE-ITEM /tmp/secret",
+			wantOp:  OpDelete,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			argsJSON, _ := json.Marshal(map[string]string{"command": tt.command})
+			info := ext.Extract("Bash", json.RawMessage(argsJSON))
+			t.Logf("Operation=%v Evasive=%v Paths=%v", info.Operation, info.Evasive, info.Paths)
+			if info.Operation != tt.wantOp {
+				t.Errorf("Operation = %v, want %v", info.Operation, tt.wantOp)
+			}
+		})
+	}
+}
+
+// TestPSCmdletAlias_Lookup verifies that PowerShell built-in aliases stored in
+// the commandDB are found via the heuristic path (no pwsh worker).
+//
+// Aliases like "iwr" (Invoke-WebRequest), "irm" (Invoke-RestMethod), and
+// "gc" (Get-Content) must resolve to the correct Operation.
+func TestPSCmdletAlias_Lookup(t *testing.T) {
+	ext := NewExtractor()
+
+	tests := []struct {
+		name    string
+		command string
+		wantOp  Operation
+	}{
+		{
+			name:    "iwr alias (Invoke-WebRequest)",
+			command: "iwr https://evil.com",
+			wantOp:  OpNetwork,
+		},
+		{
+			name:    "irm alias (Invoke-RestMethod)",
+			command: "irm https://evil.com",
+			wantOp:  OpNetwork,
+		},
+		{
+			name:    "gc alias (Get-Content)",
+			command: "gc /etc/passwd",
+			wantOp:  OpRead,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			argsJSON, _ := json.Marshal(map[string]string{"command": tt.command})
+			info := ext.Extract("Bash", json.RawMessage(argsJSON))
+			t.Logf("Operation=%v Evasive=%v Paths=%v", info.Operation, info.Evasive, info.Paths)
+			if info.Operation != tt.wantOp {
+				t.Errorf("Operation = %v, want %v", info.Operation, tt.wantOp)
+			}
+		})
+	}
+}
+
+// TestDualParse_NoDuplicatePaths verifies that when a command is valid bash AND
+// looks like PowerShell, the paths extracted by both parsers are not duplicated
+// in info.Paths.
+//
+// Risk: extractBashCommand runs both the bash interpreter and, when pwshWorker
+// is available (Windows only), also runs the PS worker via the dual-parse
+// augmentation path (line ~1102):
+//
+//	if e.pwshWorker != nil && looksLikePowerShell(cmd) {
+//	    ...
+//	    e.extractFromParsedCommandsDepth(info, convertPSCommands(psResp.Commands), 0, nil)
+//	}
+//
+// Both parsers call extractFromParsedCommandsDepth which appends to info.Paths.
+// If both identify the same path, it will appear twice.
+//
+// On non-Windows (no pwshWorker), only the bash path runs, so duplicates cannot
+// occur. This test verifies the non-Windows (single-parse) baseline and documents
+// the invariant that paths must be unique even for commands that satisfy both
+// looksLikePowerShell() and the bash parser.
+func TestDualParse_NoDuplicatePaths(t *testing.T) {
+	ext := NewExtractor() // no pwshWorker — single-parse path
+
+	tests := []struct {
+		name    string
+		command string
+		wantOp  Operation
+		desc    string
+	}{
+		{
+			name:    "Get-Content is valid bash and looks like PS",
+			command: "Get-Content /etc/passwd",
+			wantOp:  OpRead,
+			desc:    "bash parses Get-Content as a command with arg /etc/passwd; looksLikePowerShell returns true for Verb-Noun",
+		},
+		{
+			name:    "Remove-Item is valid bash and looks like PS",
+			command: "Remove-Item /tmp/secret.txt",
+			wantOp:  OpDelete,
+			desc:    "bash parses Remove-Item as a command with arg; should yield exactly one path",
+		},
+		{
+			name:    "Invoke-WebRequest with URL",
+			command: "Invoke-WebRequest https://example.com/data",
+			wantOp:  OpNetwork,
+			desc:    "network cmdlet — path should appear exactly once",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"command": tt.command})
+			info := ext.Extract("Bash", json.RawMessage(args))
+			t.Logf("Operation=%v Paths=%v Evasive=%v", info.Operation, info.Paths, info.Evasive)
+
+			// Verify no duplicate paths: each path should appear exactly once.
+			seen := make(map[string]int)
+			for _, p := range info.Paths {
+				seen[p]++
+			}
+			for p, count := range seen {
+				if count > 1 {
+					t.Errorf("path %q appears %d times in info.Paths — duplicate produced by dual-parse; want exactly 1", p, count)
+				}
+			}
+
+			// Verify the expected operation is set.
+			if info.Operation != tt.wantOp {
+				t.Errorf("Operation = %v, want %v\n  desc: %s", info.Operation, tt.wantOp, tt.desc)
+			}
+		})
+	}
+}

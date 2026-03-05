@@ -14,8 +14,17 @@
                                 $htVars[$vn] = $hv.ToArray()
                             } elseif ($rhs -is [PipelineAst] -and $rhs.PipelineElements.Count -eq 1 -and $rhs.PipelineElements[0] -is [CommandAst]) {
                                 $c = $rhs.PipelineElements[0]
-                                if ($c.GetCommandName() -ieq 'New-Object' -and $c.CommandElements.Count -ge 2 -and $c.CommandElements[1] -is [StringConstantExpressionAst]) {
-                                    $objVars[$vn] = $c.CommandElements[1].Value.ToLower()
+                                if ($c.GetCommandName() -ieq 'New-Object' -and $c.CommandElements.Count -ge 2) {
+                                    $tn = $null
+                                    if ($c.CommandElements[1] -is [StringConstantExpressionAst]) {
+                                        $tn = $c.CommandElements[1].Value
+                                    } elseif ($c.CommandElements[1] -is [CommandParameterAst] -and
+                                              $c.CommandElements[1].ParameterName -ieq 'TypeName' -and
+                                              $c.CommandElements.Count -ge 3 -and
+                                              $c.CommandElements[2] -is [StringConstantExpressionAst]) {
+                                        $tn = $c.CommandElements[2].Value
+                                    }
+                                    if ($tn) { $objVars[$vn] = $tn.ToLower() }
                                 }
                             }
                         }

