@@ -1031,7 +1031,7 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 			// Fall back to static AST extraction: walk CallExpr nodes for command names,
 			// literal args, and redirect paths. Imperfect but sufficient since OS sandboxing
 			// provides the ultimate enforcement layer.
-			fallback := extractFromAST(file)
+			fallback := extractFromAST(file, false)
 			if len(fallback) > 0 {
 				e.extractFromParsedCommandsDepth(info, fallback, 0, symtab)
 			}
@@ -2309,13 +2309,13 @@ func defuseStmt(stmt *syntax.Stmt) *syntax.Stmt {
 // backgrounded commands, coproc). It extracts command names, literal arguments,
 // and redirect paths from statements.
 //
-// When skipInner is true, ProcSubst and CoprocClause subtrees are skipped
-// (the caller handles them separately via collectInnerStmts + interpretation).
-func extractFromAST(file *syntax.File, skipInner ...bool) []parsedCommand {
-	skip := len(skipInner) > 0 && skipInner[0]
+// When skipInner is true, ProcSubst and CoprocClause subtrees are skipped;
+// the caller handles them separately via collectInnerStmts + interpretation.
+// Use false for a full-file fallback where no separate inner handling occurs.
+func extractFromAST(file *syntax.File, skipInner bool) []parsedCommand {
 	var commands []parsedCommand
 	syntax.Walk(file, func(node syntax.Node) bool {
-		if skip {
+		if skipInner {
 			switch node.(type) {
 			case *syntax.ProcSubst, *syntax.CoprocClause:
 				return false
@@ -2649,7 +2649,7 @@ func (e *Extractor) runShellFile(file *syntax.File, parentSymtab map[string]stri
 
 		// Strategy (b): AST outer + interpret inner stmts.
 		singleFile := &syntax.File{Stmts: []*syntax.Stmt{stmt}}
-		allCmds = append(allCmds, extractFromAST(singleFile, true)...) // skipInner=true
+		allCmds = append(allCmds, extractFromAST(singleFile, true)...) // inner stmts handled below via collectInnerStmts
 
 		for _, inner := range collectInnerStmts(stmt) {
 			innerFile := &syntax.File{Stmts: []*syntax.Stmt{inner}}
@@ -2661,7 +2661,7 @@ func (e *Extractor) runShellFile(file *syntax.File, parentSymtab map[string]stri
 					continue
 				}
 			}
-			allCmds = append(allCmds, extractFromAST(innerFile)...)
+			allCmds = append(allCmds, extractFromAST(innerFile, false)...)
 		}
 	}
 
