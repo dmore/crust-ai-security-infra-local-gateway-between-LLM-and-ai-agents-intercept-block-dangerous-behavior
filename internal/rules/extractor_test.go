@@ -4547,3 +4547,67 @@ func TestMultiOp_RuleMatchesBothOps(t *testing.T) {
 		t.Errorf("HasAnyAction([execute,read]) should NOT match rule with actions:[network]")
 	}
 }
+
+// TestWindowsBashEnv_PathExtraction verifies Windows-style path extraction
+// for two cases that only apply on Windows (MSYS2 / Git Bash / native):
+//  1. Quoted Windows paths inside interpreter inline code (python3 -c, perl -e).
+//  2. Bare Windows paths passed to unknown commands not in commandDB.
+func TestWindowsBashEnv_PathExtraction(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows path extraction only applies on Windows")
+	}
+	ext := NewExtractor()
+
+	cases := []struct {
+		name     string
+		cmd      string
+		wantPath string
+	}{
+		// Quoted Windows paths inside interpreter code
+		{
+			"python3 single-quoted backslash path",
+			`python3 -c "import shutil; shutil.copy('C:\Users\user\.env', '/tmp/')"`,
+			`C:\Users\user\.env`,
+		},
+		{
+			"python3 single-quoted forward-slash path",
+			`python3 -c "open('C:/Windows/System32/hosts')"`,
+			`C:/Windows/System32/hosts`,
+		},
+		{
+			"perl single-quoted backslash path",
+			`perl -e "open(F, 'C:\secret.txt')"`,
+			`C:\secret.txt`,
+		},
+		// Bare Windows paths on unknown commands.
+		// Backslash paths must be quoted in bash; forward-slash and //UNC are
+		// unquoted-safe since MSYS2 converts them to Windows paths.
+		{
+			"unknown cmd drive-letter quoted backslash",
+			`myCustomTool 'C:\Users\user\.env'`,
+			`C:\Users\user\.env`,
+		},
+		{
+			"unknown cmd drive-letter forward-slash",
+			`myCustomTool C:/Users/user/secret.txt`,
+			`C:/Users/user/secret.txt`,
+		},
+		{
+			"unknown cmd UNC forward-slash (MSYS2)",
+			`myCustomTool //server/share/file.txt`,
+			`//server/share/file.txt`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"command": tc.cmd})
+			info := ext.Extract("Bash", json.RawMessage(args))
+			found := slices.ContainsFunc(info.Paths, func(p string) bool {
+				return strings.EqualFold(p, tc.wantPath)
+			})
+			if !found {
+				t.Errorf("want path %q in %v", tc.wantPath, info.Paths)
+			}
+		})
+	}
+}

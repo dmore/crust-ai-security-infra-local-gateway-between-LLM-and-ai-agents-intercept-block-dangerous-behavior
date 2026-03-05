@@ -1460,18 +1460,25 @@ var interpreterCodeFlags = map[string]string{
 
 // quotedPathRe matches absolute paths in single-quoted or double-quoted strings
 // with paired quotes (not mixed). Used for interpreter code path extraction.
-var quotedPathRe = regexp.MustCompile(`'(/[a-zA-Z0-9_.~/-]+)'|"(/[a-zA-Z0-9_.~/-]+)"`)
+// Groups: 1=Unix single, 2=Unix double, 3=Win single, 4=Win double.
+var quotedPathRe = regexp.MustCompile(
+	`'(/[a-zA-Z0-9_.~/-]+)'` + // Unix single-quoted
+		`|"(/[a-zA-Z0-9_.~/-]+)"` + // Unix double-quoted
+		`|'([A-Za-z]:[/\\][a-zA-Z0-9_.~\\/:-]*)'` + // Windows single-quoted
+		`|"([A-Za-z]:[/\\][a-zA-Z0-9_.~\\/:-]*)"`) // Windows double-quoted
 
 // extractPathsFromInterpreterCode extracts absolute paths from interpreter code
-// strings (e.g., python3 -c "open('/home/user/.env')").
+// strings (e.g., python3 -c "open('/home/user/.env')" or
+// python3 -c "open('C:\\Users\\user\\.env')").
 func extractPathsFromInterpreterCode(code string) []string {
 	matches := quotedPathRe.FindAllStringSubmatch(code, -1)
 	var paths []string
 	for _, m := range matches {
-		if m[1] != "" {
-			paths = append(paths, m[1])
-		} else if m[2] != "" {
-			paths = append(paths, m[2])
+		for _, group := range m[1:] {
+			if group != "" {
+				paths = append(paths, group)
+				break
+			}
 		}
 	}
 	return paths
@@ -1757,6 +1764,33 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 			// Command-specific argument analysis (scp/rsync hosts, socat addresses,
 			// tar create mode, sed in-place). See extractor_commands.go.
 			e.applyCommandSpecificExtraction(info, cmdName, args)
+		}
+
+		// On Windows-family environments (native, MSYS2, Cygwin) unknown commands
+		// may receive Windows absolute paths (C:\..., \\server\..., //server/...)
+		// as positional arguments. WSL also surfaces UNC //server/share paths when
+		// accessing Windows network shares. Commands in commandDB use PathArgIndex
+		// for precise extraction; unknown commands fall back to this heuristic so
+		// "myTool C:\Users\user\.env" is not silently ignored.
+		// Note: plain Unix NFS/CIFS //nas/share paths are intentionally out of
+		// scope; the heuristic only applies to Windows-hosted environments.
+		if !found {
+			env := ShellEnvironment()
+			if env.IsWindows() || env == EnvWSL {
+				for _, arg := range args {
+					if strings.HasPrefix(arg, "-") {
+						continue
+					}
+					// Drive-letter paths only appear on Windows-family environments.
+					// UNC //server/share paths also appear on WSL when accessing
+					// Windows network shares. Drive-letter paths are not valid on WSL.
+					if env.IsWindows() && pathutil.IsWindowsAbsPath(arg) {
+						info.Paths = append(info.Paths, arg)
+					} else if env == EnvWSL && pathutil.IsUNCPath(arg) {
+						info.Paths = append(info.Paths, arg)
+					}
+				}
+			}
 		}
 
 		// Extract paths from interpreter code strings (python -c, perl -e, etc.)

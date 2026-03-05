@@ -307,6 +307,38 @@ func TestCleanPath_PathTraversalSequences(t *testing.T) {
 	}
 }
 
+func TestIsWindowsAbsPath(t *testing.T) {
+	cases := []struct {
+		s    string
+		want bool
+	}{
+		{`C:\Users\user\.env`, true},
+		{`C:/Users/user/secret.txt`, true},
+		{`D:\`, true},
+		{`c:\lower`, true},
+		{"\\\\server\\share", true}, // UNC backslash
+		{`//server/share`, true},    // UNC forward-slash (MSYS2)
+		{`/etc/passwd`, false},
+		{`relative/path`, false},
+		{`-flag`, false},
+		{`C:`, false},          // too short — no slash after colon
+		{`1:\bad`, false},      // digit, not letter
+		{``, false},            // empty string
+		{`C`, false},           // single char
+		{`C:\`, true},          // minimum valid absolute drive path (len exactly 3)
+		{`C:relative`, false},  // drive-relative, not absolute
+		{"C: /path", false},    // space at [2], not a slash
+		{"\x80:\\foo", false},  // non-ASCII first byte
+		{`\\`, true},           // bare UNC backslash prefix
+		{`//`, true},           // bare UNC forward-slash prefix
+	}
+	for _, tc := range cases {
+		if got := IsWindowsAbsPath(tc.s); got != tc.want {
+			t.Errorf("IsWindowsAbsPath(%q) = %v, want %v", tc.s, got, tc.want)
+		}
+	}
+}
+
 func TestIsDriverLetter_AllLetters(t *testing.T) {
 	// Exhaustive: every ASCII letter should be valid
 	for c := byte('A'); c <= 'Z'; c++ {
