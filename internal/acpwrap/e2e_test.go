@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,9 @@ func buildAndRun(m *testing.M) int {
 	defer os.RemoveAll(tmp)
 
 	bin := filepath.Join(tmp, "mock-acp-agent")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
 	cmd := exec.Command("go", "build", "-o", bin, "../../cmd/mock-acp-agent")
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

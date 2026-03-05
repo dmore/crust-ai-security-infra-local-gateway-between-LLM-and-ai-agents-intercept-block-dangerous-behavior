@@ -26,6 +26,13 @@ func skipE2E(t *testing.T) {
 	}
 }
 
+// toJSONPath converts a filesystem path to forward slashes for safe embedding
+// in JSON strings. On Windows, backslashes in paths would be misinterpreted as
+// JSON escape sequences, producing invalid JSON that the MCP server cannot parse.
+func toJSONPath(p string) string {
+	return filepath.ToSlash(p)
+}
+
 // runMCPE2E runs the MCP proxy against the real filesystem server and returns
 // all JSON-RPC responses received by the client.
 func runMCPE2E(t *testing.T, dir string, messages []string) []testResponse {
@@ -137,7 +144,7 @@ func TestE2E_ReadAllowed(t *testing.T) {
 	dir := setupTestDir(t)
 
 	messages := append(initMessages(),
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/safe.txt"}}}`, dir),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/safe.txt"}}}`, toJSONPath(dir)),
 	)
 	responses := runMCPE2E(t, dir, messages)
 
@@ -160,7 +167,7 @@ func TestE2E_ReadBlocked_Env(t *testing.T) {
 	dir := setupTestDir(t)
 
 	messages := append(initMessages(),
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/.env"}}}`, dir),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/.env"}}}`, toJSONPath(dir)),
 	)
 	responses := runMCPE2E(t, dir, messages)
 
@@ -184,7 +191,7 @@ func TestE2E_ReadBlocked_SSHKey(t *testing.T) {
 	dir := setupTestDir(t)
 
 	messages := append(initMessages(),
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/.ssh/id_rsa"}}}`, dir),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/.ssh/id_rsa"}}}`, toJSONPath(dir)),
 	)
 	responses := runMCPE2E(t, dir, messages)
 
@@ -206,7 +213,7 @@ func TestE2E_WriteAllowed(t *testing.T) {
 	outFile := filepath.Join(dir, "output.txt")
 
 	messages := append(initMessages(),
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"write_file","arguments":{"path":"%s","content":"written by e2e test"}}}`, outFile),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"write_file","arguments":{"path":"%s","content":"written by e2e test"}}}`, toJSONPath(outFile)),
 	)
 	responses := runMCPE2E(t, dir, messages)
 
@@ -234,7 +241,7 @@ func TestE2E_WriteBlocked_Env(t *testing.T) {
 	envContent, _ := os.ReadFile(filepath.Join(dir, ".env"))
 
 	messages := append(initMessages(),
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"write_file","arguments":{"path":"%s/.env","content":"STOLEN=true"}}}`, dir),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"write_file","arguments":{"path":"%s/.env","content":"STOLEN=true"}}}`, toJSONPath(dir)),
 	)
 	responses := runMCPE2E(t, dir, messages)
 
@@ -264,11 +271,11 @@ func TestE2E_MixedStream(t *testing.T) {
 		// id=2: tools/list (allowed — not tools/call)
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
 		// id=3: read .env (BLOCKED by inbound path rules)
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/.env"}}}`, dir),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/.env"}}}`, toJSONPath(dir)),
 		// id=4: read safe.txt (allowed)
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/safe.txt"}}}`, dir),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/safe.txt"}}}`, toJSONPath(dir)),
 		// id=5: write .env (BLOCKED by inbound path rules)
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"write_file","arguments":{"path":"%s/.env","content":"STOLEN"}}}`, dir),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"write_file","arguments":{"path":"%s/.env","content":"STOLEN"}}}`, toJSONPath(dir)),
 	)
 	responses := runMCPE2E(t, dir, messages)
 
@@ -321,7 +328,7 @@ func TestE2E_ResponseDLP_AWSKey(t *testing.T) {
 
 	// config.txt contains an AWS access key but is NOT a .env file
 	messages := append(initMessages(),
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/config.txt"}}}`, dir),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/config.txt"}}}`, toJSONPath(dir)),
 	)
 	responses := runMCPE2E(t, dir, messages)
 
@@ -350,7 +357,7 @@ func TestE2E_ResponseDLP_GitHubToken(t *testing.T) {
 
 	// tokens.txt contains a GitHub personal access token
 	messages := append(initMessages(),
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/tokens.txt"}}}`, dir),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/tokens.txt"}}}`, toJSONPath(dir)),
 	)
 	responses := runMCPE2E(t, dir, messages)
 
@@ -375,7 +382,7 @@ func TestE2E_ResponseDLP_CleanFile(t *testing.T) {
 
 	// notes.txt has no secrets — should pass through
 	messages := append(initMessages(),
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/notes.txt"}}}`, dir),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/notes.txt"}}}`, toJSONPath(dir)),
 	)
 	responses := runMCPE2E(t, dir, messages)
 
@@ -397,15 +404,15 @@ func TestE2E_ResponseDLP_MixedStream(t *testing.T) {
 
 	messages := append(initMessages(),
 		// id=2: read clean file (ALLOWED — passes both inbound and response DLP)
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/notes.txt"}}}`, dir),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/notes.txt"}}}`, toJSONPath(dir)),
 		// id=3: read file with AWS key (BLOCKED by response DLP)
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/config.txt"}}}`, dir),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/config.txt"}}}`, toJSONPath(dir)),
 		// id=4: read .env (BLOCKED by inbound path rules — never reaches server)
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/.env"}}}`, dir),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/.env"}}}`, toJSONPath(dir)),
 		// id=5: read file with GitHub token (BLOCKED by response DLP)
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/tokens.txt"}}}`, dir),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/tokens.txt"}}}`, toJSONPath(dir)),
 		// id=6: read safe file (ALLOWED)
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/safe.txt"}}}`, dir),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"%s/safe.txt"}}}`, toJSONPath(dir)),
 	)
 	responses := runMCPE2E(t, dir, messages)
 

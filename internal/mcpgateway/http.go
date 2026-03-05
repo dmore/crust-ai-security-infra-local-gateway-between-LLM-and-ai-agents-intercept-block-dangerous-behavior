@@ -19,6 +19,9 @@ const maxRequestBody = 100 * 1024 * 1024
 // sessionHeader is the MCP session ID header.
 const sessionHeader = "Mcp-Session-Id"
 
+// sseMessageType is the SSE event type for JSON-RPC messages.
+const sseMessageType = "message"
+
 // HTTPGateway is an HTTP reverse proxy for MCP Streamable HTTP transport.
 // It inspects JSON-RPC messages using the Crust rule engine and DLP scanner.
 type HTTPGateway struct {
@@ -170,7 +173,7 @@ func (g *HTTPGateway) handleGet(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	ProxySSEStream(ctx, upResp.Body, w, func(event SSEEvent) (SSEEvent, bool) {
-		if event.Type != "message" && event.Type != "" {
+		if event.Type != sseMessageType && event.Type != "" {
 			return event, true // non-message events pass through
 		}
 
@@ -267,7 +270,7 @@ func (g *HTTPGateway) proxySSEResponse(w http.ResponseWriter, r *http.Request, u
 
 	ctx := r.Context()
 	ProxySSEStream(ctx, upResp.Body, w, func(event SSEEvent) (SSEEvent, bool) {
-		if event.Type != "message" && event.Type != "" {
+		if event.Type != sseMessageType && event.Type != "" {
 			return event, true
 		}
 

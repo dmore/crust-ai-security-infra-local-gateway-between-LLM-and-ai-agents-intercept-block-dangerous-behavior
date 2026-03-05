@@ -172,7 +172,7 @@ func sseResponse(t *testing.T, gw *HTTPGateway, sessionID string, body string) (
 	if strings.HasPrefix(ct, "text/event-stream") {
 		events := ReadSSEEvents(context.Background(), strings.NewReader(string(respBody)))
 		for event := range events {
-			if event.Type == "message" || event.Type == "" {
+			if event.Type == sseMessageType || event.Type == "" {
 				var tr testResponse
 				if err := json.Unmarshal([]byte(event.Data), &tr); err == nil {
 					return &tr, newSID

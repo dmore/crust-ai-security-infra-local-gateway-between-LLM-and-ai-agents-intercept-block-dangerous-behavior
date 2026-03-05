@@ -106,9 +106,44 @@ while ($true) {
                                 }
                             } catch { $null = $_ }
                         }
+                        # Extract output/input redirect paths from this CommandAst.
+                        # RedirectionAst.File is a CommandElementAst; we only capture
+                        # StringConstantExpressionAst (literal paths) for safety.
+                        $redirOut = [System.Collections.Generic.List[string]]::new()
+                        $redirIn  = [System.Collections.Generic.List[string]]::new()
+                        foreach ($r in $_.Redirections) {
+                            try {
+                                $f = $r.File
+                                if ($f -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                                    # FromType 0 = stdin (<), others are stdout/stderr (>, >>)
+                                    if ($r.FromStream -eq [System.Management.Automation.Language.RedirectionStream]::Input) {
+                                        $redirIn.Add($f.Value)
+                                    } else {
+                                        $redirOut.Add($f.Value)
+                                    }
+                                }
+                            } catch { $null = $_ }
+                        }
+                        # has_subst: true if any *argument* element is not a simple constant
+                        # (variable, subexpression, expandable string, etc.).
+                        # Skip index 0 (the command name itself) — & $cmd -Arg should not
+                        # set has_subst=true just because the name element is a variable.
+                        # Use foreach+break for early exit; ForEach-Object pipelines do not
+                        # support break (it would exit the outer foreach ($stmt) loop instead).
+                        $hasSubst = $false
+                        foreach ($el in ($_.CommandElements | Select-Object -Skip 1)) {
+                            if ($el -isnot [System.Management.Automation.Language.StringConstantExpressionAst] -and
+                                $el -isnot [System.Management.Automation.Language.CommandParameterAst]) {
+                                $hasSubst = $true
+                                break
+                            }
+                        }
                         $cmds.Add([PSCustomObject]@{
-                            name = $nm
-                            args = [string[]]$ag.ToArray()
+                            name        = $nm
+                            args        = [string[]]$ag.ToArray()
+                            redir_paths = [string[]]$redirOut.ToArray()
+                            redir_in_paths = [string[]]$redirIn.ToArray()
+                            has_subst   = $hasSubst
                         })
                     }
                 }
@@ -242,6 +277,10 @@ func (w *pwshWorker) parse(cmd string) (pwshWorkerResponse, error) {
 	if err := json.Unmarshal(w.scanner.Bytes(), &resp); err != nil {
 		w.kill()
 		return pwshWorkerResponse{}, err
+	}
+
+	for i := range resp.Commands {
+		resp.Commands[i].Name = normalizeParsedCmdName(resp.Commands[i].Name)
 	}
 
 	return resp, nil

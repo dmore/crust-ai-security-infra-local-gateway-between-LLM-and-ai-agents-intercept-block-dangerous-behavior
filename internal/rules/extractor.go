@@ -40,6 +40,28 @@ type ExtractedInfo struct {
 	EvasiveReason string // human-readable reason for evasion detection
 }
 
+// normalizeParsedCmdName normalizes a raw command name from the shell AST into
+// its canonical form before it is stored in parsedCommand.Name.
+//
+// "[" is the POSIX alias for "test" (both are mandated by POSIX and present on
+// Linux, macOS, and Windows POSIX environments like MSYS2/Cygwin/Git Bash).
+// Storing "test" from the start means all downstream code (commandDB lookup,
+// glob check, logging) sees a consistent name without each call site needing a
+// special case for "[".
+func normalizeParsedCmdName(name string) string {
+	if name == "[" {
+		return "test"
+	}
+	return name
+}
+
+// stripPathPrefix returns the base name of a command path, normalising
+// backslashes to forward slashes first so the same logic handles both Unix
+// paths (/usr/bin/cat → cat) and Windows paths (C:\Windows\cmd.exe → cmd.exe).
+func stripPathPrefix(s string) string {
+	return path.Base(pathutil.ToSlash(s))
+}
+
 // parsedCommand represents a single command extracted from a shell AST.
 type parsedCommand struct {
 	Name         string   `json:"name"`
@@ -1220,7 +1242,8 @@ func (e *Extractor) inferPowerShellOperation(info *ExtractedInfo, cmd string) {
 		if len(fields) == 0 {
 			continue
 		}
-		if ci, ok := e.commandDB[fields[0]]; ok {
+		cmdName := stripPathPrefix(fields[0])
+		if ci, ok := e.commandDB[cmdName]; ok {
 			if operationPriority(ci.Operation) > operationPriority(info.Operation) {
 				info.Operation = ci.Operation
 			}
@@ -1335,7 +1358,7 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		// Flag as evasive and conservatively extract all non-flag args as paths
 		// (we can't know which are paths vs values). Also infer the worst-case
 		// operation from matching commands.
-		if cmdName != "[" && strings.ContainsAny(cmdName, "*?[") {
+		if strings.ContainsAny(cmdName, "*?[") {
 			info.Evasive = true
 			info.EvasiveReason = fmt.Sprintf("command %q uses a wildcard pattern — unable to determine the actual program", cmdName)
 			for _, arg := range args {
@@ -1414,10 +1437,7 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		// args as file paths for the unwrapped command. No arg-count check:
 		// xargs ALWAYS appends stdin items as additional args even when the
 		// wrapped command has explicit args (e.g., "xargs rm -f", "xargs cat 0").
-		origBase := pc.Name
-		if idx := strings.LastIndex(origBase, "/"); idx != -1 {
-			origBase = origBase[idx+1:]
-		}
+		origBase := stripPathPrefix(pc.Name)
 		if stdinArgWrappers[origBase] && cmdName != origBase {
 			if dbInfo, ok := e.commandDB[cmdName]; ok {
 				found := false
@@ -1687,13 +1707,7 @@ var wrapperFlagsWithValue = map[string]map[string]bool{
 // value arguments (e.g., timeout DURATION COMMAND).
 func (e *Extractor) resolveCommand(name string, args []string) (string, []string) {
 	// Strip path prefix (e.g., /usr/bin/cat → cat, C:\Windows\cmd.exe → cmd.exe)
-	cmdName := name
-	if idx := strings.LastIndex(cmdName, "/"); idx != -1 {
-		cmdName = cmdName[idx+1:]
-	}
-	if idx := strings.LastIndex(cmdName, `\`); idx != -1 {
-		cmdName = cmdName[idx+1:]
-	}
+	cmdName := stripPathPrefix(name)
 
 	// Walk through wrapper commands
 	for wrapperCommands[cmdName] && len(args) > 0 {
@@ -1732,10 +1746,7 @@ func (e *Extractor) resolveCommand(name string, args []string) (string, []string
 			return cmdName, nil
 		}
 
-		cmdName = args[i]
-		if idx := strings.LastIndex(cmdName, "/"); idx != -1 {
-			cmdName = cmdName[idx+1:]
-		}
+		cmdName = stripPathPrefix(args[i])
 		args = args[i+1:]
 	}
 
@@ -2268,9 +2279,15 @@ func defuseStmt(stmt *syntax.Stmt) *syntax.Stmt {
 		if r.N != nil && r.N.Value != "" && r.N.Value != "0" && r.N.Value != "1" && r.N.Value != "2" {
 			continue
 		}
-		switch r.Op { //nolint:exhaustive // only keep known-safe redirect ops
+		switch r.Op {
 		case syntax.RdrOut, syntax.AppOut, syntax.RdrIn, syntax.WordHdoc:
 			safeRedirs = append(safeRedirs, r)
+		case syntax.RdrInOut, syntax.DplIn, syntax.DplOut, syntax.ClbOut,
+			syntax.Hdoc, syntax.DashHdoc, syntax.RdrAll, syntax.AppAll:
+			// RdrAll/AppAll (&>, &>>) are path-bearing but unsupported by the interpreter;
+			// their paths are captured by extractFromAST on the AST fallback path.
+			// The rest (DplIn/DplOut dup FDs, Hdoc/DashHdoc use goroutines) are also
+			// unsafe for the interpreter — all dropped here.
 		}
 	}
 	defused.Redirs = safeRedirs
@@ -2319,11 +2336,14 @@ func extractFromAST(file *syntax.File, skipInner ...bool) []parsedCommand {
 			if p == "" {
 				continue
 			}
-			switch r.Op { //nolint:exhaustive // only extract path-bearing redirect ops
+			switch r.Op {
 			case syntax.RdrOut, syntax.AppOut, syntax.RdrAll, syntax.AppAll:
 				redirOut = append(redirOut, p)
 			case syntax.RdrIn, syntax.WordHdoc:
 				redirIn = append(redirIn, p)
+			case syntax.RdrInOut, syntax.DplIn, syntax.DplOut, syntax.ClbOut,
+				syntax.Hdoc, syntax.DashHdoc:
+				// not path-bearing; ignore
 			}
 		}
 
@@ -2332,7 +2352,7 @@ func extractFromAST(file *syntax.File, skipInner ...bool) []parsedCommand {
 			return true // continue into nested structures (BinaryCmd, IfClause, etc.)
 		}
 
-		name := wordToLiteral(call.Args[0])
+		name := normalizeParsedCmdName(wordToLiteral(call.Args[0]))
 		if name == "" {
 			return true
 		}
@@ -2686,7 +2706,7 @@ func (e *Extractor) runShellFileInterp(file *syntax.File, parentSymtab map[strin
 			}
 			mu.Lock()
 			pc := parsedCommand{
-				Name:     args[0],
+				Name:     normalizeParsedCmdName(args[0]),
 				Args:     slices.Clone(args[1:]),
 				HasSubst: hasSubst,
 			}

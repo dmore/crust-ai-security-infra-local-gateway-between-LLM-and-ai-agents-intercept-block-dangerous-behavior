@@ -12,7 +12,7 @@ import (
 type StringOrArray []string
 
 func (s *StringOrArray) UnmarshalYAML(node *yaml.Node) error {
-	switch node.Kind { //nolint:exhaustive // default returns error for all non-scalar/non-sequence node types
+	switch node.Kind {
 	case yaml.ScalarNode:
 		if node.Value == "" {
 			return errors.New("empty pattern not allowed")
@@ -34,7 +34,10 @@ func (s *StringOrArray) UnmarshalYAML(node *yaml.Node) error {
 		}
 		*s = arr
 		return nil
+	case yaml.DocumentNode, yaml.MappingNode, yaml.AliasNode:
+		return fmt.Errorf("must be string or array, got %v", node.Kind)
 	default:
+		// Future yaml.v3 Kind values.
 		return fmt.Errorf("must be string or array, got %v", node.Kind)
 	}
 }
