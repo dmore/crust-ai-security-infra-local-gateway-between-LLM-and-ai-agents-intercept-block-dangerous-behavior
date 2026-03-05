@@ -202,6 +202,146 @@ func TestPSWorker_VarResolution(t *testing.T) {
 	}
 }
 
+// TestPSWorker_ExpandableStringArg verifies that "$var" expandable string
+// arguments are resolved when the variable was assigned on the same scope level.
+func TestPSWorker_ExpandableStringArg(t *testing.T) {
+	pwshPath, ok := FindPwsh()
+	if !ok {
+		t.Skip("pwsh.exe / powershell.exe not found")
+	}
+	w, err := newPwshWorker(pwshPath)
+	if err != nil {
+		t.Fatalf("newPwshWorker: %v", err)
+	}
+	defer w.stop()
+
+	tests := []struct {
+		name     string
+		cmd      string
+		wantArg  string
+		wantName string
+	}{
+		{
+			name:     "double-quoted expandable string arg",
+			cmd:      `$p = "/home/user/.env"; Get-Content "$p"`,
+			wantName: "Get-Content",
+			wantArg:  "/home/user/.env",
+		},
+		{
+			name:     "colon-syntax with expandable string",
+			cmd:      `$p = "/home/user/.env"; Get-Content -Path:"$p"`,
+			wantName: "Get-Content",
+			wantArg:  "/home/user/.env",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := w.parse(tt.cmd)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if len(resp.ParseErrors) > 0 {
+				t.Fatalf("parse errors: %v", resp.ParseErrors)
+			}
+			var found bool
+			for _, c := range resp.Commands {
+				if c.Name == tt.wantName && slices.Contains(c.Args, tt.wantArg) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected %s with arg %q in %+v", tt.wantName, tt.wantArg, resp.Commands)
+			}
+		})
+	}
+}
+
+// TestPSWorker_TypeCastAssignment verifies that [type]$var = "literal"
+// assignments are captured and resolved in subsequent commands.
+func TestPSWorker_TypeCastAssignment(t *testing.T) {
+	pwshPath, ok := FindPwsh()
+	if !ok {
+		t.Skip("pwsh.exe / powershell.exe not found")
+	}
+	w, err := newPwshWorker(pwshPath)
+	if err != nil {
+		t.Fatalf("newPwshWorker: %v", err)
+	}
+	defer w.stop()
+
+	resp, err := w.parse(`[string]$path = "/home/user/.env"; Get-Content $path`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(resp.ParseErrors) > 0 {
+		t.Fatalf("parse errors: %v", resp.ParseErrors)
+	}
+	var found bool
+	for _, c := range resp.Commands {
+		if c.Name == "Get-Content" && slices.Contains(c.Args, "/home/user/.env") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected Get-Content with resolved path in %+v", resp.Commands)
+	}
+}
+
+// TestPSWorker_HasSubstColonSyntax verifies that has_subst is set to true
+// when a parameter's colon-syntax value is a variable or expandable string.
+func TestPSWorker_HasSubstColonSyntax(t *testing.T) {
+	pwshPath, ok := FindPwsh()
+	if !ok {
+		t.Skip("pwsh.exe / powershell.exe not found")
+	}
+	w, err := newPwshWorker(pwshPath)
+	if err != nil {
+		t.Fatalf("newPwshWorker: %v", err)
+	}
+	defer w.stop()
+
+	tests := []struct {
+		name         string
+		cmd          string
+		wantHasSubst bool
+	}{
+		{
+			// -Path:$var → Argument is VariableExpressionAst → has_subst true
+			name:         "colon-syntax variable arg",
+			cmd:          `Get-Content -Path:$secret`,
+			wantHasSubst: true,
+		},
+		{
+			// -Path:"$var" → Argument is ExpandableStringExpressionAst → has_subst true
+			name:         "colon-syntax expandable string arg",
+			cmd:          `Get-Content -Path:"$secret"`,
+			wantHasSubst: true,
+		},
+		{
+			// -Path:"literal" → Argument is StringConstantExpressionAst → has_subst false
+			name:         "colon-syntax literal arg",
+			cmd:          `Get-Content -Path:"/etc/passwd"`,
+			wantHasSubst: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := w.parse(tt.cmd)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if len(resp.Commands) == 0 {
+				t.Fatal("expected at least one command")
+			}
+			if resp.Commands[0].HasSubst != tt.wantHasSubst {
+				t.Errorf("has_subst = %v, want %v (cmd: %s)", resp.Commands[0].HasSubst, tt.wantHasSubst, tt.cmd)
+			}
+		})
+	}
+}
+
 // =============================================================================
 // FuzzPSWorker_NoCrash: Can fuzzed PowerShell command strings crash or hang
 // the pwsh worker subprocess? Tests worker robustness and auto-restart.

@@ -67,10 +67,18 @@ while ($true) {
                     try {
                         $lhs = $stmt.Left
                         $rhs = $stmt.Right
-                        if ($lhs -is [System.Management.Automation.Language.VariableExpressionAst] -and
-                            $rhs -is [System.Management.Automation.Language.CommandExpressionAst] -and
+                        if ($rhs -is [System.Management.Automation.Language.CommandExpressionAst] -and
                             $rhs.Expression -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
-                            $vars[$lhs.VariablePath.UserPath] = $rhs.Expression.Value
+                            # Plain assignment: $var = "literal"
+                            if ($lhs -is [System.Management.Automation.Language.VariableExpressionAst]) {
+                                $vars[$lhs.VariablePath.UserPath] = $rhs.Expression.Value
+                            }
+                            # Type-cast assignment: [type]$var = "literal"
+                            # The LHS is a ConvertExpressionAst wrapping a VariableExpressionAst.
+                            elseif ($lhs -is [System.Management.Automation.Language.ConvertExpressionAst] -and
+                                    $lhs.Child -is [System.Management.Automation.Language.VariableExpressionAst]) {
+                                $vars[$lhs.Child.VariablePath.UserPath] = $rhs.Expression.Value
+                            }
                         }
                     } catch { $null = $_ }
                 }
@@ -92,6 +100,16 @@ while ($true) {
                                 } elseif ($_ -is [System.Management.Automation.Language.VariableExpressionAst]) {
                                     $k = $_.VariablePath.UserPath
                                     if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) }
+                                } elseif ($_ -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) {
+                                    # "$var" expandable string: resolve if it is a single bare variable.
+                                    # NestedExpressions holds the dynamic parts; if there is exactly one
+                                    # and it is a plain variable reference we can substitute its value.
+                                    $nested = @($_.NestedExpressions)
+                                    if ($nested.Count -eq 1 -and
+                                        $nested[0] -is [System.Management.Automation.Language.VariableExpressionAst]) {
+                                        $k = $nested[0].VariablePath.UserPath
+                                        if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) }
+                                    }
                                 } elseif ($_ -is [System.Management.Automation.Language.CommandParameterAst]) {
                                     $ag.Add('-' + $_.ParameterName)
                                     # -Flag:value colon syntax: Argument holds the value expression.
@@ -101,6 +119,13 @@ while ($true) {
                                         } elseif ($_.Argument -is [System.Management.Automation.Language.VariableExpressionAst]) {
                                             $k = $_.Argument.VariablePath.UserPath
                                             if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) }
+                                        } elseif ($_.Argument -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) {
+                                            $nested = @($_.Argument.NestedExpressions)
+                                            if ($nested.Count -eq 1 -and
+                                                $nested[0] -is [System.Management.Automation.Language.VariableExpressionAst]) {
+                                                $k = $nested[0].VariablePath.UserPath
+                                                if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) }
+                                            }
                                         }
                                     }
                                 }
@@ -134,6 +159,13 @@ while ($true) {
                         foreach ($el in ($_.CommandElements | Select-Object -Skip 1)) {
                             if ($el -isnot [System.Management.Automation.Language.StringConstantExpressionAst] -and
                                 $el -isnot [System.Management.Automation.Language.CommandParameterAst]) {
+                                $hasSubst = $true
+                                break
+                            }
+                            # -Flag:$var or -Flag:"$expandable" — the colon-syntax Argument is complex.
+                            if ($el -is [System.Management.Automation.Language.CommandParameterAst] -and
+                                $null -ne $el.Argument -and
+                                $el.Argument -isnot [System.Management.Automation.Language.StringConstantExpressionAst]) {
                                 $hasSubst = $true
                                 break
                             }
