@@ -583,8 +583,11 @@ func stripADS(p string) string {
 	// Process each path segment, stripping everything after the first colon.
 	parts := strings.Split(p, "/")
 	for i, part := range parts {
-		// Skip drive letter segment (e.g., "C:") when it's a path prefix.
-		if i == 0 && len(part) == 2 && part[1] == ':' && pathutil.IsDriverLetter(part[0]) {
+		// Skip bare drive-letter segments (e.g., "C:" in "C:/..." or "/C:/...").
+		// They appear at index 0 for Windows paths and index 1 for MSYS2-style
+		// paths that begin with "/" (e.g., "/c:/..." where parts[0]=="").
+		isDriveSeg := len(part) == 2 && part[1] == ':' && pathutil.IsDriverLetter(part[0])
+		if isDriveSeg && (i == 0 || (i == 1 && parts[0] == "")) {
 			continue
 		}
 		if before, _, ok := strings.Cut(part, ":"); ok {

@@ -334,6 +334,11 @@ func TestStripADS(t *testing.T) {
 		{name: "lowercase drive letter", input: "c:/foo:bar", expected: "c:/foo"},
 		{name: "drive letter only", input: "C:", expected: "C:"},
 		{name: "drive letter with just stream", input: "C:/file:stream/dir", expected: "C:/file/dir"},
+
+		// MSYS2-style /X:/ paths (drive letter at segment index 1)
+		{name: "msys2 style drive preserved", input: "/c:/Users/file.txt::$DATA", expected: "/c:/Users/file.txt"},
+		{name: "msys2 style no ADS", input: "/c:/Users/file.txt", expected: "/c:/Users/file.txt"},
+		{name: "msys2 style with stream", input: "/c:/file:stream/dir", expected: "/c:/file/dir"},
 	}
 
 	for _, tt := range tests {

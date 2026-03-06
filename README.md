@@ -67,7 +67,7 @@ All activity is logged locally to encrypted storage.
 
 ## Quick Start
 
-**macOS / Linux:**
+**macOS / Linux / BSD:**
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/BakeLens/crust/main/install.sh)"
 ```
