@@ -1999,7 +1999,7 @@ var wrapperFlagsWithValue = map[string]map[string]bool{
 	"prlimit":     {"-p": true, "--pid": true},
 	"ionice":      {"-p": true},
 	"chrt":        {"-p": true},
-	"xargs": {"-a": true, "--arg-file": true, "-E": true, "-I": true, "-L": true, "-n": true, "-P": true, "-s": true},
+	"xargs":       {"-a": true, "--arg-file": true, "-E": true, "-I": true, "-L": true, "-n": true, "-P": true, "-s": true},
 	// wsl flags that consume a value before the inner command
 	"wsl":     {"-d": true, "--distribution": true, "-u": true, "--user": true, "--cd": true},
 	"wsl.exe": {"-d": true, "--distribution": true, "-u": true, "--user": true, "--cd": true},
