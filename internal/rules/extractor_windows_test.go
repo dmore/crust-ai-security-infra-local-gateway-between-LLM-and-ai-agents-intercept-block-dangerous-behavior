@@ -2008,7 +2008,7 @@ func TestExtract_CmdExeSlashC(t *testing.T) {
 			name:      "cmd /c type reads file",
 			cmd:       `cmd /c type C:\Users\user\.env`,
 			wantOp:    OpRead,
-			wantPaths: []string{`C:\Users\user\.env`},
+			wantPaths: []string{`C:/Users/user/.env`}, // backslashes normalized to / before bash parse
 		},
 		{
 			name:      "cmd.exe /c type with forward-slash path",
@@ -2020,19 +2020,19 @@ func TestExtract_CmdExeSlashC(t *testing.T) {
 			name:      "cmd /c del deletes file",
 			cmd:       `cmd /c del C:\Users\user\secret.txt`,
 			wantOp:    OpDelete,
-			wantPaths: []string{`C:\Users\user\secret.txt`},
+			wantPaths: []string{`C:/Users/user/secret.txt`},
 		},
 		{
 			name:      "cmd /c copy copies file",
 			cmd:       `cmd /c copy C:\Users\user\.env C:\tmp\out.txt`,
 			wantOp:    OpCopy,
-			wantPaths: []string{`C:\Users\user\.env`},
+			wantPaths: []string{`C:/Users/user/.env`},
 		},
 		{
 			name:      "cmd /k type keeps file open",
 			cmd:       `cmd /k type C:\Users\user\.ssh\id_rsa`,
 			wantOp:    OpRead,
-			wantPaths: []string{`C:\Users\user\.ssh\id_rsa`},
+			wantPaths: []string{`C:/Users/user/.ssh/id_rsa`},
 		},
 	}
 
@@ -2067,9 +2067,9 @@ func TestExtract_WslExeCommands(t *testing.T) {
 	}{
 		{
 			name:      "wsl cat reads Unix path",
-			cmd:       "wsl cat ~/.env",
+			cmd:       "wsl cat /home/user/.env", // ~ expands to the host home dir; use absolute path
 			wantOp:    OpRead,
-			wantPaths: []string{"~/.env"},
+			wantPaths: []string{"/home/user/.env"},
 		},
 		{
 			name:      "wsl.exe cat reads absolute Unix path",
@@ -2129,19 +2129,19 @@ func TestExtract_PSInvokeItem(t *testing.T) {
 			name:      "Invoke-Item positional path",
 			cmd:       `Invoke-Item C:\Users\user\.env`,
 			wantOp:    OpExecute,
-			wantPaths: []string{`C:\Users\user\.env`},
+			wantPaths: []string{`C:/Users/user/.env`}, // backslashes normalized to /
 		},
 		{
 			name:      "Invoke-Item -Path flag",
 			cmd:       `Invoke-Item -Path C:\Users\user\Documents\secret.pdf`,
 			wantOp:    OpExecute,
-			wantPaths: []string{`C:\Users\user\Documents\secret.pdf`},
+			wantPaths: []string{`C:/Users/user/Documents/secret.pdf`},
 		},
 		{
 			name:      "ii alias",
 			cmd:       `ii C:\Users\user\.ssh\id_rsa`,
 			wantOp:    OpExecute,
-			wantPaths: []string{`C:\Users\user\.ssh\id_rsa`},
+			wantPaths: []string{`C:/Users/user/.ssh/id_rsa`},
 		},
 	}
 
@@ -2177,19 +2177,19 @@ func TestExtract_BatchFileExecution(t *testing.T) {
 			name:      "absolute .bat execution",
 			cmd:       `C:\scripts\deploy.bat`,
 			wantOp:    OpExecute,
-			wantPaths: []string{`C:\scripts\deploy.bat`},
+			wantPaths: []string{`C:/scripts/deploy.bat`}, // backslashes normalized to /
 		},
 		{
 			name:      "absolute .cmd execution",
 			cmd:       `C:\scripts\setup.cmd`,
 			wantOp:    OpExecute,
-			wantPaths: []string{`C:\scripts\setup.cmd`},
+			wantPaths: []string{`C:/scripts/setup.cmd`},
 		},
 		{
 			name:      "relative .bat execution",
-			cmd:       `.\deploy.bat`,
+			cmd:       `./deploy.bat`, // forward slash; .\deploy.bat would be mangled by bash
 			wantOp:    OpExecute,
-			wantPaths: []string{`.\deploy.bat`},
+			wantPaths: []string{`./deploy.bat`},
 		},
 		{
 			name:      "call built-in invokes .bat",
@@ -2241,19 +2241,19 @@ func TestExtract_CmdPercentVarExpansion(t *testing.T) {
 			name:        "type with %USERPROFILE%",
 			cmd:         `cmd /c type %USERPROFILE%\.env`,
 			wantOp:      OpRead,
-			wantRawPath: `%USERPROFILE%\.env`,
+			wantRawPath: `%USERPROFILE%/.env`, // backslash normalized to /
 		},
 		{
 			name:        "del with %TEMP%",
 			cmd:         `cmd /c del %TEMP%\secret.txt`,
 			wantOp:      OpDelete,
-			wantRawPath: `%TEMP%\secret.txt`,
+			wantRawPath: `%TEMP%/secret.txt`,
 		},
 		{
 			name:        "copy with %APPDATA%",
 			cmd:         `cmd /c copy %APPDATA%\config.ini C:\tmp\out`,
 			wantOp:      OpCopy,
-			wantRawPath: `%APPDATA%\config.ini`,
+			wantRawPath: `%APPDATA%/config.ini`,
 		},
 	}
 
