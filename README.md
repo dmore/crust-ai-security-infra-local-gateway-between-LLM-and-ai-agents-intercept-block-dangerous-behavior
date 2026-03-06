@@ -179,6 +179,8 @@ Crust ships with **26 security rules** (19 locked, 7 user-disablable) and **34 D
 
 All rules are open source: [`internal/rules/builtin/security.yaml`](internal/rules/builtin/security.yaml) (path rules), [`internal/rules/dlp.go`](internal/rules/dlp.go) (DLP patterns), and [`internal/rules/dlp_crypto.go`](internal/rules/dlp_crypto.go) (crypto key detection)
 
+These defenses are validated against [**22 real-world CVEs**](docs/cve-tracker.md) affecting Cursor, GitHub Copilot, Claude Code, and other AI agents — including prompt injection, config hijacking, and token exfiltration attacks.
+
 ### Custom Rules
 
 Rules use a progressive disclosure schema — start simple, add complexity only when needed:
