@@ -240,7 +240,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 | [CLI Reference](docs/cli.md) | Commands, flags, environment variables |
 | [How It Works](docs/how-it-works.md) | Architecture, rule engine, evaluation pipeline |
 | [Shell Parsing](docs/shell-parsing.md) | Bash command parsing for path/command extraction |
-| [CVE Tracker](docs/cve-tracker.md) | AI agent & MCP vulnerability coverage |
+| [CVE Tracker](docs/cve-tracker.md) | AI agent vulnerability tracker |
 | [Migration](docs/migration.md) | Upgrade guides for breaking changes |
 
 ## Build from Source
