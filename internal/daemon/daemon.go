@@ -100,5 +100,6 @@ func IsDaemonMode() bool {
 // a forcefully-killed process can't run its own defers.
 func stopCleanup() {
 	RestoreAgentConfigs()
-	_ = RemovePID() //nolint:errcheck // cleanup best effort
+	_ = RemovePID()              //nolint:errcheck // cleanup best effort
+	_ = os.Remove(portFile())    //nolint:errcheck // cleanup best effort
 }

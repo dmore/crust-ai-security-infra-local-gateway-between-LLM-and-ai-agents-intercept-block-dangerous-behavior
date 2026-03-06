@@ -113,14 +113,14 @@ function Install-Gitleaks {
 
     # Go is already required, so go install should work
     try {
-        & go install github.com/gitleaks/gitleaks/v8@latest 2>$null
+        & go install github.com/zricethezav/gitleaks/v8@latest 2>$null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "  gitleaks installed via go install" -ForegroundColor Green
             return
         }
     } catch {}
 
-    throw "Failed to install gitleaks. Install manually: go install github.com/gitleaks/gitleaks/v8@latest"
+    Write-Warning "Failed to install gitleaks (DLP Tier 2 will be disabled). Install manually: go install github.com/zricethezav/gitleaks/v8@latest"
 }
 
 function Install-NerdFont {
@@ -262,7 +262,8 @@ try {
     # Use Start-Process to avoid $ErrorActionPreference="Stop" killing on git stderr
     $gitResult = Start-Process -FilePath "git" -ArgumentList "clone","--depth","1","--branch",$Version,$CloneUrl,$TmpDir -Wait -NoNewWindow -PassThru 2>$null
     if ($gitResult.ExitCode -ne 0) {
-        & git clone --depth 1 --branch $Version $CloneUrl $TmpDir 2>$null
+        # Fallback: clone default branch (mirrors install-common.sh behaviour)
+        & git clone --depth 1 $CloneUrl $TmpDir
     }
 
     # Build Go binary

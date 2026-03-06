@@ -298,14 +298,13 @@ setup_gitleaks() {
     fi
 
     # Fallback: go install (works on all platforms with Go)
-    if go install github.com/gitleaks/gitleaks/v8@latest 2>/dev/null; then
+    if go install github.com/zricethezav/gitleaks/v8@latest 2>/dev/null; then
         echo -e "  ${GREEN}gitleaks installed via go install${NC}"
         return 0
     fi
 
-    echo -e "${RED}Error: Failed to install gitleaks${NC}"
-    echo "Install manually: brew install gitleaks  OR  go install github.com/gitleaks/gitleaks/v8@latest"
-    exit 1
+    echo -e "${YELLOW}Warning: Failed to install gitleaks (DLP Tier 2 will be disabled)${NC}"
+    echo "Install manually: brew install gitleaks  OR  go install github.com/zricethezav/gitleaks/v8@latest"
 }
 
 # Install a Nerd Font for optimal TUI rendering (optional, non-fatal).

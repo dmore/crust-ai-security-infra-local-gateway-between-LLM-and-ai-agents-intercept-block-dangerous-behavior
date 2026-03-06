@@ -91,11 +91,16 @@ func TestNewHTTPGateway_InvalidURL(t *testing.T) {
 // --- E2E Tests with Real MCP HTTP Server ---
 // These use @modelcontextprotocol/server-everything with streamableHttp transport.
 
-// skipHTTPE2E skips if -short or npx not available.
+// skipHTTPE2E skips unless explicitly opted in.
+// The server-everything npx package may not start reliably in all environments,
+// so these tests require MCP_HTTP_E2E=1 in addition to npx being available.
 func skipHTTPE2E(t *testing.T) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("E2E: skipped in -short mode")
+	}
+	if os.Getenv("MCP_HTTP_E2E") != "1" {
+		t.Skip("E2E: set MCP_HTTP_E2E=1 to run HTTP E2E tests")
 	}
 	if _, err := exec.LookPath("npx"); err != nil {
 		t.Skip("E2E: npx not found in PATH")
