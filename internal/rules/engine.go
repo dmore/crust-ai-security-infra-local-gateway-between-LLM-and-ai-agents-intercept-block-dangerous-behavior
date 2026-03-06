@@ -185,7 +185,7 @@ func NewEngineWithNormalizer(cfg EngineConfig, normalizer *Normalizer) (*Engine,
 		}
 	}
 
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		// Windows 10/11 always ships powershell.exe (5.1); pwsh.exe (7+) is
 		// optional. FindPwsh() should always succeed on supported platforms.
 		if pwshPath, ok := FindPwsh(); ok {
