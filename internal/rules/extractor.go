@@ -222,7 +222,7 @@ type Extractor struct {
 	commandDB  map[string]CommandInfo
 	env        map[string]string // process environment for shell expansion
 	worker     *shellWorker      // nil if subprocess isolation is disabled
-	pwshWorker *pwsh.Worker      // nil on non-Windows or if pwsh not found
+	pwshWorker *pwsh.WorkerPool  // nil on non-Windows or if pwsh not found
 }
 
 // EnableSubprocessIsolation starts a worker subprocess for crash-isolated
@@ -244,11 +244,11 @@ func (e *Extractor) EnableSubprocessIsolation(exePath string) error {
 // site in engine.go is gated behind runtime.GOOS == "windows". Falls back to
 // the heuristic PS transform if this method is not called or returns an error.
 func (e *Extractor) EnablePSWorker(pwshPath string) error {
-	w, err := pwsh.NewWorker(pwshPath)
+	pool, err := pwsh.NewWorkerPool(pwshPath, 0) // 0 = auto-size
 	if err != nil {
 		return err
 	}
-	e.pwshWorker = w
+	e.pwshWorker = pool
 	return nil
 }
 
@@ -1063,12 +1063,11 @@ func (e *Extractor) Extract(toolName string, args json.RawMessage) ExtractedInfo
 	return info
 }
 
-// minPrinter reconstructs shell commands in canonical minified form.
-// Used to produce a normalized info.Command for rule matching.
-var minPrinter = syntax.NewPrinter(syntax.Minify(true))
-
 // extractBashCommand parses a bash command and extracts paths/operation.
 func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
+	// minPrinter reconstructs shell commands in canonical minified form.
+	// Created per-call so concurrent goroutines don't share printer state.
+	minPrinter := syntax.NewPrinter(syntax.Minify(true))
 	// Collect ALL command field values — not just the first.
 	// An attacker could hide a dangerous command in a secondary field
 	// (e.g., "command": "echo safe", "shell": "cat ~/.ssh/id_rsa").
