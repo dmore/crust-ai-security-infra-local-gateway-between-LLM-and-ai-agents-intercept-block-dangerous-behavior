@@ -2077,7 +2077,10 @@ func FuzzPipeBypass(f *testing.F) {
 		// This catches cases where extraction works but matching fails.
 		// ---------------------------------------------------------------
 		info := NewExtractor().Extract("Bash", json.RawMessage(args))
-		normalizedPaths := normalizer.NormalizeAllWithSymlinks(info.Paths)
+		// Use PreparePaths (which includes filterShellGlobs) to match
+		// the engine's step 8 pipeline, then resolve symlinks (step 9).
+		preparedPaths := normalizer.PreparePaths(info.Paths)
+		normalizedPaths := normalizer.resolveSymlinks(preparedPaths)
 
 		for _, np := range normalizedPaths {
 			if isCriticalPath(np) && !result.Matched {

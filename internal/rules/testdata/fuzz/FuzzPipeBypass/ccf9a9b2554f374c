@@ -1,0 +1,2 @@
+go test fuzz v1
+string("echo 0000000000 .env.*00& xargs BAt")
