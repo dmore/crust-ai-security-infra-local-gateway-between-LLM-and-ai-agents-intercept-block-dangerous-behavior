@@ -10,7 +10,7 @@ Source: `internal/rules/extractor.go`
 extractBashCommand (entry point)
  │
  ├─ A. Collect command strings from all knownCommandFields
- │     (command, cmd, script, shell_command, shell)
+ │     (command, cmd, commandline, script, shellcommand, shell)
  │
  └─ B. For each command string:
       │

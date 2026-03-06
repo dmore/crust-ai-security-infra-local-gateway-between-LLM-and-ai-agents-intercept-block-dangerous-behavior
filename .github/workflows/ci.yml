@@ -27,6 +27,11 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
 
+      - name: go mod tidy (check for stale dependencies)
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum || { echo "go mod tidy changed go.mod/go.sum — run 'go mod tidy' locally and commit"; exit 1; }
+
       - name: go fix (check for pending modernizations)
         run: |
           go fix ./...

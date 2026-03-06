@@ -8,7 +8,7 @@ If you discover a security bypass or any vulnerability in Crust,
 please report it privately using one of these methods:
 
 1. **GitHub Private Vulnerability Reporting** (preferred):
-   Go to the [Security Advisories](https://github.com/BakeLab/crust-dev/security/advisories) page
+   Go to the [Security Advisories](https://github.com/BakeLens/crust/security/advisories) page
    and click "Report a vulnerability"
 
 2. **Email**: security@bakelens.com

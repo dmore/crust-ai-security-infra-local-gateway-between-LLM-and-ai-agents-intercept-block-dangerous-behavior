@@ -31,7 +31,7 @@
 <p align="center">
   <a href="https://github.com/BakeLens/crust/blob/main/SECURITY.md"><img src="https://img.shields.io/badge/Security%20Policy-Responsible%20Disclosure-green" alt="Security Policy" /></a>
   <img src="https://img.shields.io/badge/SAST-gosec%20%7C%20semgrep-blueviolet" alt="SAST" />
-  <img src="https://img.shields.io/badge/Fuzz%20Tested-37%20targets-orange" alt="Fuzz Tested" />
+  <img src="https://img.shields.io/badge/Fuzz%20Tested-38%20targets-orange" alt="Fuzz Tested" />
   <img src="https://img.shields.io/badge/Secrets-govulncheck%20%7C%20gitleaks-critical" alt="Secret Scanning" />
 </p>
 
@@ -179,6 +179,8 @@ Crust ships with **26 security rules** (19 locked, 7 user-disablable) and **34 D
 
 All rules are open source: [`internal/rules/builtin/security.yaml`](internal/rules/builtin/security.yaml) (path rules), [`internal/rules/dlp.go`](internal/rules/dlp.go) (DLP patterns), and [`internal/rules/dlp_crypto.go`](internal/rules/dlp_crypto.go) (crypto key detection)
 
+These defenses are validated against [**22 real-world CVEs**](docs/cve-tracker.md) affecting Cursor, GitHub Copilot, Claude Code, and other AI agents — including prompt injection, config hijacking, and token exfiltration attacks.
+
 ### Custom Rules
 
 Rules use a progressive disclosure schema — start simple, add complexity only when needed:
@@ -240,6 +242,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 | [CLI Reference](docs/cli.md) | Commands, flags, environment variables |
 | [How It Works](docs/how-it-works.md) | Architecture, rule engine, evaluation pipeline |
 | [Shell Parsing](docs/shell-parsing.md) | Bash command parsing for path/command extraction |
+| [CVE Tracker](docs/cve-tracker.md) | AI agent vulnerability tracker |
 | [Migration](docs/migration.md) | Upgrade guides for breaking changes |
 
 ## Build from Source
