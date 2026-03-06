@@ -12,12 +12,11 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/gobwas/glob v0.2.3
-	github.com/klauspost/compress v1.18.3
+	github.com/klauspost/compress v1.18.4
 	github.com/muesli/termenv v0.16.0
 	github.com/mutecomm/go-sqlcipher/v4 v4.4.2
 	github.com/posener/complete/v2 v2.1.0
 	github.com/zalando/go-keyring v0.2.6
-	golang.org/x/crypto v0.46.0
 	golang.org/x/sys v0.40.0
 	golang.org/x/term v0.39.0
 	golang.org/x/text v0.32.0
@@ -76,6 +75,7 @@ require (
 	github.com/ugorji/go/codec v1.3.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/arch v0.20.0 // indirect
+	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
 	google.golang.org/protobuf v1.36.9 // indirect
 )
