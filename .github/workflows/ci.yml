@@ -144,17 +144,26 @@ jobs:
           go test ./internal/rules/ -fuzz=FuzzExtractor_PSCommand -fuzztime=30s -short
 
 
-  # MSYS2 tests run only on main to avoid the cost of a second windows-latest runner on PRs.
-  # The job always completes (SUCCESS) so it can be listed as a required status check;
+  # Platform-specific tests run only on main to reduce CI costs.
+  # macOS runners are 10x billing; MSYS2 adds a second windows-latest runner.
+  # Jobs always complete (SUCCESS) so they can be listed as required status checks;
   # the expensive steps are skipped on non-main branches.
-  test-msys2:
-    name: Unit Tests (Windows MSYS2)
+  test-expensive:
+    name: Go Test (${{ matrix.name }})
     needs: [lint-go]
-    runs-on: ${{ github.ref == 'refs/heads/main' && 'windows-latest' || 'ubuntu-latest' }}
+    runs-on: ${{ github.ref == 'refs/heads/main' && matrix.os || 'ubuntu-latest' }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            name: macOS
+          - os: windows-latest
+            name: Windows MSYS2
+            msys2: true
     steps:
       - name: Skip on non-main branches
         if: github.ref != 'refs/heads/main'
-        run: echo "MSYS2 tests run on main only — skipping to reduce CI costs"
+        run: echo "Platform tests run on main only — skipping to reduce CI costs"
 
       - uses: actions/checkout@v4
         if: github.ref == 'refs/heads/main'
@@ -167,7 +176,7 @@ jobs:
           go-version-file: go.mod
 
       - uses: msys2/setup-msys2@v2
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && matrix.msys2
         with:
           msystem: MINGW64
           update: false
@@ -175,52 +184,24 @@ jobs:
 
       - name: Install gitleaks (DLP Tier 2 runtime dependency)
         if: github.ref == 'refs/heads/main'
-        shell: msys2 {0}
-        run: go install github.com/zricethezav/gitleaks/v8@latest
-
-      - name: Unit tests under MSYS2 environment
-        if: github.ref == 'refs/heads/main'
-        shell: msys2 {0}
-        run: go test ./internal/rules/... ./internal/pathutil/... -short -count=1 -timeout 120s
-
-  # macOS and FreeBSD full tests run only on main to reduce CI costs (macOS is 10x billing).
-  # The jobs always complete (SUCCESS) so they can be listed as required status checks;
-  # the expensive steps are skipped on non-main branches.
-  test-expensive:
-    name: Go Test (${{ matrix.os }})
-    needs: [lint-go]
-    runs-on: ${{ github.ref == 'refs/heads/main' && matrix.os || 'ubuntu-latest' }}
-    strategy:
-      matrix:
-        os: [macos-latest]
-    steps:
-      - name: Skip on non-main branches
-        if: github.ref != 'refs/heads/main'
-        run: echo "macOS tests run on main only — skipping to reduce CI costs"
-
-      - uses: actions/checkout@v4
-        if: github.ref == 'refs/heads/main'
-
-      - uses: actions/setup-go@v5
-        if: github.ref == 'refs/heads/main'
-        with:
-          go-version-file: go.mod
-
-      - name: Install gitleaks (DLP Tier 2 runtime dependency)
-        if: github.ref == 'refs/heads/main'
         run: go install github.com/zricethezav/gitleaks/v8@latest
 
       - name: Build
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && !matrix.msys2
         run: go build ./...
 
       - name: Build (notui)
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && !matrix.msys2
         run: go build -tags notui ./...
 
       - name: Unit tests (with race detector)
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && !matrix.msys2
         run: go test -race -short ./...
+
+      - name: Unit tests (MSYS2 — MSYSTEM set by msys2/setup-msys2)
+        if: github.ref == 'refs/heads/main' && matrix.msys2
+        shell: msys2 {0}
+        run: go test ./internal/rules/... ./internal/pathutil/... -short -count=1 -timeout 120s
 
   test-freebsd:
     name: Go Test (FreeBSD)
