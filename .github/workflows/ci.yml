@@ -46,6 +46,7 @@ jobs:
     name: Security Checks
     needs: [lint-go]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -54,7 +55,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Install gitleaks (DLP Tier 2 runtime dependency)
-        run: go install github.com/zricethezav/gitleaks/v8@latest
+        run: go install github.com/zricethezav/gitleaks/v8@v8.24.0
 
       - name: Verify PIE binary
         run: |
@@ -72,8 +73,7 @@ jobs:
           go test ./internal/rules/ -fuzz=FuzzPipeBypass -fuzztime=30s -short
           go test ./internal/rules/ -fuzz=FuzzConfusableBypass -fuzztime=30s -short
 
-      - name: Fuzz tests (full suite, 10s each — main only)
-        if: github.ref == 'refs/heads/main'
+      - name: Fuzz tests (full suite, 10s each)
         run: |
           go test ./internal/rules/ -fuzz=FuzzNormalizerBypass -fuzztime=10s -short
           go test ./internal/rules/ -fuzz=FuzzParseShellCommands -fuzztime=10s -short
@@ -116,7 +116,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Install gitleaks (DLP Tier 2 runtime dependency)
-        run: go install github.com/zricethezav/gitleaks/v8@latest
+        run: go install github.com/zricethezav/gitleaks/v8@v8.24.0
 
       - name: Build
         run: go build ./...
@@ -157,6 +157,7 @@ jobs:
         include:
           - os: macos-latest
             name: macOS
+            msys2: false
           - os: windows-latest
             name: Windows MSYS2
             msys2: true
@@ -184,7 +185,7 @@ jobs:
 
       - name: Install gitleaks (DLP Tier 2 runtime dependency)
         if: github.ref == 'refs/heads/main'
-        run: go install github.com/zricethezav/gitleaks/v8@latest
+        run: go install github.com/zricethezav/gitleaks/v8@v8.24.0
 
       - name: Build
         if: github.ref == 'refs/heads/main' && !matrix.msys2
@@ -248,7 +249,7 @@ jobs:
           npm install -g @modelcontextprotocol/server-everything
 
       - name: Install gitleaks (DLP Tier 2 runtime dependency)
-        run: go install github.com/zricethezav/gitleaks/v8@latest
+        run: go install github.com/zricethezav/gitleaks/v8@v8.24.0
 
       - name: MCP E2E tests (stdio + HTTP)
         run: go test -race ./internal/mcpgateway/... -v -run E2E -timeout 180s
