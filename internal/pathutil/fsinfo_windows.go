@@ -3,22 +3,27 @@
 package pathutil
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/windows"
 )
 
-// DetectFS queries filesystem properties for the volume containing path
-// using GetVolumeInformation. This is a direct kernel syscall that reports
-// the volume's actual case sensitivity — it cannot be fooled by userspace tricks.
+// DetectFS queries filesystem properties for the volume containing path.
 //
-// NTFS is case-insensitive by default. Windows 10+ supports per-directory
-// case sensitivity, but the volume-level flag reflects the default behavior.
+// Strategy (two-phase):
+//  1. GetVolumeInformation — fast, zero I/O. If the volume flag is NOT set
+//     (FILE_CASE_SENSITIVE_SEARCH == 0), we are definitely case-insensitive.
+//  2. If the volume flag IS set, it only means NTFS *supports* case-sensitive
+//     names — it doesn't mean the directory is actually case-sensitive. Windows 10+
+//     allows per-directory case sensitivity (opt-in via fsutil or WSL2), so the
+//     volume flag can be set while most user directories remain case-insensitive.
+//     In that case we do a runtime probe at the target path to confirm.
 func DetectFS(path string) FSInfo {
-	// Extract volume root (e.g., "C:\").
+	// Phase 1: volume-level flag via GetVolumeInformation.
 	vol := filepath.VolumeName(path)
 	if vol == "" {
-		// No volume name — default to case-insensitive (NTFS default).
 		return FSInfo{CaseSensitive: false}
 	}
 	root := vol + `\`
@@ -31,18 +36,57 @@ func DetectFS(path string) FSInfo {
 
 	err = windows.GetVolumeInformation(
 		rootPtr,
-		nil, 0, // volume name buffer (not needed)
-		nil,    // serial number (not needed)
-		nil,    // max component length (not needed)
-		&flags, // filesystem flags — this is what we want
-		nil, 0, // filesystem name buffer (not needed)
+		nil, 0,
+		nil,
+		nil,
+		&flags,
+		nil, 0,
 	)
 	if err != nil {
-		// Safe fallback: NTFS is case-insensitive by default.
 		return FSInfo{CaseSensitive: false}
 	}
 
-	return FSInfo{
-		CaseSensitive: flags&windows.FILE_CASE_SENSITIVE_SEARCH != 0,
+	if flags&windows.FILE_CASE_SENSITIVE_SEARCH == 0 {
+		// Volume is case-insensitive — no probe needed.
+		return FSInfo{CaseSensitive: false}
 	}
+
+	// Phase 2: volume flag says case-sensitive, but per-directory settings
+	// may override (common on MSYS2/WSL2 developer machines). Probe the
+	// actual directory to get the real behavior.
+	return FSInfo{CaseSensitive: probeCS(path)}
+}
+
+// probeCS creates a temp file in dir and tries to open it with different case.
+// Returns true (case-sensitive) if the OS cannot find the file under alternate case.
+// Falls back to true (safe/conservative) on any I/O error.
+func probeCS(dir string) bool {
+	// Ensure dir exists and is a directory.
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		dir = filepath.Dir(dir)
+	}
+
+	// Create a file with a mixed-case prefix so we can probe with lower/upper.
+	f, err := os.CreateTemp(dir, "CrustCSProbe")
+	if err != nil {
+		return true // can't probe — stay conservative
+	}
+	name := f.Name()
+	f.Close()
+	defer os.Remove(name)
+
+	base := filepath.Base(name)
+	altBase := strings.ToLower(base)
+	if altBase == base {
+		altBase = strings.ToUpper(base)
+		if altBase == base {
+			return true // all digits/symbols — can't distinguish
+		}
+	}
+	altPath := filepath.Join(filepath.Dir(name), altBase)
+
+	_, err = os.Stat(altPath)
+	// If err is nil → OS found the file under different case → case-insensitive.
+	// If IsNotExist → OS couldn't find it → case-sensitive.
+	return os.IsNotExist(err)
 }

@@ -1533,6 +1533,9 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		// cmdName retains its original case for shellInterpreters, powershellInterpreters,
 		// glob detection, etc.
 		lookupName := strings.ToLower(cmdName)
+		// cmdBaseName strips .exe so Windows paths like C:/Python/python.exe
+		// match interpreter maps that use bare names ("python", "bash", etc.).
+		cmdBaseName := strings.TrimSuffix(lookupName, ".exe")
 
 		// SECURITY: Glob patterns in command name position (e.g., /???/??t, ca?)
 		// bypass command DB lookup since the glob doesn't match literal entries.
@@ -1556,7 +1559,7 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 
 		// Recursively parse "bash -c '...'" / "sh -c '...'" arguments.
 		// Parse and expand inner command with propagated symtab in a single pass.
-		if shellInterpreters[cmdName] && depth < maxShellRecursionDepth {
+		if shellInterpreters[cmdBaseName] && depth < maxShellRecursionDepth {
 			if innerCmd := extractFlagValue(args, "-c"); innerCmd != "" {
 				// Merge env KEY=VALUE args from the wrapper into the symtab
 				innerSymtab := mergeEnvArgs(pc.Args, parentSymtab)
@@ -1652,7 +1655,7 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 
 		// Recursively parse "powershell -Command '...'" / "pwsh -c '...'".
 		// Separate from shellInterpreters because inner code is PowerShell, not POSIX sh.
-		if powershellInterpreters[cmdName] && depth < maxShellRecursionDepth {
+		if powershellInterpreters[cmdBaseName] && depth < maxShellRecursionDepth {
 			// Check -Command / -c (case-insensitive — PowerShell flags are case-insensitive)
 			innerCmd := extractFlagRestCaseInsensitive(args, "-Command")
 			if innerCmd == "" {
@@ -1798,7 +1801,7 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		// regardless of the command DB operation. "python3 -c 'open(.env)'" is
 		// primarily a file read — file-protection rules (actions:[read]) must fire.
 		// forceOperation keeps OpExecute in Operations so execute rules also fire.
-		if flag, ok := interpreterCodeFlags[cmdName]; ok {
+		if flag, ok := interpreterCodeFlags[cmdBaseName]; ok {
 			if code := extractFlagValue(args, flag); code != "" {
 				paths := extractPathsFromInterpreterCode(code)
 				if len(paths) > 0 {

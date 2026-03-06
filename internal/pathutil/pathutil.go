@@ -11,10 +11,12 @@
 //     case-insensitive) and HFS+. Returns the volume's actual setting, not a
 //     guess. Constant _PC_CASE_SENSITIVE = 11 (not exported by x/sys/unix).
 //
-//   - Windows: GetVolumeInformation — reads FILE_CASE_SENSITIVE_SEARCH from
-//     the volume flags. NTFS is case-insensitive by default. Windows 10+
-//     supports per-directory case sensitivity, but the volume-level flag
-//     reflects the default behavior.
+//   - Windows: two-phase detection. (1) GetVolumeInformation reads
+//     FILE_CASE_SENSITIVE_SEARCH from the volume flags — if unset, definitely
+//     case-insensitive. (2) If set, a runtime file-probe confirms the actual
+//     per-directory behavior, since Windows 10+ NTFS supports per-directory
+//     case sensitivity (enabled by WSL2/fsutil) that may differ from the
+//     volume-level flag.
 //
 //   - Linux: statfs(path) — compares f_type against a list of known
 //     case-insensitive filesystem magic numbers: vfat/FAT32, exFAT, CIFS,
@@ -184,6 +186,37 @@ func HasPathPrefix(p, dir string) bool {
 		return strings.HasPrefix(p, dir+`\`)
 	}
 	return false
+}
+
+// ExpandMSYS2Path converts an MSYS2/Git Bash mount-point path to a Windows
+// drive-letter path. On MSYS2, Windows drives are mounted as single-letter
+// directories under the root: /c/ → C:/, /d/ → D:/, etc.
+//
+// Only paths of the form /X or /X/... (where X is a single ASCII letter)
+// are converted. All other paths are returned unchanged.
+//
+// Examples:
+//
+//	"/c/Users/user/.env"  → "C:/Users/user/.env"
+//	"/d/"                 → "D:/"
+//	"/c"                  → "C:/"
+//	"/etc/passwd"         → "/etc/passwd"  (unchanged — 'e' followed by 't', not '/')
+func ExpandMSYS2Path(s string) string {
+	// Must start with /X where X is a single drive letter
+	if len(s) < 2 || s[0] != '/' || !IsDriverLetter(s[1]) {
+		return s
+	}
+	// Third char must be '/' or the string must end (bare /c)
+	if len(s) > 2 && s[2] != '/' {
+		return s
+	}
+	drive := strings.ToUpper(string(s[1]))
+	if len(s) == 2 {
+		// bare /c → C:/
+		return drive + ":/"
+	}
+	// /c/Users/... → C:/Users/...
+	return drive + ":" + s[2:]
 }
 
 // IsUNCPath reports whether s is a UNC path: \\server (Windows) or //server

@@ -3,6 +3,7 @@ package pathutil
 import (
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -307,6 +308,34 @@ func TestCleanPath_PathTraversalSequences(t *testing.T) {
 	}
 }
 
+func TestExpandMSYS2Path(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		// Converted: single drive letter followed by / or end-of-string
+		{"/c/Users/user/.env", "C:/Users/user/.env"},
+		{"/d/Projects/foo", "D:/Projects/foo"},
+		{"/c/", "C:/"},
+		{"/c", "C:/"},
+		{"/z/deep/path/file.txt", "Z:/deep/path/file.txt"},
+		// Unchanged: multi-char segment after /
+		{"/etc/passwd", "/etc/passwd"},
+		{"/usr/bin/bash", "/usr/bin/bash"},
+		// Unchanged: UNC paths
+		{"//server/share", "//server/share"},
+		// Unchanged: already Windows paths
+		{"C:/Users/foo", "C:/Users/foo"},
+		// Unchanged: empty or non-slash start
+		{"", ""},
+		{"relative/path", "relative/path"},
+	}
+	for _, tc := range cases {
+		if got := ExpandMSYS2Path(tc.in); got != tc.want {
+			t.Errorf("ExpandMSYS2Path(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestIsWindowsAbsPath(t *testing.T) {
 	cases := []struct {
 		s    string
@@ -359,4 +388,61 @@ func TestIsDriverLetter_AllLetters(t *testing.T) {
 			t.Errorf("IsDriverLetter(%q) = %v, want %v", c, IsDriverLetter(c), isLetter)
 		}
 	}
+}
+
+func FuzzExpandMSYS2Path(f *testing.F) {
+	// Drive-letter mount paths
+	f.Add("/c/Users/user/.env")
+	f.Add("/d/Projects/secret.txt")
+	f.Add("/z/deep/path/file")
+	f.Add("/c")
+	f.Add("/c/")
+	// Paths that must NOT convert
+	f.Add("/etc/passwd")
+	f.Add("/usr/bin/bash")
+	f.Add("//server/share") // UNC — not a single-letter mount
+	f.Add("C:/already/windows")
+	f.Add("")
+	f.Add("relative/path")
+	f.Add("/")
+
+	f.Fuzz(func(t *testing.T, s string) {
+		result := ExpandMSYS2Path(s)
+
+		// 1. Idempotency: applying twice must equal applying once.
+		if ExpandMSYS2Path(result) != result {
+			t.Errorf("not idempotent: ExpandMSYS2Path(%q) = %q, then ExpandMSYS2Path(%q) = %q",
+				s, result, result, ExpandMSYS2Path(result))
+		}
+
+		// 2. If input is a single-letter mount (/X or /X/...), result must be X:/ form.
+		if len(s) >= 2 && s[0] == '/' && IsDriverLetter(s[1]) &&
+			(len(s) == 2 || s[2] == '/') {
+			if !IsDrivePath(result) {
+				t.Errorf("single-letter mount %q not converted to drive path, got %q", s, result)
+			}
+		}
+
+		// 3. Multi-char first segment must never be converted.
+		// e.g. /etc/passwd: s[0]='/', s[1]='e', s[2]='t' — third char is not '/'.
+		if len(s) >= 3 && s[0] == '/' && IsDriverLetter(s[1]) && s[2] != '/' {
+			if result != s {
+				t.Errorf("multi-char segment %q must be unchanged, got %q", s, result)
+			}
+		}
+
+		// 4. A converted path (starts with X:/) must not be altered again.
+		if IsDrivePath(result) && len(result) >= 3 && result[2] == '/' {
+			if ExpandMSYS2Path(result) != result {
+				t.Errorf("converted path %q is not stable under re-application", result)
+			}
+		}
+
+		// 5. Result must never contain the original /X/ prefix once converted.
+		if IsDrivePath(result) && strings.HasPrefix(s, "/") {
+			if len(result) >= 3 && result[0] == '/' {
+				t.Errorf("result %q still starts with '/' after conversion of %q", result, s)
+			}
+		}
+	})
 }

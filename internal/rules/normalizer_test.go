@@ -366,9 +366,16 @@ func TestNormalizer_EnvVarEdgeCases(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "single char var",
-			input:    "$A/foo",
-			expected: "/a/foo",
+			name:  "single char var",
+			input: "$A/foo",
+			// On MSYS2, /a/ is the mount point for drive A: → A:/foo.
+			// Case folding depends on DefaultFS (NTFS may be case-sensitive per-directory).
+			expected: func() string {
+				if ShellEnvironment() == EnvMSYS2 {
+					return pathutil.DefaultFS().Lower("A:/foo")
+				}
+				return "/a/foo"
+			}(),
 		},
 		{
 			name:     "var with numbers",
@@ -406,9 +413,16 @@ func TestNormalizer_EnvVarEdgeCases(t *testing.T) {
 			expected: "/foo", // empty var results in /foo which is absolute
 		},
 		{
-			name:     "adjacent vars",
-			input:    "$A$AB",
-			expected: "/a/ab",
+			name:  "adjacent vars",
+			input: "$A$AB",
+			// On MSYS2, /a/ is the mount point for drive A: → A:/ab.
+			// Case folding depends on DefaultFS (NTFS may be case-sensitive per-directory).
+			expected: func() string {
+				if ShellEnvironment() == EnvMSYS2 {
+					return pathutil.DefaultFS().Lower("A:/ab")
+				}
+				return "/a/ab"
+			}(),
 		},
 		{
 			name:  "braced var allows adjacent text",

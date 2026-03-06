@@ -136,6 +136,12 @@ func (n *Normalizer) Normalize(path string) string {
 	// Step 4: Convert relative paths to absolute
 	path = n.makeAbsolute(path)
 
+	// Step 4.1: On MSYS2/Git Bash, Windows drives are mounted as /c/, /d/, etc.
+	// Convert /c/Users/... → C:/Users/... so rules with Windows-style patterns match.
+	if ShellEnvironment() == EnvMSYS2 {
+		path = pathutil.ExpandMSYS2Path(path)
+	}
+
 	// SECURITY: Strip NTFS Alternate Data Stream suffixes — on Windows,
 	// "file.txt::$DATA" accesses the same content as "file.txt" but bypasses
 	// glob pattern matching. Strip ":streamname" and "::$DATA" etc.
