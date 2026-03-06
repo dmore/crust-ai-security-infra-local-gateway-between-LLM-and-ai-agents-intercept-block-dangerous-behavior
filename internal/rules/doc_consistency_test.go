@@ -8,6 +8,7 @@ package rules
 // and tell you exactly which doc files to update.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -177,6 +178,64 @@ var requiredCLICommands = []string{
 func TestDocConsistency_CLICommands(t *testing.T) {
 	for _, cmd := range requiredCLICommands {
 		docContains(t, "docs/cli.md", cmd)
+	}
+}
+
+// ── Fuzz targets ─────────────────────────────────────────────────────────────
+
+func TestDocConsistency_FuzzTargetCount(t *testing.T) {
+	root := repoRoot(t)
+	count := 0
+	err := filepath.Walk(filepath.Join(root, "internal"), func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		count += strings.Count(string(data), "\nfunc Fuzz")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking internal/: %v", err)
+	}
+
+	// README badge: "Fuzz%20Tested-NN%20targets"
+	readme := readDoc(t, "README.md")
+	badge := fmt.Sprintf("Fuzz%%20Tested-%d%%20targets", count)
+	if !strings.Contains(readme, badge) {
+		t.Errorf("README.md fuzz badge does not match source code\n"+
+			"  actual fuzz targets: %d\n"+
+			"  → Update the Fuzz Tested badge in README.md", count)
+	}
+}
+
+// ── CVE tracker ──────────────────────────────────────────────────────────────
+
+func TestDocConsistency_CVETrackerCount(t *testing.T) {
+	tracker := readDoc(t, "docs/cve-tracker.md")
+	readme := readDoc(t, "README.md")
+
+	// Extract total from tracker: | **Total** | **NN** |
+	totalIdx := strings.Index(tracker, "| **Total**")
+	if totalIdx < 0 {
+		t.Fatal("cve-tracker.md missing Total row")
+	}
+	line := tracker[totalIdx : totalIdx+60]
+	// Extract number between ** **
+	parts := strings.Split(line, "**")
+	if len(parts) < 4 {
+		t.Fatal("cannot parse Total row in cve-tracker.md")
+	}
+	trackerTotal := strings.TrimSpace(parts[3])
+
+	// README should reference the same count
+	expected := trackerTotal + " real-world CVEs"
+	if !strings.Contains(readme, expected) {
+		t.Errorf("README.md CVE count does not match cve-tracker.md\n"+
+			"  tracker total: %s\n"+
+			"  → Update README.md to say \"%s\"", trackerTotal, expected)
 	}
 }
 

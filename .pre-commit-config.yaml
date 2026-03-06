@@ -127,7 +127,7 @@ repos:
         entry: bash -c 'go test ./internal/rules/ -run=TestDocConsistency -short'
         language: system
         pass_filenames: false
-        files: (internal/rules/builtin/security\.yaml|internal/rules/.*\.go|README\.md|docs/cli\.md)$
+        files: (internal/rules/builtin/security\.yaml|internal/rules/.*\.go|README\.md|docs/cli\.md|docs/cve-tracker\.md|internal/.*fuzz.*\.go)$
 
   # Go unit tests
   - repo: local
