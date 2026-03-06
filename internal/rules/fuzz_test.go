@@ -2051,7 +2051,10 @@ func FuzzPipeBypass(f *testing.F) {
 			return true
 		}
 		// Match **/.env and **/.env.* but not .envrc, .env0, etc.
-		if strings.HasSuffix(p, "/.env") || (strings.Contains(p, "/.env.") && !strings.HasSuffix(p, ".example")) {
+		// The glob **/.env.* does NOT cross directory boundaries, so
+		// /.env./subdir is NOT a match — .env. must be in the basename.
+		base := path.Base(p)
+		if base == ".env" || (strings.HasPrefix(base, ".env.") && base != ".env.example") {
 			return true
 		}
 		if p == criticalEnvPrefix {
