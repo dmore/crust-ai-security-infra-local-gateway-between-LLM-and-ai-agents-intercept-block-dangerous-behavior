@@ -286,6 +286,26 @@ jobs:
           docker logs crust-ci
           exit 1
 
+      - name: DLP block test – Bash tool_use reading /etc/passwd must return 403
+        run: |
+          BODY='{"model":"claude-3-5-sonnet-20241022","max_tokens":1,"messages":[{"role":"user","content":"read it"},{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cat /etc/passwd"}}]}]}'
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST http://localhost:9090/v1/messages \
+            -H "Content-Type: application/json" \
+            -d "$BODY")
+          echo "DLP block status: $STATUS"
+          [ "$STATUS" = "403" ] || { echo "Expected 403, got $STATUS"; docker logs crust-ci; exit 1; }
+
+      - name: Benign request must not be blocked (expect 502, not 403)
+        run: |
+          BODY='{"model":"claude-3-5-sonnet-20241022","max_tokens":1,"messages":[{"role":"user","content":"hello"}]}'
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST http://localhost:9090/v1/messages \
+            -H "Content-Type: application/json" \
+            -d "$BODY")
+          echo "Benign request status: $STATUS"
+          [ "$STATUS" = "403" ] && { echo "Benign request incorrectly blocked (403)"; docker logs crust-ci; exit 1; } || true
+
       - name: Graceful shutdown
         run: |
           docker stop --time 5 crust-ci

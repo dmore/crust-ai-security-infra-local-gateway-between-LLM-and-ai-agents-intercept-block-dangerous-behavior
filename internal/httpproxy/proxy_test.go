@@ -21,6 +21,7 @@ import (
 	"github.com/BakeLens/crust/internal/rules"
 	"github.com/BakeLens/crust/internal/security"
 	"github.com/BakeLens/crust/internal/telemetry"
+	"github.com/BakeLens/crust/internal/testutil"
 	"github.com/BakeLens/crust/internal/types"
 )
 
@@ -1307,14 +1308,18 @@ func TestBufferedSSEWriter_OverflowFailsClosed(t *testing.T) {
 	}
 }
 
-// TestRetryAsNonStreaming_RespectsClientContext verifies that retryAsNonStreaming
-// uses the original request context, so a canceled client context cancels the
-// retry (preventing it from blocking after client disconnect).
-func TestRetryAsNonStreaming_RespectsClientContext(t *testing.T) {
-	// Upstream server that hangs until its context is canceled.
+// TestRetryAsNonStreaming_IndependentOfClientContext verifies that retryAsNonStreaming
+// uses a detached context and completes the security evaluation even when the
+// original client request context is canceled (e.g. client disconnected).
+// A canceled client context must NOT abort the retry — the response must still
+// be inspected for security violations regardless of the client's connection state.
+func TestRetryAsNonStreaming_IndependentOfClientContext(t *testing.T) {
+	testutil.FailOnLogError(t)
+	// Upstream returns a valid non-streaming response immediately.
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done() // block until the request context is canceled
-		http.Error(w, "canceled", http.StatusGatewayTimeout)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hello"}],"model":"claude-3","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}`))
 	}))
 	defer upstream.Close()
 
@@ -1324,10 +1329,13 @@ func TestRetryAsNonStreaming_RespectsClientContext(t *testing.T) {
 	}
 
 	clientCtx, cancelClient := context.WithCancel(context.Background())
+	cancelClient() // cancel immediately — simulates client disconnect before retry
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"stream":true}`))
 	req = req.WithContext(clientCtx)
 	req.Header.Set("Content-Type", "application/json")
+	// UpstreamReq uses the already-canceled client context; retryAsNonStreaming
+	// must clone it with a fresh context, not inherit the canceled one.
 	upstreamReq, err := http.NewRequestWithContext(clientCtx, http.MethodPost, upstream.URL+"/v1/messages",
 		strings.NewReader(`{"stream":false}`))
 	if err != nil {
@@ -1342,24 +1350,19 @@ func TestRetryAsNonStreaming_RespectsClientContext(t *testing.T) {
 		APIType:     types.APITypeAnthropic,
 	}
 
-	// Cancel the client context immediately — retryAsNonStreaming must not block.
-	cancelClient()
-
-	start := time.Now()
 	_, _, _, _, statusCode := proxy.retryAsNonStreaming(rctx)
-	elapsed := time.Since(start)
 
-	if elapsed > 5*time.Second {
-		t.Errorf("retryAsNonStreaming blocked for %v after client context canceled (want <5s)", elapsed)
-	}
-	if statusCode == http.StatusOK {
-		t.Error("expected non-200 status when client context is canceled, got 200")
+	// Retry must succeed despite canceled client context — security evaluation
+	// must complete regardless of client connection state.
+	if statusCode != http.StatusOK {
+		t.Errorf("retryAsNonStreaming returned %d, want 200: retry must be independent of client context", statusCode)
 	}
 }
 
 // TestRetryAsNonStreaming_ErrorStatusCodes verifies that retryAsNonStreaming
 // propagates non-2xx upstream status codes (e.g. 429, 500) to the caller.
 func TestRetryAsNonStreaming_ErrorStatusCodes(t *testing.T) {
+	testutil.FailOnLogError(t)
 	tests := []struct {
 		name           string
 		upstreamStatus int

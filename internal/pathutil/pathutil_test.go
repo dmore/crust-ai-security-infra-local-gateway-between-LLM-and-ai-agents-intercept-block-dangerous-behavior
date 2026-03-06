@@ -268,6 +268,41 @@ func TestDetectFS_NonexistentPath(t *testing.T) {
 	// Should not panic — that's the main assertion (implicit)
 }
 
+func TestIsUNCPath(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		// Valid UNC paths — must have a server component after the double prefix
+		{`\\server\share`, true},
+		{`\\server`, true},
+		{`\\s`, true},
+		{"//server/share", true},
+		{"//server", true},
+		{"//s", true},
+
+		// Invalid — bare double-prefix with no server name
+		{`\\`, false},
+		{`\\\\`, false}, // more slashes, still no server name char
+		{"//", false},
+		{"////", false},
+
+		// Non-UNC paths
+		{"", false},
+		{"/", false},
+		{`\`, false},
+		{"C:/Users", false},
+		{"/etc/passwd", false},
+		{"/c/Users", false}, // MSYS2 drive mount — not UNC
+	}
+	for _, tt := range tests {
+		got := IsUNCPath(tt.in)
+		if got != tt.want {
+			t.Errorf("IsUNCPath(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestDefaultFS(t *testing.T) {
 	// Verify DefaultFS is safe to call and returns consistent results (sync.OnceValue)
 	fs1 := DefaultFS()
@@ -342,6 +377,7 @@ func TestIsWindowsAbsPath(t *testing.T) {
 		{`c:\lower`, true},
 		{"\\\\server\\share", true}, // UNC backslash
 		{`//server/share`, true},    // UNC forward-slash (MSYS2)
+		{"//server", true},          // UNC with server only
 		{`/etc/passwd`, false},
 		{`relative/path`, false},
 		{`-flag`, false},
@@ -353,8 +389,8 @@ func TestIsWindowsAbsPath(t *testing.T) {
 		{`C:relative`, false}, // drive-relative, not absolute
 		{"C: /path", false},   // space at [2], not a slash
 		{"\x80:\\foo", false}, // non-ASCII first byte
-		{`\\`, true},          // bare UNC backslash prefix
-		{`//`, true},          // bare UNC forward-slash prefix
+		{`\\`, false},         // bare prefix, no server name — not a valid UNC path
+		{`//`, false},         // bare prefix, no server name — not a valid UNC path
 	}
 	for _, tc := range cases {
 		if got := IsWindowsAbsPath(tc.s); got != tc.want {

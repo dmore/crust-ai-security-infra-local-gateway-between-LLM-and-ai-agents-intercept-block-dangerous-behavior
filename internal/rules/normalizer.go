@@ -292,6 +292,11 @@ func (n *Normalizer) NormalizePattern(pattern string) string {
 	pattern = norm.NFKC.String(pattern)
 	pattern = stripInvisible(pattern)
 	pattern = stripConfusables(pattern)
+	// SECURITY: Re-normalize after confusable replacement — same reason as in
+	// Normalize(): replacing a non-Latin base char (e.g., Greek τ → t) can
+	// create new NFKC composition pairs with existing combining marks, causing
+	// a pattern/path mismatch that would silently bypass rule matching.
+	pattern = norm.NFKC.String(pattern)
 	pattern = n.expandTilde(pattern)
 	pattern = n.expandEnvVars(pattern)
 	// SECURITY: Lowercase patterns on case-insensitive filesystems to match

@@ -117,6 +117,7 @@ type CompiledRule struct {
 type EngineConfig struct {
 	UserRulesDir        string
 	DisableBuiltin      bool
+	DisableDLP          bool // Skip gitleaks-based DLP scanning (useful in fuzz/unit tests)
 	SubprocessIsolation bool // Isolate shell interpreter in a subprocess for crash safety
 
 	// PreChecker is called before the evaluation pipeline (e.g., self-protection).
@@ -171,7 +172,7 @@ func NewEngineWithNormalizer(cfg EngineConfig, normalizer *Normalizer) (*Engine,
 		normalizer: normalizer,
 		loader:     loader,
 		preFilter:  NewPreFilter(),
-		dlpScanner: NewDLPScanner(),
+		dlpScanner: newDLPScanner(cfg.DisableDLP),
 		config:     cfg,
 		preChecker: cfg.PreChecker,
 		hitCounts:  make(map[string]*int64),

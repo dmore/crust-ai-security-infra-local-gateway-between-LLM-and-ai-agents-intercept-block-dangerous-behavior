@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 )
 
 //go:embed ps_bootstrap_header.ps1
@@ -132,9 +133,13 @@ func (w *Worker) start() error {
 	return nil
 }
 
+// parseTimeout is the maximum time to wait for a single Parse response.
+// pwsh startup + JIT can be slow; 30 s is generous but prevents infinite hangs.
+const parseTimeout = 30 * time.Second
+
 // Parse sends a command to the pwsh worker and returns the parsed result.
-// Returns an error if the worker died or the response was malformed; the
-// worker is automatically restarted on the next call.
+// Returns an error if the worker died, timed out, or the response was malformed;
+// the worker is automatically restarted on the next call.
 func (w *Worker) Parse(cmd string) (Response, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -145,23 +150,60 @@ func (w *Worker) Parse(cmd string) (Response, error) {
 		}
 	}
 
-	if err := w.encoder.Encode(pwshWorkerRequest{Command: cmd}); err != nil {
-		w.kill()
-		return Response{}, err
-	}
+	// Start the timer before Encode so the timeout covers both the write
+	// (stdin pipe could block if pwsh is dead but pipe not yet detected)
+	// and the subsequent scan.
+	timer := time.NewTimer(parseTimeout)
+	defer timer.Stop()
 
-	if !w.scanner.Scan() {
-		w.kill()
-		return Response{}, errors.New("pwsh worker: unexpected EOF")
+	// Encode and scan both run in a goroutine so the timer can fire even if
+	// Encode() blocks. Capturing scanner as a local avoids a data race when
+	// w.kill() clears w.scanner on timeout.
+	type scanResult struct {
+		line []byte
+		err  error
 	}
+	ch := make(chan scanResult, 1)
+	encoder := w.encoder
+	scanner := w.scanner
+	go func() {
+		if err := encoder.Encode(pwshWorkerRequest{Command: cmd}); err != nil {
+			ch <- scanResult{err: err}
+			return
+		}
+		if scanner.Scan() {
+			ch <- scanResult{line: append([]byte(nil), scanner.Bytes()...)}
+		} else {
+			err := scanner.Err()
+			if err == nil {
+				err = errors.New("pwsh worker: unexpected EOF")
+			}
+			ch <- scanResult{err: err}
+		}
+	}()
 
-	var resp Response
-	if err := json.Unmarshal(w.scanner.Bytes(), &resp); err != nil {
+	select {
+	case <-timer.C:
+		// If the response arrived at the same instant the timer fired, Go's
+		// select picks one case randomly — we may discard a valid response here.
+		// This race window is ~nanoseconds vs. a 30 s timer, so acceptable.
+		// Kill the process — closes stdout, unblocking scanner.Scan() in the
+		// goroutine above so it exits cleanly via the buffered ch.
 		w.kill()
-		return Response{}, err
+		// w.proc is now nil; the next Parse() call will restart the worker.
+		return Response{}, errors.New("pwsh worker: parse timed out")
+	case res := <-ch:
+		if res.err != nil {
+			w.kill()
+			return Response{}, res.err
+		}
+		var resp Response
+		if err := json.Unmarshal(res.line, &resp); err != nil {
+			w.kill()
+			return Response{}, err
+		}
+		return resp, nil
 	}
-
-	return resp, nil
 }
 
 func (w *Worker) kill() {

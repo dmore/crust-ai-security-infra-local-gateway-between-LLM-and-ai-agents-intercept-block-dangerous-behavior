@@ -2,9 +2,11 @@ package rules
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/BakeLens/crust/internal/pathutil"
+	"golang.org/x/text/unicode/norm"
 )
 
 func TestNormalizer_Normalize(t *testing.T) {
@@ -494,5 +496,37 @@ func TestMSYS2_NormalizerEndToEnd(t *testing.T) {
 				t.Errorf("Normalize(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestNormalizePattern_ConfusableNFKC is a regression test for the missing
+// second NFKC pass in NormalizePattern after stripConfusables.
+// A confusable replacement (e.g. Greek ρ → p) can leave a base character
+// adjacent to combining marks that NFKC must compose. Without the second pass,
+// the pattern contains p+\u0301 while Normalize() composes them into ṕ,
+// causing a pattern/path mismatch that silently bypasses rule matching.
+func TestNormalizePattern_ConfusableNFKC(t *testing.T) {
+	n := NewNormalizerWithEnv("/home/user", "/home/user/project", nil)
+
+	// Greek ρ (U+03C1) maps to 'p' in confusableMap.
+	// Combining acute accent U+0301 follows it.
+	// stripConfusables: ρ → p, leaving p + U+0301 (undecomposed).
+	// Second NFKC: composes p + U+0301 → ṕ (U+1E55).
+	// Without the second pass, NormalizePattern leaves p\u0301 while
+	// Normalize produces ṕ — mismatch causes the rule to miss the path.
+	input := "/etc/\u03C1\u0301asswd" // /etc/ρ + combining-acute + asswd
+
+	normalized := n.Normalize(input)
+	pattern := n.NormalizePattern(input)
+
+	if normalized != pattern {
+		t.Errorf("Normalize and NormalizePattern diverge after confusable+combining:\n  Normalize        = %q\n  NormalizePattern = %q", normalized, pattern)
+	}
+
+	// Both must contain the NFKC-composed form, not the decomposed p+\u0301.
+	composed := norm.NFKC.String("p\u0301") // ṕ (U+1E55)
+	decomposed := "p\u0301"
+	if strings.Contains(normalized, decomposed) && !strings.Contains(normalized, composed) {
+		t.Errorf("result contains decomposed p+\\u0301 instead of composed ṕ: %q", normalized)
 	}
 }

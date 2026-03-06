@@ -769,7 +769,12 @@ func (p *Proxy) retryAsNonStreaming(ctx *RequestContext) (responseBody json.RawM
 	log.Warn("[BUFFERED] Retrying as non-streaming for full security evaluation")
 
 	nonStreamBody := forceNonStreaming(ctx.RequestBody)
-	retryReq := ctx.UpstreamReq.Clone(ctx.Request.Context())
+	// Use a detached context so the retry is not canceled if the client
+	// disconnects mid-stream. The retry must complete for security evaluation
+	// regardless of the original request's lifecycle.
+	retryCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	retryReq := ctx.UpstreamReq.Clone(retryCtx)
 	retryReq.Body = io.NopCloser(bytes.NewReader(nonStreamBody))
 	retryReq.ContentLength = int64(len(nonStreamBody))
 	retryReq.Header.Del("Content-Encoding") // body is now uncompressed JSON

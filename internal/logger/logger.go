@@ -27,6 +27,32 @@ var (
 	globalMu      sync.RWMutex
 )
 
+// errorHooks holds registered error hooks keyed by an auto-incrementing ID.
+// Multiple hooks can be active simultaneously (e.g. parallel tests). Each hook
+// is removed via the cleanup function returned by AddErrorHook.
+var (
+	errorHooksMu sync.RWMutex
+	errorHooks   = map[uint64]func(string){}
+	errorHookSeq uint64
+)
+
+// AddErrorHook registers fn to be called synchronously on every Error() call
+// with the fully-formatted "[prefix] message" string. Returns a cleanup
+// function that removes the hook — call it via t.Cleanup to avoid leaks.
+// Safe for concurrent use; multiple hooks from parallel tests are all fired.
+func AddErrorHook(fn func(msg string)) func() {
+	errorHooksMu.Lock()
+	errorHookSeq++
+	id := errorHookSeq
+	errorHooks[id] = fn
+	errorHooksMu.Unlock()
+	return func() {
+		errorHooksMu.Lock()
+		delete(errorHooks, id)
+		errorHooksMu.Unlock()
+	}
+}
+
 var (
 	styleTrace = lipgloss.NewStyle().Foreground(lipgloss.Color("#E8C872")) // warm gold
 	styleDebug = lipgloss.NewStyle().Foreground(lipgloss.Color("#F0C674")) // gold
@@ -126,7 +152,19 @@ func (l *Logger) Warn(format string, args ...any) {
 	l.log(LevelWarn, "WARN", styleWarn, format, args...)
 }
 
-// Error logs an error message
+// Error logs an error message and fires all registered error hooks.
 func (l *Logger) Error(format string, args ...any) {
 	l.log(LevelError, "ERROR", styleError, format, args...)
+	errorHooksMu.RLock()
+	hooks := make([]func(string), 0, len(errorHooks))
+	for _, fn := range errorHooks {
+		hooks = append(hooks, fn)
+	}
+	errorHooksMu.RUnlock()
+	if len(hooks) > 0 {
+		msg := fmt.Sprintf("[%s] "+format, append([]any{l.prefix}, args...)...)
+		for _, fn := range hooks {
+			fn(msg)
+		}
+	}
 }

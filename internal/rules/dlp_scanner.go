@@ -29,6 +29,14 @@ type DLPFinding struct {
 	StartLine   int    `json:"StartLine"`
 }
 
+// newDLPScanner creates a scanner, optionally disabled (e.g., for fuzz/unit tests).
+func newDLPScanner(disabled bool) *DLPScanner {
+	if disabled {
+		return &DLPScanner{timeout: 5 * time.Second}
+	}
+	return NewDLPScanner()
+}
+
 // NewDLPScanner creates a scanner. Returns a disabled scanner if gitleaks is not in PATH.
 func NewDLPScanner() *DLPScanner {
 	s := &DLPScanner{
@@ -86,6 +94,11 @@ func (s *DLPScanner) runGitleaks(ctx context.Context, content string, args ...st
 	cmdArgs = append(cmdArgs, args...)
 	cmdArgs = append(cmdArgs, "--report-format", "json", "--no-banner", "--exit-code", "0")
 	cmd := exec.CommandContext(ctx, s.binaryPath, cmdArgs...) //nolint:gosec // binaryPath is resolved via exec.LookPath at init
+	// WaitDelay forces stdin/stdout goroutines to stop 1s after context cancels.
+	// Without this, a timed-out or killed gitleaks process leaves pipe goroutines
+	// blocked indefinitely — particularly on Windows where killing a process does
+	// not automatically close its pipe handles.
+	cmd.WaitDelay = 1 * time.Second
 	cmd.Stdin = strings.NewReader(content)
 
 	var stdout, stderr bytes.Buffer

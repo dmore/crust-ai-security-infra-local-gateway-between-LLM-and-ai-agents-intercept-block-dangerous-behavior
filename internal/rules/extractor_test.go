@@ -4645,3 +4645,71 @@ func TestMSYS2_PathExtractionEndToEnd(t *testing.T) {
 		})
 	}
 }
+
+// TestInvokeExpression_CommandRecursion is a regression test for the bug where
+// "Invoke-Expression -Command <code>" put -Command in SkipFlags, causing the
+// inner PowerShell code string to be silently dropped with no path extraction.
+func TestInvokeExpression_CommandRecursion(t *testing.T) {
+	ext := NewExtractor()
+	tests := []struct {
+		command     string
+		wantPath    string
+		windowsOnly bool
+	}{
+		// Positional form — most common idiom
+		{`Invoke-Expression "Get-Content /etc/passwd"`, "/etc/passwd", false},
+		// Windows drive path: normalizer only recognizes C:/ as absolute on Windows.
+		{`iex "Get-Content C:/Users/user/.env"`, "c:/users/user/.env", true},
+		// -Command flag form — previously dropped by SkipFlags
+		{`Invoke-Expression -Command "Get-Content /etc/passwd"`, "/etc/passwd", false},
+		{`iex -Command "cat /etc/ssh/ssh_host_rsa_key"`, "/etc/ssh/ssh_host_rsa_key", false},
+		// Nested: iex wrapping another sensitive read
+		{`Invoke-Expression "cat /home/user/.aws/credentials"`, "/home/user/.aws/credentials", false},
+	}
+	n := NewNormalizerWithEnv("/home/user", "/home/user/project", nil)
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			if tt.windowsOnly && runtime.GOOS != "windows" {
+				t.Skip("Windows path normalisation only applies on Windows")
+			}
+			args, _ := json.Marshal(map[string]string{"command": tt.command})
+			info := ext.Extract("Bash", json.RawMessage(args))
+			normalized := n.NormalizeAll(info.Paths)
+			if !slices.Contains(normalized, tt.wantPath) {
+				t.Errorf("Extract(%q).Paths (normalized) = %v, want %q", tt.command, normalized, tt.wantPath)
+			}
+		})
+	}
+}
+
+// TestXargs_PathExtraction is a regression test for the bug where removing
+// PathArgIndex from the xargs DB entry caused paths passed to an unknown
+// wrapped command to be silently dropped.
+func TestXargs_PathExtraction(t *testing.T) {
+	ext := NewExtractor()
+	tests := []struct {
+		command  string
+		wantPath string
+	}{
+		// -a / --arg-file flag (always worked)
+		{"xargs -a /etc/paths cat", "/etc/paths"},
+		{"xargs --arg-file /etc/paths cat", "/etc/paths"},
+		// Paths passed to unknown wrapped command (regression: previously extracted, then dropped)
+		{"xargs unknownTool /etc/passwd", "/etc/passwd"},
+		{"xargs unknownTool /etc/passwd /etc/shadow", "/etc/passwd"},
+		// Known command via pipe detection still works
+		{"xargs cat", ""}, // no echo/printf piped — no paths; just verify no panic
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"command": tt.command})
+			info := ext.Extract("Bash", json.RawMessage(args))
+			if tt.wantPath == "" {
+				return // just verify no panic
+			}
+			if !slices.Contains(info.Paths, tt.wantPath) {
+				t.Errorf("Extract(%q).Paths = %v, want %q", tt.command, info.Paths, tt.wantPath)
+			}
+		})
+	}
+}

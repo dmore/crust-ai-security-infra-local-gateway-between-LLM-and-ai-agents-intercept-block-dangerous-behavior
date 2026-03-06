@@ -1010,9 +1010,9 @@ func TestPSWorker_PipelineInput(t *testing.T) {
 	}
 }
 
-// TestPSWorker_IEX_OpExecuteOnly documents that Invoke-Expression is detected
-// as OpExecute but the inner command is not recursively analyzed — a
-// [GAP-PARTIAL] bypass when the inner command is a read/write operation.
+// TestPSWorker_IEX_OpExecuteOnly verifies Invoke-Expression behavior:
+//   - Literal-string IEX is recursively analyzed (inner command paths extracted)
+//   - Variable-built IEX string remains a [GAP-PARTIAL] — inner paths not extracted
 func TestPSWorker_IEX_OpExecuteOnly(t *testing.T) {
 	pwshPath, ok := FindPwsh()
 	if !ok {
@@ -1025,47 +1025,31 @@ func TestPSWorker_IEX_OpExecuteOnly(t *testing.T) {
 	}
 	defer ext.Close()
 
-	tests := []struct {
-		name         string
-		cmd          string
-		wantOp       Operation
-		wantNotPaths []string // paths that should NOT be extracted (gap)
-	}{
-		{
-			name:         "IEX with Get-Content inner command",
-			cmd:          `Invoke-Expression "Get-Content /etc/passwd"`,
-			wantOp:       OpExecute,
-			wantNotPaths: []string{"/etc/passwd"},
-		},
-		{
-			// IEX with variable-built string: the inner command is not recursively
-			// analyzed regardless of how the IEX arg is constructed.
-			name:         "IEX with computed inner command",
-			cmd:          `$c = "Get-Content /etc/passwd"; Invoke-Expression $c`,
-			wantOp:       OpExecute,
-			wantNotPaths: []string{"/etc/passwd"},
-		},
-	}
+	t.Run("IEX with literal string is recursively analyzed", func(t *testing.T) {
+		cmd := `Invoke-Expression "Get-Content /etc/passwd"`
+		args, _ := json.Marshal(map[string]string{"command": cmd})
+		info := ext.Extract("Bash", json.RawMessage(args))
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			args, _ := json.Marshal(map[string]string{"command": tt.cmd})
-			info := ext.Extract("Bash", json.RawMessage(args))
+		if info.Operation != OpRead {
+			t.Errorf("Operation=%v, want %v", info.Operation, OpRead)
+		}
+		if !slices.Contains(info.Paths, "/etc/passwd") {
+			t.Errorf("Paths=%v, want /etc/passwd to be extracted by recursive IEX analysis", info.Paths)
+		}
+	})
 
-			if info.Operation != tt.wantOp {
-				t.Errorf("Operation=%v, want %v", info.Operation, tt.wantOp)
-			}
-			// [GAP-PARTIAL]: inner Get-Content /etc/passwd is not recursively
-			// analyzed — /etc/passwd should NOT appear as a semantically-extracted
-			// file path (it may appear as a raw string arg to Invoke-Expression,
-			// but not as a resolved read target).
-			for _, path := range tt.wantNotPaths {
-				if slices.Contains(info.Paths, path) {
-					t.Logf("note: %q found in Paths — IEX gap may be fixed, update test", path)
-				}
-			}
-		})
-	}
+	t.Run("IEX with variable-built string extracts inner paths", func(t *testing.T) {
+		// Previously a [GAP-PARTIAL]: variable-built IEX strings were not analyzed.
+		// The PowerShell worker resolves $c to its assigned value, so the inner
+		// Get-Content path is now extracted.
+		cmd := `$c = "Get-Content /etc/passwd"; Invoke-Expression $c`
+		args, _ := json.Marshal(map[string]string{"command": cmd})
+		info := ext.Extract("Bash", json.RawMessage(args))
+
+		if !slices.Contains(info.Paths, "/etc/passwd") {
+			t.Errorf("Paths=%v, want /etc/passwd extracted via variable IEX analysis", info.Paths)
+		}
+	})
 }
 
 // TestPSWorker_LoopBody_Detected verifies that commands inside ForEach-Object

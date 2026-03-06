@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -223,7 +222,7 @@ type Extractor struct {
 	commandDB  map[string]CommandInfo
 	env        map[string]string // process environment for shell expansion
 	worker     *shellWorker      // nil if subprocess isolation is disabled
-	pwshWorker *pwsh.Worker      // nil on non-Windows or if pwsh not found
+	pwshWorker *pwsh.WorkerPool  // nil on non-Windows or if pwsh not found
 }
 
 // EnableSubprocessIsolation starts a worker subprocess for crash-isolated
@@ -245,11 +244,11 @@ func (e *Extractor) EnableSubprocessIsolation(exePath string) error {
 // site in engine.go is gated behind runtime.GOOS == "windows". Falls back to
 // the heuristic PS transform if this method is not called or returns an error.
 func (e *Extractor) EnablePSWorker(pwshPath string) error {
-	w, err := pwsh.NewWorker(pwshPath)
+	pool, err := pwsh.NewWorkerPool(pwshPath, 0) // 0 = auto-size
 	if err != nil {
 		return err
 	}
-	e.pwshWorker = w
+	e.pwshWorker = pool
 	return nil
 }
 
@@ -731,8 +730,8 @@ func defaultCommandDB() map[string]CommandInfo {
 		"Rscript": {Operation: OpExecute, PathArgIndex: []int{0}},
 
 		// Indirect execution
-		"xargs":  {Operation: OpExecute, PathFlags: []string{"-a", "--arg-file"}},               // arg0 is a command name, not a path
-		"find":   {Operation: OpRead, ExtraOps: []Operation{OpExecute}, PathArgIndex: []int{0}}, // searches dirs (read), may -exec commands
+		"xargs":  {Operation: OpExecute, PathFlags: []string{"-a", "--arg-file"}, PathArgIndex: []int{1, 2, 3}}, // arg0 is command name; args 1+ are paths passed to it
+		"find":   {Operation: OpRead, ExtraOps: []Operation{OpExecute}, PathArgIndex: []int{0}},                 // searches dirs (read), may -exec commands
 		"eval":   {Operation: OpExecute, PathArgIndex: []int{0}},
 		"source": {Operation: OpExecute, PathArgIndex: []int{0}},
 		".":      {Operation: OpExecute, PathArgIndex: []int{0}}, // source alias
@@ -864,7 +863,7 @@ func defaultCommandDB() map[string]CommandInfo {
 		"Resolve-DnsName":    {Operation: OpNetwork, PathArgIndex: []int{0}},
 
 		// Execute operations
-		"Invoke-Expression":      {Operation: OpExecute, PathArgIndex: []int{0}, SkipFlags: []string{"-Command"}},
+		"Invoke-Expression":      {Operation: OpExecute, PathArgIndex: []int{0}}, // -Command handled by recursive PS parser above
 		"iex":                    {Operation: OpExecute, PathArgIndex: []int{0}},
 		"Start-Process":          {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-FilePath", "-ArgumentList"}},
 		"saps":                   {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-FilePath"}},
@@ -1064,12 +1063,11 @@ func (e *Extractor) Extract(toolName string, args json.RawMessage) ExtractedInfo
 	return info
 }
 
-// minPrinter reconstructs shell commands in canonical minified form.
-// Used to produce a normalized info.Command for rule matching.
-var minPrinter = syntax.NewPrinter(syntax.Minify(true))
-
 // extractBashCommand parses a bash command and extracts paths/operation.
 func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
+	// minPrinter reconstructs shell commands in canonical minified form.
+	// Created per-call so concurrent goroutines don't share printer state.
+	minPrinter := syntax.NewPrinter(syntax.Minify(true))
 	// Collect ALL command field values — not just the first.
 	// An attacker could hide a dangerous command in a secondary field
 	// (e.g., "command": "echo safe", "shell": "cat ~/.ssh/id_rsa").
@@ -1526,6 +1524,19 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		// (see extractBashCommand). HasSubst is now per-command (not file-wide)
 		// so it only fires when THIS command's args had dynamic content.
 
+		// Pre-resolution: extract xargs file args before resolveCommand strips them.
+		// "xargs -a /etc/paths cat" → /etc/paths must be captured before the wrapper
+		// resolution replaces xargs with its wrapped command and discards its own flags.
+		origCmdBase := strings.ToLower(stripPathPrefix(pc.Name))
+		if origCmdBase == "xargs" {
+			if val := extractFlagValue(pc.Args, "-a"); val != "" {
+				info.Paths = append(info.Paths, val)
+			}
+			if val := extractFlagValue(pc.Args, "--arg-file"); val != "" {
+				info.Paths = append(info.Paths, val)
+			}
+		}
+
 		// Resolve the actual command name and args, skipping wrappers like sudo/env
 		cmdName, args := e.resolveCommand(pc.Name, pc.Args)
 
@@ -1653,6 +1664,22 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 			}
 		}
 
+		// Recursively parse "Invoke-Expression 'Get-Content /etc/passwd'" and
+		// "iex -Command 'Get-Content /etc/passwd'". Both cmdlets execute arbitrary
+		// PowerShell code — treat the code string as an inner command to inspect.
+		// This handles "Invoke-Expression -Command <code>" (flag form) and
+		// "Invoke-Expression <code>" (positional form, the common idiom).
+		if (cmdBaseName == "invoke-expression" || cmdBaseName == "iex") && depth < maxShellRecursionDepth {
+			innerCmd := extractFlagValueCaseInsensitive(args, "-Command")
+			if innerCmd == "" && len(args) > 0 {
+				innerCmd = args[0] // positional: iex 'Get-Content /etc/passwd'
+			}
+			if innerCmd != "" {
+				e.parsePowerShellInnerCommand(info, innerCmd, depth, parentSymtab)
+				continue
+			}
+		}
+
 		// Recursively parse "powershell -Command '...'" / "pwsh -c '...'".
 		// Separate from shellInterpreters because inner code is PowerShell, not POSIX sh.
 		if powershellInterpreters[cmdBaseName] && depth < maxShellRecursionDepth {
@@ -1777,6 +1804,17 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		// "myTool C:\Users\user\.env" is not silently ignored.
 		// Note: plain Unix NFS/CIFS //nas/share paths are intentionally out of
 		// scope; the heuristic only applies to Windows-hosted environments.
+		//
+		// Special case: "xargs unknownCmd /path/file" — xargs passes its own
+		// positional args to the wrapped command. If the wrapped command is unknown
+		// (not in commandDB), conservatively extract all non-flag args as paths.
+		if !found && origCmdBase == "xargs" {
+			for _, arg := range args {
+				if !strings.HasPrefix(arg, "-") {
+					info.Paths = append(info.Paths, arg)
+				}
+			}
+		}
 		if !found {
 			env := ShellEnvironment()
 			if env.IsWindows() || env == EnvWSL {
@@ -1912,6 +1950,7 @@ var wrapperFlagsWithValue = map[string]map[string]bool{
 	"prlimit":     {"-p": true, "--pid": true},
 	"ionice":      {"-p": true},
 	"chrt":        {"-p": true},
+	"xargs":       {"-a": true, "--arg-file": true, "-E": true, "-I": true, "-L": true, "-n": true, "-P": true, "-s": true},
 }
 
 // resolveCommand skips wrapper commands and returns the actual command name
@@ -2911,67 +2950,71 @@ func (e *Extractor) runShellFile(file *syntax.File, parentSymtab map[string]stri
 		}
 	}()
 
-	// Partition statements into safe (interpretable) and unsafe (AST fallback).
-	var safeStmts, unsafeStmts []*syntax.Stmt
+	// Check if any unsafe stmts exist; if not, fast path through interpreter.
+	hasUnsafe := false
 	for _, stmt := range file.Stmts {
 		if nodeHasUnsafe(stmt) {
-			unsafeStmts = append(unsafeStmts, stmt)
-		} else {
-			safeStmts = append(safeStmts, stmt)
+			hasUnsafe = true
+			break
 		}
 	}
 
 	// Fast path: all safe — run entire file through interpreter (unchanged behavior).
-	if len(unsafeStmts) == 0 {
+	if !hasUnsafe {
 		return e.runShellFileInterp(file, parentSymtab)
 	}
 
 	// --- Hybrid path: some or all stmts are unsafe ---
-
-	// Phase 1: Run safe stmts through interpreter for commands + symtab.
-	safeSymtab := make(map[string]string)
-	maps.Copy(safeSymtab, parentSymtab)
-	var safeCmds []parsedCommand
-	if len(safeStmts) > 0 {
-		safeFile := &syntax.File{Stmts: safeStmts}
-		safeRes := e.runShellFileInterp(safeFile, parentSymtab)
-		if safeRes.panicked {
-			return shellExecResult{sym: maps.Clone(parentSymtab), panicked: true}
-		}
-		safeCmds = safeRes.cmds
-		safeSymtab = safeRes.sym
-	}
-
+	//
+	// IMPORTANT: Process statements in their ORIGINAL ORDER to preserve variable
+	// assignment semantics. Batching all safe stmts first would break scripts like
+	// "A=/secret 1>&2; cat $A" where $A is set in an unsafe stmt but consumed by
+	// a safe stmt that appears later — running safe stmts first means cat $A would
+	// see $A="" and the protected path would be missed.
+	symtab := make(map[string]string)
+	maps.Copy(symtab, parentSymtab) // safe even if parentSymtab is nil
 	var allCmds []parsedCommand
-	allCmds = append(allCmds, safeCmds...)
 
-	// Phase 2: For each unsafe stmt, try three strategies in order:
-	// (a) Defuse (strip background/unsafe redirects) and interpret the whole command
-	// (b) AST-extract the outer command + interpret inner ProcSubst/CoprocClause stmts
-	// (c) Pure AST fallback
-	for _, stmt := range unsafeStmts {
-		// Strategy (a): defuse and interpret — handles background, fd-dup, heredoc.
+	for _, stmt := range file.Stmts {
+		if !nodeHasUnsafe(stmt) {
+			// Safe: run through interpreter, propagate symtab.
+			f := &syntax.File{Stmts: []*syntax.Stmt{stmt}}
+			res := e.runShellFileInterp(f, symtab)
+			if res.panicked {
+				return shellExecResult{sym: symtab, panicked: true}
+			}
+			allCmds = append(allCmds, res.cmds...)
+			maps.Copy(symtab, res.sym)
+			continue
+		}
+
+		// Unsafe stmt: try three strategies in order.
+
+		// Strategy (a): defuse (strip background/unsafe redirects) and interpret.
+		// Accept even zero-cmd results: pure assignments (e.g., "A=/secret 1>&2")
+		// produce no commands but DO update the symtab — crucial for subsequent
+		// "cat $A" stmts to see the variable binding.
 		if defused := defuseStmt(stmt); defused != nil {
 			defusedFile := &syntax.File{Stmts: []*syntax.Stmt{defused}}
-			defusedRes := e.runShellFileInterp(defusedFile, safeSymtab)
-			if !defusedRes.panicked && len(defusedRes.cmds) > 0 {
+			defusedRes := e.runShellFileInterp(defusedFile, symtab)
+			if !defusedRes.panicked {
 				allCmds = append(allCmds, defusedRes.cmds...)
-				maps.Copy(safeSymtab, defusedRes.sym)
+				maps.Copy(symtab, defusedRes.sym)
 				continue
 			}
 		}
 
-		// Strategy (b): AST outer + interpret inner stmts.
+		// Strategy (b): AST outer + interpret inner ProcSubst/CoprocClause stmts.
 		singleFile := &syntax.File{Stmts: []*syntax.Stmt{stmt}}
-		allCmds = append(allCmds, extractFromAST(singleFile, true)...) // inner stmts handled below via collectInnerStmts
+		allCmds = append(allCmds, extractFromAST(singleFile, true)...)
 
 		for _, inner := range collectInnerStmts(stmt) {
 			innerFile := &syntax.File{Stmts: []*syntax.Stmt{inner}}
 			if !nodeHasUnsafe(inner) {
-				innerRes := e.runShellFileInterp(innerFile, safeSymtab)
+				innerRes := e.runShellFileInterp(innerFile, symtab)
 				if !innerRes.panicked && len(innerRes.cmds) > 0 {
 					allCmds = append(allCmds, innerRes.cmds...)
-					maps.Copy(safeSymtab, innerRes.sym)
+					maps.Copy(symtab, innerRes.sym)
 					continue
 				}
 			}
@@ -2979,7 +3022,7 @@ func (e *Extractor) runShellFile(file *syntax.File, parentSymtab map[string]stri
 		}
 	}
 
-	return shellExecResult{cmds: allCmds, sym: safeSymtab}
+	return shellExecResult{cmds: allCmds, sym: symtab}
 }
 
 // runShellFileInterp runs a pre-checked shell AST through interp.Runner in
@@ -3041,11 +3084,14 @@ func (e *Extractor) runShellFileInterp(file *syntax.File, parentSymtab map[strin
 			// Prevent the source/dot builtin from calling scriptFromPathDir →
 			// findFile → checkStat → os.Stat, which can block for ~14s on
 			// Windows when the path looks like a UNC network share (e.g.
-			// "//hostname/share"). Returning an error stops the builtin without
-			// affecting our analysis — the command name and args are already
-			// captured above.
+			// "//hostname/share"). Replace with "true" (a no-op builtin that
+			// exits 0) so subsequent commands in the same script still execute.
+			// SECURITY: DO NOT return a non-nil error here — an error aborts
+			// the runner and causes commands after "source" to be silently
+			// dropped from analysis (e.g., "source /tmp/a; cat ~/.ssh/id_rsa"
+			// would only return /tmp/a as a path, missing the id_rsa access).
 			if cmdNorm == "." || cmdNorm == "source" {
-				return nil, errors.New("dry-run: skip source builtin")
+				return []string{"true"}, nil
 			}
 			return args, nil
 		}),

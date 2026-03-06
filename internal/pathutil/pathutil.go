@@ -227,9 +227,17 @@ func ExpandMSYS2Path(s string) string {
 }
 
 // IsUNCPath reports whether s is a UNC path: \\server (Windows) or //server
-// (MSYS2/Git Bash/WSL forward-slash form).
+// (MSYS2/Git Bash/WSL forward-slash form). Requires at least one non-separator
+// character after the double-slash prefix — bare "\\" and "//" are not valid
+// UNC paths (they have no server component) and are rejected.
 func IsUNCPath(s string) bool {
-	return strings.HasPrefix(s, `\\`) || strings.HasPrefix(s, "//")
+	if strings.HasPrefix(s, `\\`) {
+		return len(s) > 2 && s[2] != '\\'
+	}
+	if strings.HasPrefix(s, "//") {
+		return len(s) > 2 && s[2] != '/'
+	}
+	return false
 }
 
 // IsWindowsAbsPath reports whether s looks like a Windows absolute path:
