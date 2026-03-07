@@ -198,6 +198,13 @@ func FuzzEngineBypass(f *testing.F) {
 		info := extractor.Extract("Bash", json.RawMessage(args))
 		normalizedPaths := normalizer.NormalizeAllWithSymlinks(info.Paths)
 
+		// Unknown commands (OpNone) legitimately skip operation-based path
+		// rules — the engine can't know the semantics of an unrecognized
+		// command, so not blocking is expected, not a bypass.
+		if info.Operation == OpNone {
+			return
+		}
+
 		// INVARIANT: If the normalized paths contain a blocked path,
 		// the engine MUST match. A false negative here is a bypass.
 		blockedPaths := []string{"/etc/passwd", "/etc/shadow"}

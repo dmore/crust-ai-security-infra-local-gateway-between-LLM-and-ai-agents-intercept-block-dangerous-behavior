@@ -829,6 +829,14 @@ func CountLockedBuiltinRules() int {
 	return count
 }
 
+// Close releases resources held by the engine (e.g. the PowerShell worker
+// pool). It is safe to call multiple times.
+func (e *Engine) Close() {
+	if e.extractor != nil {
+		e.extractor.Close()
+	}
+}
+
 // GetLoader returns the rule loader
 func (e *Engine) GetLoader() *Loader {
 	return e.loader
