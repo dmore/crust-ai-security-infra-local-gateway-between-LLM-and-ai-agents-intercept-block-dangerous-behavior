@@ -265,13 +265,11 @@ function Install-Gitleaks {
     $glVerFile = Join-Path $PSScriptRoot "GITLEAKS_VERSION"
     if (Test-Path $glVerFile) { $glVer = (Get-Content $glVerFile -Raw).Trim() }
     Write-Running "Installing gitleaks $glVer via go install"
-    try {
-        $null = & go install "github.com/zricethezav/gitleaks/v8@$glVer" 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-Ok "gitleaks installed"
-            return
-        }
-    } catch {}
+    & go install "github.com/zricethezav/gitleaks/v8@$glVer" 2>&1 | Write-Host
+    if ($LASTEXITCODE -eq 0) {
+        Write-Ok "gitleaks installed"
+        return
+    }
     Write-Fail "gitleaks install failed — required for DLP secret detection. Install manually: go install github.com/zricethezav/gitleaks/v8@$glVer"
 }
 
@@ -451,10 +449,10 @@ $TmpDir = Join-Path ([IO.Path]::GetTempPath()) "crust-install-$(Get-Random)"
 try {
     Write-Step "Cloning repository"
     $CloneUrl  = "https://github.com/$GitHubRepo.git"
-    $gitResult = Start-Process git -ArgumentList "clone","--depth","1","--branch",$Version,$CloneUrl,$TmpDir `
-        -Wait -NoNewWindow -PassThru 2>$null
-    if ($gitResult.ExitCode -ne 0) {
+    & git clone --depth 1 --branch $Version $CloneUrl $TmpDir 2>$null
+    if ($LASTEXITCODE -ne 0) {
         & git clone --depth 1 $CloneUrl $TmpDir
+        if ($LASTEXITCODE -ne 0) { Write-Fail "Clone failed — check your internet connection" }
     }
     Write-Ok "Repository cloned"
 
