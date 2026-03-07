@@ -28,7 +28,7 @@ crust wrap [flags] -- <cmd...>              # Auto-detect MCP or ACP (stdio)
 crust acp-wrap [flags] -- <cmd...>          # ACP stdio proxy with security rules
 
 # Diagnostics
-crust doctor [--timeout 5s] [--retries N]   # Check provider endpoint connectivity
+crust doctor [--timeout 5s] [--retries N]   # Check providers + scan for unguarded agents
 crust doctor --report                       # Generate sanitized report for GitHub issues
 
 # Other
@@ -117,7 +117,7 @@ crust list-rules --json
 crust status --live --api-addr localhost:9090
 crust list-rules --api-addr localhost:9090
 
-# Diagnostics — check all provider endpoints (no daemon needed)
+# Diagnostics — check providers + scan for unguarded agent servers
 crust doctor
 crust doctor --timeout 3s --retries 0
 crust doctor --report              # sanitized report for GitHub issues

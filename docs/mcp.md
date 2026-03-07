@@ -81,7 +81,11 @@ Remote MCP Server (https://...)
 
 ### CSRF Protection
 
-The HTTP gateway validates `Origin` and `Sec-Fetch-Site` headers on all requests, blocking cross-origin browser requests per the [MCP spec security requirements](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports). This prevents browser CSRF attacks (CVE-2025-49596 class) where a malicious website sends requests to a local MCP server. Non-browser clients (MCP SDKs, CLI tools) don't send `Origin` and are unaffected.
+The HTTP gateway validates `Origin` and `Sec-Fetch-Site` headers on all requests — including WebSocket upgrades — blocking cross-origin browser requests per the [MCP spec security requirements](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports). This prevents browser CSRF attacks (CVE-2025-49596) and WebSocket hijack attacks (CVE-2026-25253) where a malicious website connects to a local server. Non-browser clients (MCP SDKs, CLI tools) don't send `Origin` and are unaffected.
+
+### WebSocket Proxy
+
+The HTTP gateway transparently proxies WebSocket upgrade requests to the upstream server. Origin validation is applied before the upgrade handshake, blocking cross-origin browser connections while allowing legitimate local clients. Supports both `ws://` and `wss://` (TLS) upstream servers.
 
 ### Session Management
 

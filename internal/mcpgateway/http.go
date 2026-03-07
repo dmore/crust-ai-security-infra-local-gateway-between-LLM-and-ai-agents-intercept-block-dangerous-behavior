@@ -59,6 +59,12 @@ func (g *HTTPGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// WebSocket upgrade — proxy at TCP level after origin validation.
+	if isWebSocketUpgrade(r) {
+		g.handleWebSocket(w, r)
+		return
+	}
+
 	switch r.Method {
 	case http.MethodPost:
 		g.handlePost(w, r)

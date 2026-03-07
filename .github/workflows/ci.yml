@@ -466,10 +466,10 @@ jobs:
         shell: pwsh
         run: |
           $bin    = Join-Path $env:LOCALAPPDATA "Crust\crust.exe"
-          $pid    = Join-Path $env:USERPROFILE  ".crust\crust.pid"
+          $pidFile = Join-Path $env:USERPROFILE  ".crust\crust.pid"
           $log    = Join-Path $env:USERPROFILE  ".crust\crust.log"
           if (Test-Path $bin) { Write-Error "ERROR: binary not removed"; exit 1 }
-          if (Test-Path $pid) { Write-Error "ERROR: PID file not removed"; exit 1 }
+          if (Test-Path $pidFile) { Write-Error "ERROR: PID file not removed"; exit 1 }
           if (Test-Path $log) { Write-Error "ERROR: log file not removed"; exit 1 }
 
       - name: Logs on failure
@@ -525,7 +525,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d "$BODY")
           echo "Benign request status: $STATUS"
-          [ "$STATUS" = "403" ] && { echo "Benign request incorrectly blocked (403)"; docker logs crust-ci; exit 1; } || true
+          if [ "$STATUS" = "403" ]; then echo "Benign request incorrectly blocked (403)"; docker logs crust-ci; exit 1; fi
 
       - name: Graceful shutdown
         run: |

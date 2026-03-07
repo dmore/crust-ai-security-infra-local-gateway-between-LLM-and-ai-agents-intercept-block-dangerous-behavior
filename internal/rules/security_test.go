@@ -7,7 +7,7 @@ import (
 	"github.com/BakeLens/crust/internal/pathutil"
 )
 
-// TestBuiltinRulesLoad verifies all 21 builtin security rules can be loaded.
+// TestBuiltinRulesLoad verifies all 24 builtin security rules can be loaded.
 // Tests rule: protect-env-files
 // Tests rule: protect-ssh-keys
 // Tests rule: protect-system-auth
@@ -65,6 +65,7 @@ func TestBuiltinRulesLoad(t *testing.T) {
 		"detect-reverse-shell",
 		"block-ssrf-metadata",
 		"protect-agent-config",
+		"protect-vscode-settings",
 		"protect-git-hooks",
 	}
 
@@ -118,6 +119,7 @@ func TestLockedRulesSurviveDisableBuiltin(t *testing.T) {
 		"protect-github-cli",
 		"detect-private-key-write",
 		"block-eval-exec",
+		"protect-vscode-settings",
 	}
 
 	for _, r := range rules {

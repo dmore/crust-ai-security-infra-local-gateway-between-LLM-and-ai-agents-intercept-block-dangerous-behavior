@@ -60,6 +60,7 @@ func createEngineWithBuiltinRules(t *testing.T) *Engine {
 		t.Fatalf("Failed to create engine: %v", err)
 	}
 
+	t.Cleanup(engine.Close)
 	return engine
 }
 

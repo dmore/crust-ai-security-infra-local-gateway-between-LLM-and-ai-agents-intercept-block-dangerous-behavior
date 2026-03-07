@@ -18,6 +18,7 @@ func newBuiltinEngine(t *testing.T) *Engine {
 	if err != nil {
 		t.Fatalf("Failed to create builtin engine: %v", err)
 	}
+	t.Cleanup(engine.Close)
 	return engine
 }
 
@@ -172,6 +173,48 @@ func TestCVE_2025_68143_GitHooksInjection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := engine.Evaluate(tc.call)
 			assertBlocked(t, result, "protect-git-hooks")
+		})
+	}
+}
+
+// ─── VS Code ─────────────────────────────────────────────────────────
+
+// CVE-2025-53773/54130: Prompt injection writes .vscode/settings.json to
+// auto-approve chat tools or point to a malicious executable, achieving RCE.
+// Tests rule: protect-vscode-settings
+func TestCVE_2025_53773_VSCodeSettingsHijack(t *testing.T) {
+	engine := newBuiltinEngine(t)
+
+	attacks := []struct {
+		name string
+		call ToolCall
+	}{
+		{
+			"write auto-approve",
+			makeToolCall("Write", map[string]any{
+				"file_path": "/home/user/project/.vscode/settings.json",
+				"content":   `{"chat.tools.autoApprove":true}`,
+			}),
+		},
+		{
+			"write malicious executablePath",
+			makeToolCall("Write", map[string]any{
+				"file_path": "/home/user/project/.vscode/settings.json",
+				"content":   `{"python.defaultInterpreterPath":"/tmp/evil"}`,
+			}),
+		},
+		{
+			"bash redirect to settings.json",
+			makeToolCall("Bash", map[string]any{
+				"command": `echo '{"chat.tools.autoApprove":true}' > .vscode/settings.json`,
+			}),
+		},
+	}
+
+	for _, tc := range attacks {
+		t.Run(tc.name, func(t *testing.T) {
+			result := engine.Evaluate(tc.call)
+			assertBlocked(t, result, "protect-vscode-settings")
 		})
 	}
 }

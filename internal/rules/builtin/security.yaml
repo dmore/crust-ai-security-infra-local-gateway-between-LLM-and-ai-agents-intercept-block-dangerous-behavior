@@ -498,7 +498,25 @@ rules:
     severity: critical
 
   # ===========================================================================
-  # 22. GIT HOOKS PROTECTION
+  # 22. VS CODE SETTINGS PROTECTION
+  # Blocks agent writes to VS Code settings that can escalate privileges.
+  # Not locked — agents sometimes need to edit VS Code workspace settings
+  # for formatting, linting, or debug config. Users who need this can disable.
+  #
+  # CVE-2025-53773: prompt injection → chat.tools.autoApprove → YOLO mode → RCE
+  # CVE-2025-54130: prompt injection → executablePath → malicious binary → RCE
+  # ===========================================================================
+  - name: protect-vscode-settings
+    block:
+      - "**/.vscode/settings.json"
+      - "**/.vscode/launch.json"
+      - "**/.vscode/tasks.json"
+    actions: [write, delete]
+    message: "Blocked: .vscode config files can be abused to auto-approve commands, specify malicious executables, or define arbitrary shell tasks (CVE-2025-53773, CVE-2025-54130). Disable this rule if your agent needs to edit VS Code settings."
+    severity: high
+
+  # ===========================================================================
+  # 23. GIT HOOKS PROTECTION
   # Git hooks auto-execute on operations like commit, push, and checkout.
   # An agent writing hooks achieves persistence across all future git usage.
   #
