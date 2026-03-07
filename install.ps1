@@ -49,7 +49,7 @@ $DataDir     = Join-Path $env:USERPROFILE  ".crust"
 $GoMinVer    = "1.26.1"
 
 # ─── Plain mode (matches Go TUI IsPlainMode logic) ───────────────────────────
-$PlainMode = $env:NO_COLOR -ne $null -or -not [Environment]::UserInteractive
+$PlainMode = $env:NO_COLOR -ne $null -or $env:CI -eq "true" -or -not [Environment]::UserInteractive
 
 # ─── TUI helpers ─────────────────────────────────────────────────────────────
 $script:StepN     = 0

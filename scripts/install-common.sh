@@ -16,7 +16,7 @@ NC='\033[0m'
 
 # Plain mode: set when NO_COLOR is set or stdout is not a TTY.
 # Matches the Go TUI's IsPlainMode() logic.
-if [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then
+if [ -n "${NO_COLOR:-}" ] || [ "${CI:-}" = "true" ] || [ ! -t 1 ]; then
     _PLAIN=1
 else
     _PLAIN=0
