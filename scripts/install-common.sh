@@ -670,9 +670,14 @@ run_uninstall() {
 
     if [ -d "$DATA_DIR" ]; then
         echo ""
-        echo -e "  ${YELLOW}Remove data directory ($DATA_DIR)?${NC}"
-        echo "  This contains your configuration, rules, and telemetry data."
-        read -r -p "  Remove? [y/N] " confirm
+        if [ "$_PLAIN" = "1" ]; then
+            # Non-interactive (piped/CI): auto-remove without prompting
+            confirm="y"
+        else
+            echo -e "  ${YELLOW}Remove data directory ($DATA_DIR)?${NC}"
+            echo "  This contains your configuration, rules, and telemetry data."
+            read -r -p "  Remove? [y/N] " confirm
+        fi
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
             rm -rf "$DATA_DIR"
             ok "Data directory removed"

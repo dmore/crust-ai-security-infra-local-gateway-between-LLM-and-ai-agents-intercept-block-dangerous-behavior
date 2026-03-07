@@ -347,7 +347,7 @@ jobs:
           }
 
       - name: Uninstall crust
-        run: echo "y" | bash install.sh --uninstall
+        run: bash install.sh --uninstall
 
       - name: Verify uninstall cleaned up
         run: |
