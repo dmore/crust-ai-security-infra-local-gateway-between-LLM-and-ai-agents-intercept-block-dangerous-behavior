@@ -359,8 +359,9 @@ jobs:
 
       - name: Verify uninstall cleaned up
         run: |
-          test ! -f "$HOME/.local/bin/crust" || { echo "ERROR: binary not removed"; exit 1; }
-          test ! -d "$HOME/.crust"            || { echo "ERROR: data dir not removed"; exit 1; }
+          test ! -f "$HOME/.local/bin/crust"      || { echo "ERROR: binary not removed"; exit 1; }
+          test ! -f "$HOME/.crust/crust.pid"       || { echo "ERROR: PID file not removed"; exit 1; }
+          test ! -f "$HOME/.crust/crust.log"       || { echo "ERROR: log file not removed"; exit 1; }
 
       - name: Logs on failure
         if: failure()
@@ -464,10 +465,12 @@ jobs:
       - name: Verify uninstall cleaned up
         shell: pwsh
         run: |
-          $bin     = Join-Path $env:LOCALAPPDATA "Crust\crust.exe"
-          $dataDir = Join-Path $env:USERPROFILE  ".crust"
-          if (Test-Path $bin)     { Write-Error "ERROR: binary not removed";   exit 1 }
-          if (Test-Path $dataDir) { Write-Error "ERROR: data dir not removed"; exit 1 }
+          $bin    = Join-Path $env:LOCALAPPDATA "Crust\crust.exe"
+          $pid    = Join-Path $env:USERPROFILE  ".crust\crust.pid"
+          $log    = Join-Path $env:USERPROFILE  ".crust\crust.log"
+          if (Test-Path $bin) { Write-Error "ERROR: binary not removed"; exit 1 }
+          if (Test-Path $pid) { Write-Error "ERROR: PID file not removed"; exit 1 }
+          if (Test-Path $log) { Write-Error "ERROR: log file not removed"; exit 1 }
 
       - name: Logs on failure
         if: failure()

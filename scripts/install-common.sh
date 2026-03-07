@@ -669,20 +669,16 @@ run_uninstall() {
     done
 
     if [ -d "$DATA_DIR" ]; then
-        echo ""
-        if [ "$_PLAIN" = "1" ]; then
-            # Non-interactive (piped/CI): auto-remove without prompting
-            confirm="y"
-        else
-            echo -e "  ${YELLOW}Remove data directory ($DATA_DIR)?${NC}"
-            echo "  This contains your configuration, rules, and telemetry data."
-            read -r -p "  Remove? [y/N] " confirm
-        fi
-        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        # Remove runtime files; preserve rules.d (user-authored content).
+        local rules_dir="$DATA_DIR/rules.d"
+        find "$DATA_DIR" -mindepth 1 -maxdepth 1 ! -name "rules.d" -exec rm -rf {} +
+        # Remove the data dir itself if rules.d is absent or empty.
+        if [ ! -d "$rules_dir" ] || [ -z "$(ls -A "$rules_dir" 2>/dev/null)" ]; then
             rm -rf "$DATA_DIR"
             ok "Data directory removed"
         else
-            info "Data directory kept: $DATA_DIR"
+            ok "Runtime data removed"
+            info "Your rules are kept at: $rules_dir"
         fi
     fi
 

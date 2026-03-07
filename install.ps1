@@ -357,13 +357,18 @@ if ($Uninstall) {
     }
 
     if (Test-Path $DataDir) {
-        Write-Host ""
-        $confirm = if ($PlainMode) { 'y' } else { Read-Host "  Remove data directory ($DataDir)? [y/N]" }
-        if ($confirm -eq 'y' -or $confirm -eq 'Y') {
-            Remove-Item $DataDir -Recurse -Force
+        # Remove runtime files; preserve rules.d (user-authored content).
+        $rulesDir = Join-Path $DataDir "rules.d"
+        Get-ChildItem $DataDir | Where-Object { $_.Name -ne "rules.d" } |
+            ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+        # Remove the data dir itself if rules.d is absent or empty.
+        $hasRules = (Test-Path $rulesDir) -and (@(Get-ChildItem $rulesDir -ErrorAction SilentlyContinue).Count -gt 0)
+        if (-not $hasRules) {
+            Remove-Item $DataDir -Recurse -Force -ErrorAction SilentlyContinue
             Write-Ok "Data directory removed"
         } else {
-            Write-Info "Data directory kept: $DataDir"
+            Write-Ok "Runtime data removed"
+            Write-Info "Your rules are kept at: $rulesDir"
         }
     }
 
