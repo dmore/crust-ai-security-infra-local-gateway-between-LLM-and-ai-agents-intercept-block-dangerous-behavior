@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
 )
 
-// DLPScanner provides Tier 2 secret detection via an external gitleaks binary.
-// Recommended dependency — logs a warning with install instructions if missing.
+// DLPScanner provides secret detection via an external gitleaks binary.
+// Required dependency — engine creation fails if gitleaks is not installed.
 type DLPScanner struct {
 	binaryPath string
 	available  bool
@@ -30,30 +31,29 @@ type DLPFinding struct {
 }
 
 // newDLPScanner creates a scanner, optionally disabled (e.g., for fuzz/unit tests).
-func newDLPScanner(disabled bool) *DLPScanner {
+func newDLPScanner(disabled bool) (*DLPScanner, error) {
 	if disabled {
-		return &DLPScanner{timeout: 5 * time.Second}
+		return &DLPScanner{timeout: 5 * time.Second}, nil
 	}
 	return NewDLPScanner()
 }
 
-// NewDLPScanner creates a scanner. Returns a disabled scanner if gitleaks is not in PATH.
-func NewDLPScanner() *DLPScanner {
+// NewDLPScanner creates a scanner. Returns an error if gitleaks is not installed.
+func NewDLPScanner() (*DLPScanner, error) {
 	s := &DLPScanner{
 		timeout: 5 * time.Second,
 	}
 
 	path, err := exec.LookPath("gitleaks")
 	if err != nil {
-		log.Warn("DLP Tier 2 disabled: gitleaks not found — install for full secret detection (200+ patterns)")
-		log.Warn("  brew install gitleaks  OR  go install github.com/zricethezav/gitleaks/v8@v8.30.0")
-		return s
+		return nil, errors.New("gitleaks not found in PATH — required for DLP secret detection. " +
+			"Install: brew install gitleaks  OR  go install github.com/zricethezav/gitleaks/v8@v8.30.0")
 	}
 
 	s.binaryPath = path
 	s.available = true
-	log.Info("DLP Tier 2 enabled: gitleaks found at %s", path)
-	return s
+	log.Info("DLP enabled: gitleaks found at %s", path)
+	return s, nil
 }
 
 // Available reports whether gitleaks is installed.
@@ -107,7 +107,7 @@ func (s *DLPScanner) runGitleaks(ctx context.Context, content string, args ...st
 
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
-			log.Warn("DLP Tier 2 scan timed out after %s", s.timeout)
+			log.Warn("DLP gitleaks scan timed out after %s", s.timeout)
 		}
 		return nil
 	}

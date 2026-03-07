@@ -66,7 +66,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install gitleaks (DLP Tier 2 runtime dependency)
+      - name: Install gitleaks (DLP dependency)
         # go install tool pins are not updated by Dependabot — bump manually
         run: go install github.com/zricethezav/gitleaks/v8@v8.30.0
 
@@ -81,15 +81,16 @@ jobs:
           # Pre-build test binaries once; fuzz targets reuse the cached binary.
           go test -c -o /tmp/rules.fuzz ./internal/rules/
           go test -c -o /tmp/httpproxy.fuzz ./internal/httpproxy/
+          mkdir -p /tmp/fuzz-cache
           # Critical fuzz targets (30s each, sequential — these are the most
           # security-sensitive and get more fuzzing time).
-          /tmp/rules.fuzz -test.fuzz=FuzzEngineBypass -test.fuzztime=30s -test.short
-          /tmp/rules.fuzz -test.fuzz=FuzzBuiltinRuleBypass -test.fuzztime=30s -test.short
-          /tmp/rules.fuzz -test.fuzz=FuzzNormalizeUnicode -test.fuzztime=30s -test.short
-          /tmp/rules.fuzz -test.fuzz=FuzzLoopbackRegex -test.fuzztime=30s -test.short
-          /tmp/rules.fuzz -test.fuzz=FuzzMCPToolBypass -test.fuzztime=30s -test.short
-          /tmp/rules.fuzz -test.fuzz=FuzzPipeBypass -test.fuzztime=30s -test.short
-          /tmp/rules.fuzz -test.fuzz=FuzzConfusableBypass -test.fuzztime=30s -test.short
+          /tmp/rules.fuzz -test.fuzz=FuzzEngineBypass -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache
+          /tmp/rules.fuzz -test.fuzz=FuzzBuiltinRuleBypass -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache
+          /tmp/rules.fuzz -test.fuzz=FuzzNormalizeUnicode -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache
+          /tmp/rules.fuzz -test.fuzz=FuzzLoopbackRegex -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache
+          /tmp/rules.fuzz -test.fuzz=FuzzMCPToolBypass -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache
+          /tmp/rules.fuzz -test.fuzz=FuzzPipeBypass -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache
+          /tmp/rules.fuzz -test.fuzz=FuzzConfusableBypass -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache
 
       - name: Fuzz tests (full suite, 10s each — parallelized)
         run: |
@@ -102,7 +103,7 @@ jobs:
             local targets=()
             local failed=0
             for target in "$@"; do
-              "$bin" -test.fuzz="$target" -test.fuzztime=10s -test.short &
+              "$bin" -test.fuzz="$target" -test.fuzztime=10s -test.short -test.fuzzcachedir=/tmp/fuzz-cache &
               pids+=($!)
               targets+=("$target")
               # Cap concurrency at 2 for better per-target CPU utilization.
@@ -155,7 +156,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install gitleaks (DLP Tier 2 runtime dependency)
+      - name: Install gitleaks (DLP dependency)
         # go install tool pins are not updated by Dependabot — bump manually
         run: go install github.com/zricethezav/gitleaks/v8@v8.30.0
 
@@ -223,7 +224,7 @@ jobs:
           update: false
           path-type: inherit  # inherit Windows PATH so the Go toolchain is visible
 
-      - name: Install gitleaks (DLP Tier 2 runtime dependency)
+      - name: Install gitleaks (DLP dependency)
         if: github.ref == 'refs/heads/main'
         run: go install github.com/zricethezav/gitleaks/v8@v8.30.0
 
@@ -297,7 +298,7 @@ jobs:
           npm install -g @modelcontextprotocol/server-filesystem
           npm install -g @modelcontextprotocol/server-everything
 
-      - name: Install gitleaks (DLP Tier 2 runtime dependency)
+      - name: Install gitleaks (DLP dependency)
         # go install tool pins are not updated by Dependabot — bump manually
         run: go install github.com/zricethezav/gitleaks/v8@v8.30.0
 

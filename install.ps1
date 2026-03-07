@@ -267,8 +267,7 @@ function Install-Gitleaks {
             return
         }
     } catch {}
-    Write-Warn "gitleaks install failed (DLP Tier 2 will be disabled)"
-    Write-Info "Install manually: go install github.com/zricethezav/gitleaks/v8@v8.30.0"
+    Write-Fail "gitleaks install failed — required for DLP secret detection. Install manually: go install github.com/zricethezav/gitleaks/v8@v8.30.0"
 }
 
 function Install-NerdFont {

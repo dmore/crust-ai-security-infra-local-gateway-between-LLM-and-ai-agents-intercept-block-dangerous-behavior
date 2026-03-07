@@ -170,12 +170,17 @@ func NewEngineWithNormalizer(cfg EngineConfig, normalizer *Normalizer) (*Engine,
 		extEnv["HOME"] = h
 	}
 
+	dlp, err := newDLPScanner(cfg.DisableDLP)
+	if err != nil {
+		return nil, fmt.Errorf("DLP init: %w", err)
+	}
+
 	e := &Engine{
 		extractor:  NewExtractorWithEnv(extEnv),
 		normalizer: normalizer,
 		loader:     loader,
 		preFilter:  NewPreFilter(),
-		dlpScanner: newDLPScanner(cfg.DisableDLP),
+		dlpScanner: dlp,
 		config:     cfg,
 		preChecker: cfg.PreChecker,
 		hitCounts:  make(map[string]*int64),

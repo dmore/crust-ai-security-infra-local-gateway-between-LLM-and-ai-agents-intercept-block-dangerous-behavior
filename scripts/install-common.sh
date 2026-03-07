@@ -507,7 +507,7 @@ setup_completion() {
     fi
 }
 
-# Install gitleaks for DLP Tier 2 secret detection (200+ patterns).
+# Install gitleaks — required for DLP secret detection (200+ patterns).
 setup_gitleaks() {
     if command -v gitleaks &>/dev/null; then
         ok "gitleaks already installed"
@@ -530,8 +530,7 @@ setup_gitleaks() {
         spinner_ok "gitleaks installed"
         return 0
     fi
-    spinner_warn "gitleaks install failed (DLP Tier 2 will be disabled)"
-    info "Install manually: go install github.com/zricethezav/gitleaks/v8@v8.30.0"
+    spinner_fail "gitleaks install failed — required for DLP secret detection. Install manually: go install github.com/zricethezav/gitleaks/v8@v8.30.0"
 }
 
 # Install Cascadia Mono NF from Nerd Fonts (optional, non-fatal).

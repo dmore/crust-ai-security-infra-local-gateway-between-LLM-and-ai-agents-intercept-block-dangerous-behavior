@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/BakeLens/crust/internal/pathutil"
 )
 
 // newBuiltinEngine creates an engine with all builtin rules enabled (the
@@ -536,6 +538,13 @@ func TestCVE_ReverseShell(t *testing.T) {
 // Defense: pathutil normalises paths using filesystem case sensitivity;
 // protect-agent-config locked rule catches all case variants.
 func TestCVE_2025_59944_CaseInsensitiveBypass(t *testing.T) {
+	// This CVE only applies on case-insensitive filesystems (macOS APFS,
+	// Windows NTFS) where .Cursor and .cursor resolve to the same file.
+	// On case-sensitive Linux, mixed-case is a different path entirely.
+	if pathutil.DefaultFS().CaseSensitive {
+		t.Skip("case-insensitive bypass not applicable on case-sensitive filesystem")
+	}
+
 	engine := newBuiltinEngine(t)
 
 	attacks := []struct {

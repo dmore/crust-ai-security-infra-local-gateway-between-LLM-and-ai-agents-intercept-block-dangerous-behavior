@@ -205,7 +205,7 @@ In stdio proxy modes (MCP Gateway, ACP Wrap, Auto-detect), DLP also scans **serv
 
 Tier 1 patterns (34 hardcoded) are sourced from [gitleaks v8.24](https://github.com/gitleaks/gitleaks) and extended for newer services. See `internal/rules/dlp.go` for the full list.
 
-Tier 2: [gitleaks](https://github.com/gitleaks/gitleaks) is used as a secondary scanner, providing 200+ additional token formats. Install with `brew install gitleaks` or `go install github.com/gitleaks/gitleaks/v8@latest`.
+[gitleaks](https://github.com/gitleaks/gitleaks) is a required dependency, providing 200+ additional token formats beyond the hardcoded patterns. It is installed automatically by the Crust installer.
 
 ### Cryptocurrency Key Detection
 
