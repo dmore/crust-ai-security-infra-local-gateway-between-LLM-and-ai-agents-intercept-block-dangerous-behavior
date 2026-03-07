@@ -14,7 +14,9 @@ func TestMain(m *testing.M) {
 	if RunShellWorkerMain() {
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	cleanupSharedPwshWorker()
+	os.Exit(code)
 }
 
 func TestShellWorkerSubprocess(t *testing.T) {

