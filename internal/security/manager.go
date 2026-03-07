@@ -131,8 +131,6 @@ func Init(cfg Config) (*Manager, error) {
 
 // cleanupLoop runs periodic data cleanup
 func (m *Manager) cleanupLoop() {
-	defer m.wg.Done()
-
 	// Run cleanup every hour
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
