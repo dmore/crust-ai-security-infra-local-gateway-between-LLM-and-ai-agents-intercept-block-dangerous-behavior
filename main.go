@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -1426,6 +1427,12 @@ func runDoctor(args []string) {
 		tui.PrintSuccess(fmt.Sprintf("All %d providers ok", okCount))
 	}
 
+	// Scan for unguarded agent servers on localhost
+	fmt.Println()
+	fmt.Println(tui.Separator("Agent Security Scan"))
+	fmt.Println()
+	scanAgentPorts(*timeout)
+
 	if *report {
 		fmt.Println()
 		fmt.Println(buildDoctorReport(results, okCount, warnCount, errCount))
@@ -1508,6 +1515,41 @@ func buildDoctorReport(results []httpproxy.DoctorResult, okCount, warnCount, err
 	sb.WriteString("```\n")
 	sb.WriteString("\nPaste the block above into a GitHub issue at https://github.com/BakeLens/crust/issues/new\n")
 	return sb.String()
+}
+
+// agentPort describes a well-known AI agent localhost server.
+type agentPort struct {
+	Port    int
+	Name    string
+	HintCmd string // suggested crust command
+}
+
+// knownAgentPorts lists common AI agent servers that expose localhost HTTP/WebSocket.
+var knownAgentPorts = []agentPort{
+	{3000, "OpenClaw", "crust mcp http --listen :3000 --upstream http://localhost:3001"},
+	{6274, "MCP Inspector", "crust mcp http --listen :6274 --upstream http://localhost:6275"},
+	{6277, "MCP Inspector (SSE)", "crust mcp http --listen :6277 --upstream http://localhost:6278"},
+}
+
+// scanAgentPorts checks if known agent servers are listening on localhost
+// without Crust protection, and warns the user.
+func scanAgentPorts(timeout time.Duration) {
+	dialer := &net.Dialer{Timeout: timeout}
+	var found int
+	for _, ap := range knownAgentPorts {
+		addr := fmt.Sprintf("127.0.0.1:%d", ap.Port)
+		conn, err := dialer.DialContext(context.Background(), "tcp", addr)
+		if err != nil {
+			continue // not listening
+		}
+		conn.Close()
+		found++
+		tui.PrintWarning(fmt.Sprintf("%s detected on :%d — not guarded by Crust", ap.Name, ap.Port))
+		fmt.Printf("  → %s\n\n", ap.HintCmd)
+	}
+	if found == 0 {
+		tui.PrintSuccess("No unguarded agent servers detected")
+	}
 }
 
 // runCompletion handles the completion subcommand
