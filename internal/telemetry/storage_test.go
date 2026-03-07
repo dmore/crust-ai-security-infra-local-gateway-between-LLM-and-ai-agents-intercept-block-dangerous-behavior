@@ -102,11 +102,9 @@ func TestGetOrCreateTrace_Concurrent(t *testing.T) {
 	errs := make([]error, n)
 
 	for i := range n {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			_, errs[idx] = s.GetOrCreateTrace(traceID, types.SessionID(fmt.Sprintf("session-%d", idx)))
-		}(i)
+		wg.Go(func() {
+			_, errs[i] = s.GetOrCreateTrace(traceID, types.SessionID(fmt.Sprintf("session-%d", i)))
+		})
 	}
 	wg.Wait()
 
@@ -301,9 +299,7 @@ func TestConcurrentWriteAndRead(t *testing.T) {
 	var writeErr, readErr error
 
 	// Writer goroutine — simulates EndLLMSpan
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := 0; ctx.Err() == nil; i++ {
 			traceID := types.TraceID(fmt.Sprintf("trace-%d", i))
 			mainSpan := &Span{
@@ -318,12 +314,10 @@ func TestConcurrentWriteAndRead(t *testing.T) {
 				return
 			}
 		}
-	}()
+	})
 
 	// Reader goroutine — simulates dashboard polling
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for ctx.Err() == nil {
 			if _, err := s.GetTraceStats(); err != nil {
 				readErr = fmt.Errorf("GetTraceStats: %w", err)
@@ -335,7 +329,7 @@ func TestConcurrentWriteAndRead(t *testing.T) {
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
-	}()
+	})
 
 	wg.Wait()
 

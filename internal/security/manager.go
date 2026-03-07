@@ -112,18 +112,15 @@ func Init(cfg Config) (*Manager, error) {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
+	m.wg.Go(func() {
 		if err := m.apiHTTPServer.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Error("API server error: %v", err)
 		}
-	}()
+	})
 
 	// Start periodic cleanup if retention is enabled
 	if cfg.RetentionDays > 0 {
-		m.wg.Add(1)
-		go m.cleanupLoop()
+		m.wg.Go(m.cleanupLoop)
 	}
 
 	globalManagerMu.Lock()

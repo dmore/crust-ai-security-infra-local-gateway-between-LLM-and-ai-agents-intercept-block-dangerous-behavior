@@ -247,7 +247,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## Build from Source
 
-Requires Go 1.24.13+ and a C compiler (CGO is needed for SQLite).
+Requires Go 1.26.1+ and a C compiler (CGO is needed for SQLite).
 
 ```bash
 git clone https://github.com/BakeLens/crust.git
@@ -255,6 +255,8 @@ cd crust
 go build .
 ./crust version   # Windows: .\crust.exe version
 ```
+
+Go 1.26 enables the [Green Tea garbage collector](https://go.dev/blog/go1.26) by default, which reduces GC overhead by 10–40% — this meaningfully improves latency for the hot-path proxy pipeline. Run `go fix ./...` before submitting PRs to apply any pending modernizations automatically.
 
 ## Contributing
 

@@ -1,6 +1,6 @@
 module github.com/BakeLens/crust
 
-go 1.25.0
+go 1.26.1
 
 require (
 	github.com/Microsoft/go-winio v0.6.2

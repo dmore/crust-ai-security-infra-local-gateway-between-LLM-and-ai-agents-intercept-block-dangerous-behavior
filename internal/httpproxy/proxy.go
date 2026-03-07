@@ -135,7 +135,7 @@ func NewProxy(upstreamURL string, apiKey string, timeout time.Duration, userProv
 
 // doRequest performs an HTTP request and guarantees a non-nil *http.Response on success.
 func (p *Proxy) doRequest(req *http.Request) (*http.Response, error) {
-	resp, err := p.client.Do(req) //nolint:gosec // proxy by design forwards client-controlled URLs to upstream providers
+	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +335,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	copyHeaders(w.Header(), resp.Header)
 	w.Header().Set("Content-Length", strconv.Itoa(len(responseBody)))
 	w.WriteHeader(resp.StatusCode)
-	_, _ = w.Write(responseBody) //nolint:gosec // binary proxy relay, not HTML; nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+	_, _ = w.Write(responseBody) //nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 }
 
 // readAndDecompressBody reads the request body with size limits, decompresses
@@ -348,8 +348,7 @@ func readAndDecompressBody(w http.ResponseWriter, r *http.Request) (
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
+		if errors.As(err, new(*http.MaxBytesError)) {
 			log.Warn("Request body too large (limit: %dMB)", maxRequestBodySize/(1024*1024))
 			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
 			return nil, nil, RequestBody{}, false

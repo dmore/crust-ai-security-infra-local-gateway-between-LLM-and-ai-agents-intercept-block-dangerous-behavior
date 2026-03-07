@@ -28,21 +28,17 @@ func TestGetInterceptionConfig_RaceFree(t *testing.T) {
 
 	// Half the goroutines read the config
 	for range goroutines / 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 1000 {
 				cfg := GetInterceptionConfig()
 				_ = cfg.BlockMode
 			}
-		}()
+		})
 	}
 
 	// Half the goroutines write the manager
 	for range goroutines / 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 1000 {
 				m := &Manager{
 					bufferStreaming: true,
@@ -54,7 +50,7 @@ func TestGetInterceptionConfig_RaceFree(t *testing.T) {
 				SetGlobalManager(m)
 				SetGlobalManager(nil)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

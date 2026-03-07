@@ -78,7 +78,7 @@ func (p *ProviderConfig) MarshalYAML() (any, error) {
 // MarshalJSON redacts the API key in JSON serialization.
 func (p *ProviderConfig) MarshalJSON() ([]byte, error) {
 	if p.APIKey != "" {
-		return json.Marshal(struct { //nolint:gosec // G117: api_key JSON key is a redacted placeholder, not a credential
+		return json.Marshal(struct {
 			URL    string `json:"url"`
 			APIKey string `json:"api_key"`
 		}{URL: p.URL, APIKey: "***"})

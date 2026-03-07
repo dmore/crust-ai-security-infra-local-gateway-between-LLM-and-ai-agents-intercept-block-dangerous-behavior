@@ -43,11 +43,9 @@ func NewWorkerPool(pwshPath string, size int) (*WorkerPool, error) {
 	// the worker (proc=nil) so Worker.Parse() will restart it automatically.
 	var wg sync.WaitGroup
 	for _, w := range workers {
-		wg.Add(1)
-		go func(w *Worker) {
-			defer wg.Done()
+		wg.Go(func() {
 			w.Parse("$null") //nolint:errcheck // warmup only; restart handled by Parse()
-		}(w)
+		})
 	}
 	wg.Wait()
 
