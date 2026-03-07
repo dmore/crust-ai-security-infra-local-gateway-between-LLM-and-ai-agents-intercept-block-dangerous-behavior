@@ -217,11 +217,15 @@ jobs:
 
       - name: Unit tests (with race detector)
         if: github.ref == 'refs/heads/main' && !matrix.msys2
+        env:
+          GOEXPERIMENT: goroutineleakprofile
         run: go test -race -short ./...
 
       - name: Unit tests (MSYS2 — MSYSTEM set by msys2/setup-msys2)
         if: github.ref == 'refs/heads/main' && matrix.msys2
         shell: msys2 {0}
+        env:
+          GOEXPERIMENT: goroutineleakprofile
         run: go test ./internal/rules/... ./internal/pathutil/... -short -count=1 -timeout 120s
 
   test-freebsd:
