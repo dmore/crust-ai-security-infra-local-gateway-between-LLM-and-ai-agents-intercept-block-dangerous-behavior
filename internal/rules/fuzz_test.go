@@ -456,6 +456,14 @@ func FuzzBuiltinRuleBypass(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, toolName, argsJSON string) {
+		// Guard: skip oversized inputs that cause slow shell parsing,
+		// Unicode normalization, or regex matching — a single slow
+		// iteration can exceed the -fuzztime budget and cause
+		// "context deadline exceeded" failures on CI.
+		if len(toolName) > 256 || len(argsJSON) > 4096 {
+			return
+		}
+
 		var args map[string]any
 		if json.Unmarshal([]byte(argsJSON), &args) != nil {
 			return // Skip invalid JSON

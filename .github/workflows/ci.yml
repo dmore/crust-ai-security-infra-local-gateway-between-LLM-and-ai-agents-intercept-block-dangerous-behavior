@@ -141,6 +141,17 @@ jobs:
             || rc=1
           exit $rc
 
+      - name: Upload failing fuzz corpus
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failing-seeds
+          path: |
+            internal/rules/testdata/fuzz/
+            internal/httpproxy/testdata/fuzz/
+          retention-days: 30
+          if-no-files-found: ignore
+
   test:
     name: Go Test (${{ matrix.os }})
     needs: [lint]
@@ -190,6 +201,14 @@ jobs:
           go test ./internal/rules/ -fuzz=FuzzPSWorker_NoCrash -fuzztime=30s -short
           go test ./internal/rules/ -fuzz=FuzzExtractor_PSCommand -fuzztime=30s -short
 
+      - name: Upload failing fuzz corpus (Windows)
+        if: failure() && matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failing-seeds-windows
+          path: internal/rules/testdata/fuzz/
+          retention-days: 30
+          if-no-files-found: ignore
 
   # Platform-specific tests run only on main to reduce CI costs.
   # macOS runners are 10x billing; MSYS2 adds a second windows-latest runner.

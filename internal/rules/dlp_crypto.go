@@ -16,6 +16,8 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+//go:generate go run bip39_verify.go
+
 // Crypto DLP: detects cryptocurrency secrets using cryptographic validation.
 // - BIP39 mnemonics: sliding window over unified 10-language wordlist (20,480 words)
 // - Extended private keys (xprv/yprv/zprv/tprv): regex + base58check checksum

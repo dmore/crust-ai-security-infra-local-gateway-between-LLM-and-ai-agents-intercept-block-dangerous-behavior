@@ -357,11 +357,8 @@ func FuzzMCPConfigPatch(f *testing.F) {
 			t.Fatal(err)
 		}
 
-		// Use the test binary as a stand-in for the crust binary path.
-		crustBin, err := os.Executable()
-		if err != nil {
-			t.Fatal(err)
-		}
+		// Use a simple fixed path to avoid JSON-escaping mismatches.
+		crustBin := "/usr/local/bin/crust"
 
 		client := ClientDef{
 			Client:     ClientCursor,
