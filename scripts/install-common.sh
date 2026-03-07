@@ -674,7 +674,7 @@ parse_args() {
                 echo "  --no-font          Skip Nerd Font installation"
                 echo "  --no-completion    Skip shell completion installation"
                 echo "  --uninstall        Uninstall crust (keeps rules, config, secrets, DB)"
-                echo "  --purge            Uninstall crust and delete all data including DB"
+                echo "  --purge            Uninstall crust and delete DB (keeps config, secrets, rules)"
                 echo "  --help, -h         Show this help"
                 exit 0
                 ;;

@@ -21,7 +21,7 @@
     Uninstall crust (keeps rules, config, secrets, DB).
 
 .PARAMETER Purge
-    Uninstall crust and delete all data including DB.
+    Uninstall crust and delete DB (keeps config, secrets, rules).
 
 .PARAMETER Help
     Show usage help.
@@ -330,7 +330,7 @@ if ($Help) {
     Write-Host "  -NoTUI           Build without TUI dependencies (plain text only)"
     Write-Host "  -NoFont          Skip Nerd Font installation"
     Write-Host "  -Uninstall       Uninstall crust (keeps rules, config, secrets, DB)"
-    Write-Host "  -Purge           Uninstall crust and delete all data including DB"
+    Write-Host "  -Purge           Uninstall crust and delete DB (keeps config, secrets, rules)"
     Write-Host "  -Help, -h        Show this help"
     exit 0
 }

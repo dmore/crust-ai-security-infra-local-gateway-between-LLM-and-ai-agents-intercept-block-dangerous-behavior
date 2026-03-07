@@ -2,6 +2,7 @@ package mcpdiscover
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,6 +67,9 @@ func PatchConfigsWithClients(crustBin string, clients []ClientDef) PatchResult {
 // patchConfigFile rewrites stdio servers in a single config file.
 // Returns the number of servers patched.
 func patchConfigFile(path string, client ClientDef, crustBin string) (int, error) {
+	if crustBin == "" {
+		return 0, errors.New("crust binary path is empty — cannot wrap MCP servers")
+	}
 	root, servers, origData, err := readServersMap(path, client.ServersKey)
 	if err != nil {
 		return 0, err

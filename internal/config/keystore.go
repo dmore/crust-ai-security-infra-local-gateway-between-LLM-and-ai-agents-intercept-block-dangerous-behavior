@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -81,7 +82,7 @@ func fileGet(key string) (string, error) {
 
 	var secrets secretsMap
 	if err := json.NewDecoder(f).Decode(&secrets); err != nil {
-		return "", ErrKeyNotFound
+		return "", fmt.Errorf("secrets.json is corrupted: %w", err)
 	}
 
 	val, ok := secrets[key]

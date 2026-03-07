@@ -2121,7 +2121,7 @@ func FuzzPipeBypass(f *testing.F) {
 			left := cmd[:pipeIdx]
 			right := cmd[pipeIdx+9:] // len(" | xargs ") == 9
 			// Left must be "echo /abs/path" (no chains, no subshells)
-			if strings.HasPrefix(left, "echo ") && !strings.ContainsAny(left, ";|&(){}$`#") {
+			if strings.HasPrefix(left, "echo ") && !strings.ContainsAny(left, ";|&(){}$`#<>") {
 				echoArg := strings.TrimSpace(left[5:])
 				// Strip common echo flags (-n, -e, -E) before checking
 				for strings.HasPrefix(echoArg, "-") {
