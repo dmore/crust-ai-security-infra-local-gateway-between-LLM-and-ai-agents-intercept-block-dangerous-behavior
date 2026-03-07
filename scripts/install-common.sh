@@ -27,7 +27,6 @@ ICON_CHECK="✔"    # U+2714
 ICON_CROSS="✖"    # U+2716
 ICON_WARN="⚠"     # U+26A0
 ICON_INFO="ℹ"     # U+2139
-ICON_DOT="●"      # U+25CF
 ICON_DIAMOND="◆"  # U+25C6  (brand prefix)
 
 # ─── Configuration ────────────────────────────────────────────────────────────
