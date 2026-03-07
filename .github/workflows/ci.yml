@@ -158,6 +158,7 @@ jobs:
 
       - name: Install gitleaks (DLP dependency)
         # Version pinned in GITLEAKS_VERSION at repo root (single source of truth)
+        shell: bash
         run: go install "github.com/zricethezav/gitleaks/v8@$(tr -d '[:space:]' < GITLEAKS_VERSION)"
 
       - name: Build (default + notui)
@@ -226,6 +227,7 @@ jobs:
 
       - name: Install gitleaks (DLP dependency)
         if: github.ref == 'refs/heads/main'
+        shell: bash
         run: go install "github.com/zricethezav/gitleaks/v8@$(tr -d '[:space:]' < GITLEAKS_VERSION)"
 
       - name: Build
