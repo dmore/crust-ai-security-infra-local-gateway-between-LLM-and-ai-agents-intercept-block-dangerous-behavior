@@ -238,8 +238,21 @@ ensure_go() {
             _install_go_tarball "$os" "$arch"
             ;;
         linux)
+            # Alpine: apk community ships a recent Go — try first, fall back if too old
+            if command -v apk &>/dev/null; then
+                spinner_start "Installing Go via apk"
+                if apk add --no-cache go >/dev/null 2>&1; then
+                    spinner_stop
+                    if _go_version_ok; then
+                        ok "Go $(_go_current_version) installed via apk"
+                        return 0
+                    fi
+                    warn "apk provided Go $(_go_current_version) — ${GO_MIN_VERSION}+ required, upgrading via direct download"
+                else
+                    spinner_warn "apk install failed — trying direct download"
+                fi
             # snap usually has a current release; apt/dnf ship outdated versions
-            if command -v snap &>/dev/null; then
+            elif command -v snap &>/dev/null; then
                 spinner_start "Installing Go via snap"
                 if snap install go --classic >/dev/null 2>&1; then
                     export PATH="/snap/bin:${PATH}"
@@ -298,7 +311,11 @@ ensure_git() {
             exit 1
             ;;
         linux)
-            if command -v apt-get &>/dev/null; then
+            if command -v apk &>/dev/null; then
+                spinner_start "Installing git via apk"
+                apk add --no-cache git >/dev/null 2>&1 && spinner_ok "git installed" && return 0
+                spinner_warn "apk install failed"
+            elif command -v apt-get &>/dev/null; then
                 spinner_start "Installing git via apt"
                 sudo apt-get install -y git >/dev/null 2>&1 && spinner_ok "git installed" && return 0
                 spinner_warn "apt install failed"
@@ -315,7 +332,7 @@ ensure_git() {
                 sudo zypper install -y git >/dev/null 2>&1 && spinner_ok "git installed" && return 0
                 spinner_warn "zypper install failed"
             fi
-            fail "Cannot install git automatically. Run: sudo apt install git"
+            fail "Cannot install git automatically. Run: apk add git  (or your distro's equivalent)"
             ;;
         freebsd)
             spinner_start "Installing git via pkg"
@@ -338,14 +355,18 @@ ensure_download_tool() {
             fail "curl not found on macOS — please check your system."
             ;;
         linux)
-            if command -v apt-get &>/dev/null; then
+            if command -v apk &>/dev/null; then
+                apk add --no-cache curl >/dev/null 2>&1 && ok "curl installed" && return 0
+            elif command -v apt-get &>/dev/null; then
                 sudo apt-get install -y curl >/dev/null 2>&1 && ok "curl installed" && return 0
             elif command -v dnf &>/dev/null; then
                 sudo dnf install -y curl >/dev/null 2>&1 && ok "curl installed" && return 0
             elif command -v pacman &>/dev/null; then
                 sudo pacman -Sy --noconfirm curl >/dev/null 2>&1 && ok "curl installed" && return 0
+            elif command -v zypper &>/dev/null; then
+                sudo zypper install -y curl >/dev/null 2>&1 && ok "curl installed" && return 0
             fi
-            fail "Cannot install curl. Run: sudo apt install curl"
+            fail "Cannot install curl. Run: apk add curl  (or your distro's equivalent)"
             ;;
         freebsd)
             sudo pkg install -y curl >/dev/null 2>&1 && ok "curl installed" && return 0
