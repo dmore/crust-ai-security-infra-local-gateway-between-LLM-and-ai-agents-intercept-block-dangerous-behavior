@@ -5,7 +5,7 @@ rules:
   - name: protect-env-files
     block: ["**/.env", "**/.env.*"]
     except: ["**/.env.example", "**/.env.template"]
-    actions: [read, write, delete, copy, move, network]
+    actions: [read, execute, write, delete, copy, move, network]
     message: "Blocked: .env files contain secrets (API keys, passwords). Ask the user to provide values instead."
     severity: critical
 
@@ -16,7 +16,7 @@ rules:
       - "$HOME/.ssh/config"
     except:
       - "$HOME/.ssh/id_*.pub"
-    actions: [read, write, delete, copy, move, network]
+    actions: [read, execute, write, delete, copy, move, network]
     message: "Blocked: SSH private keys are authentication credentials."
     severity: critical
 
@@ -31,7 +31,7 @@ rules:
       - "/etc/master.passwd"
       - "/etc/sudoers"
       - "/etc/sudoers.d/**"
-    actions: [read, write, delete, copy, move, network]
+    actions: [read, execute, write, delete, copy, move, network]
     message: "Blocked: system authentication files contain credentials (/etc/shadow, /etc/sudoers)."
     severity: critical
 
@@ -43,7 +43,7 @@ rules:
     block:
       - "**/.crust/**"
       - "**/crust*.db"
-    actions: [read, write, delete, copy, move, network]
+    actions: [read, execute, write, delete, copy, move, network]
     message: "Blocked: Crust internal data is protected from tampering."
     severity: critical
 
@@ -65,7 +65,7 @@ rules:
       - "$HOME/.lesshst"
       # Fish stores history in XDG data dir, not dotfile
       - "$HOME/.local/share/fish/fish_history"
-    actions: [read, write, delete, copy, move, network]
+    actions: [read, execute, write, delete, copy, move, network]
     message: "Blocked: shell history may contain passwords and tokens typed on the command line."
     severity: high
 
@@ -90,7 +90,7 @@ rules:
       # Terraform (project-scoped)
       - "**/terraform.tfstate"
       - "**/terraform.tfstate.backup"
-    actions: [read, write, delete, copy, move, network]
+    actions: [read, execute, write, delete, copy, move, network]
     message: "Blocked: cloud credential files contain authentication secrets. Use environment variables instead."
     severity: critical
 
@@ -105,7 +105,7 @@ rules:
       - "$HOME/.gnupg/trustdb.gpg"
       - "$HOME/.gnupg/random_seed"
     # No except needed — block list targets only private key material
-    actions: [read, write, delete, copy, move, network]
+    actions: [read, execute, write, delete, copy, move, network]
     message: "Blocked: GPG private keys are cryptographic credentials."
     severity: critical
 
@@ -151,7 +151,7 @@ rules:
       - "$HOME/.config/BraveSoftware/Brave-Browser/**/Cookies"
       - "$HOME/AppData/Local/BraveSoftware/Brave-Browser/User Data/**/Login Data"
       - "$HOME/AppData/Local/BraveSoftware/Brave-Browser/User Data/**/Cookies"
-    actions: [read, write, delete, copy, move, network]
+    actions: [read, execute, write, delete, copy, move, network]
     message: "Blocked: browser data contains saved passwords, cookies, and session tokens."
     severity: high
 
@@ -166,7 +166,7 @@ rules:
       # .netrc stores plaintext credentials for HTTP services (git, curl, ftp)
       - "$HOME/.netrc"
       - "$HOME/_netrc"
-    actions: [read, write, delete, copy, move, network]
+    actions: [read, execute, write, delete, copy, move, network]
     message: "Blocked: git credential files (.git-credentials, .netrc) contain plaintext auth tokens."
     severity: critical
 
@@ -197,7 +197,7 @@ rules:
       # Maven (settings.xml contains server credentials)
       - "$HOME/.m2/settings.xml"
       - "$HOME/.m2/settings-security.xml"
-    actions: [read, write, delete, copy, move, network]
+    actions: [read, execute, write, delete, copy, move, network]
     message: "Blocked: package manager configs (.npmrc, .pypirc) may contain registry auth tokens."
     severity: high
 
@@ -325,7 +325,7 @@ rules:
       - "$HOME/Library/Application Support/Notion/**"
       - "$HOME/.config/Notion/**"
       - "$HOME/AppData/Roaming/Notion/**"
-    actions: [read, write, delete, copy, move, network]
+    actions: [read, execute, write, delete, copy, move, network]
     message: "Blocked: desktop app data contains session tokens (Discord, Slack, Telegram, etc.)."
     severity: critical
 
@@ -342,7 +342,7 @@ rules:
       - "$HOME/.local/share/keyrings/**"
       # KDE Wallet
       - "$HOME/.local/share/kwalletd/**"
-    actions: [read, write, delete, copy, move, network]
+    actions: [read, execute, write, delete, copy, move, network]
     message: "Blocked: OS keychain contains all saved passwords and credentials."
     severity: critical
 
@@ -353,7 +353,7 @@ rules:
     block:
       - "$HOME/.config/gh/hosts.yml"
       - "$HOME/AppData/Roaming/GitHub CLI/hosts.yml"
-    actions: [read, write, delete, copy, move, network]
+    actions: [read, execute, write, delete, copy, move, network]
     message: "Blocked: GitHub CLI hosts.yml contains OAuth tokens. Use `gh` CLI or env vars instead."
     severity: critical
 
@@ -470,7 +470,7 @@ rules:
     locked: true
     match:
       host: "re:^169\\.254\\.169\\.254$|^metadata\\.google\\.internal$|^100\\.100\\.100\\.200$|^fd00:ec2::254$"
-    actions: [read, write, network]
+    actions: [read, execute, write, network]
     message: "Blocked: cloud metadata endpoint exposes IAM credentials — SSRF attack vector."
     severity: critical
 
