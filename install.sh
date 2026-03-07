@@ -48,42 +48,24 @@ main() {
 
     print_banner ""
 
+    local src_dir
     if [ -n "$LOCAL_SRC" ]; then
-        # Local build mode: skip clone, build from local source directory.
-        # Useful for Docker, CI, or development installs.
         init_steps 5
-
-        step "Detecting system"
-        detect_platform
-
-        step "Checking requirements"
-        check_requirements "go"
-
-        step "Building Crust"
-        local build_version="$VERSION"
-        if [ "$build_version" = "latest" ]; then
-            # Try to detect version from git tags in local source
-            build_version=$(git -C "$LOCAL_SRC" describe --tags --always 2>/dev/null || echo "dev")
+        src_dir="$LOCAL_SRC"
+        if [ "$VERSION" = "latest" ]; then
+            VERSION=$(git -C "$src_dir" describe --tags --always 2>/dev/null || echo "dev")
         fi
-        build_go_binary "$LOCAL_SRC" "$build_version"
-
-        step "Installing"
-        install_go_binary "$LOCAL_SRC"
-        setup_data_dir
-
-        step "Finalizing"
-        setup_completion
-        setup_gitleaks
-        setup_font
     else
         init_steps 7
+    fi
 
-        step "Detecting system"
-        detect_platform
+    step "Detecting system"
+    detect_platform
 
-        step "Checking requirements"
-        check_requirements "go"
+    step "Checking requirements"
+    check_requirements "go"
 
+    if [ -z "$LOCAL_SRC" ]; then
         step "Fetching version"
         resolve_version
 
@@ -93,19 +75,20 @@ main() {
 
         step "Cloning repository"
         clone_repo "$VERSION" "$tmp_dir/crust"
-
-        step "Building Crust"
-        build_go_binary "$tmp_dir/crust" "$VERSION"
-
-        step "Installing"
-        install_go_binary "$tmp_dir/crust"
-        setup_data_dir
-
-        step "Finalizing"
-        setup_completion
-        setup_gitleaks
-        setup_font
+        src_dir="$tmp_dir/crust"
     fi
+
+    step "Building Crust"
+    build_go_binary "$src_dir" "$VERSION"
+
+    step "Installing"
+    install_go_binary "$src_dir"
+    setup_data_dir
+
+    step "Finalizing"
+    setup_completion
+    setup_gitleaks
+    setup_font
 
     echo ""
     if [ "${_PLAIN:-0}" = "1" ]; then
