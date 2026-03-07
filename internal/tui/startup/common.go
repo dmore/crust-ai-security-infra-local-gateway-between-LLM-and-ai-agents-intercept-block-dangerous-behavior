@@ -21,7 +21,7 @@ type Config struct {
 	AutoMode bool // auto mode: resolve provider from model name (per-provider keys or client auth)
 	// Basic
 	EndpointURL   string
-	APIKey        string //nolint:gosec // not a hardcoded credential, user-provided config field
+	APIKey        string
 	EncryptionKey string
 	// Advanced - Telemetry
 	TelemetryEnabled bool

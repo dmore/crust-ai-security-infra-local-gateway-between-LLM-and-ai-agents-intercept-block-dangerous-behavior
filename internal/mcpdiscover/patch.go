@@ -44,7 +44,7 @@ func PatchConfigs(crustBin string) PatchResult {
 }
 
 // PatchConfigsWithClients is the testable variant of PatchConfigs.
-func PatchConfigsWithClients(crustBin string, clients []clientDef) PatchResult {
+func PatchConfigsWithClients(crustBin string, clients []ClientDef) PatchResult {
 	var result PatchResult
 	for _, client := range clients {
 		path := client.ConfigPath()
@@ -65,7 +65,7 @@ func PatchConfigsWithClients(crustBin string, clients []clientDef) PatchResult {
 
 // patchConfigFile rewrites stdio servers in a single config file.
 // Returns the number of servers patched.
-func patchConfigFile(path string, client clientDef, crustBin string) (int, error) {
+func patchConfigFile(path string, client ClientDef, crustBin string) (int, error) {
 	root, servers, origData, err := readServersMap(path, client.ServersKey)
 	if err != nil {
 		return 0, err
@@ -161,7 +161,7 @@ func RestoreAll() int {
 }
 
 // RestoreAllWithClients is the testable variant.
-func RestoreAllWithClients(clients []clientDef) int {
+func RestoreAllWithClients(clients []ClientDef) int {
 	restored := 0
 	for _, client := range clients {
 		path := client.ConfigPath()
@@ -177,4 +177,32 @@ func RestoreAllWithClients(clients []clientDef) int {
 		restored++
 	}
 	return restored
+}
+
+// PatchClientDef patches a single MCP client config to route its stdio servers
+// through "crust wrap". Used by the daemon registry for per-client patching.
+func PatchClientDef(c ClientDef, crustBin string) error {
+	path := c.ConfigPath()
+	if path == "" {
+		return nil
+	}
+	_, err := patchConfigFile(path, c, crustBin)
+	if os.IsNotExist(err) {
+		return nil // config file absent — not an error
+	}
+	return err
+}
+
+// RestoreClientDef restores a single MCP client config from its backup.
+// Used by the daemon registry for per-client restoration.
+func RestoreClientDef(c ClientDef) error {
+	path := c.ConfigPath()
+	if path == "" {
+		return nil
+	}
+	err := RestoreConfig(path)
+	if os.IsNotExist(err) {
+		return nil // no backup — nothing to restore
+	}
+	return err
 }

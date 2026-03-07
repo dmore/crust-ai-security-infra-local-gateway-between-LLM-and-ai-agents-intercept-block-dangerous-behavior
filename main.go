@@ -621,6 +621,10 @@ func runStop() {
 	running, _ := daemon.IsRunning()
 	if !running {
 		tui.PrintInfo("Crust is not running")
+		// Daemon may have crashed after patching agent configs but before its
+		// defers ran. Attempt a best-effort restore so configs aren't left
+		// pointing at the (now-gone) proxy.
+		daemon.RestoreAgentConfigs()
 		return
 	}
 

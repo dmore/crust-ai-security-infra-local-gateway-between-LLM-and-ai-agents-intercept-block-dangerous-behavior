@@ -90,12 +90,12 @@ func ReadSSEEvents(ctx context.Context, r io.Reader) <-chan SSEEvent {
 // WriteSSEEvent writes an SSE event to an http.ResponseWriter and flushes.
 func WriteSSEEvent(w http.ResponseWriter, event SSEEvent) error {
 	if event.Type != "" {
-		if _, err := fmt.Fprintf(w, "event: %s\n", event.Type); err != nil { //nolint:gosec // SSE protocol, not HTML
+		if _, err := fmt.Fprintf(w, "event: %s\n", event.Type); err != nil {
 			return err
 		}
 	}
 	if event.ID != "" {
-		if _, err := fmt.Fprintf(w, "id: %s\n", event.ID); err != nil { //nolint:gosec // SSE protocol, not HTML
+		if _, err := fmt.Fprintf(w, "id: %s\n", event.ID); err != nil {
 			return err
 		}
 	}

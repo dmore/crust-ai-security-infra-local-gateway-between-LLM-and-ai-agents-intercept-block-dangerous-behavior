@@ -238,10 +238,11 @@ func (e *Extractor) EnableSubprocessIsolation(exePath string) error {
 	return nil
 }
 
-// EnablePSWorker starts a persistent pwsh subprocess for accurate PowerShell
-// command analysis. pwshPath must be the path to pwsh.exe or powershell.exe.
-// Only call this on Windows — the subprocess is real, not a no-op. The call
-// site in engine.go is gated behind runtime.GOOS == "windows". Falls back to
+// EnablePSWorker starts a pool of pwsh worker subprocesses for accurate
+// PowerShell command analysis. pwshPath must be the path to pwsh.exe or
+// powershell.exe. Only call this on Windows (GOOS=windows covers both native
+// and MSYS2/Cygwin) — the subprocesses are real, not no-ops. The call site
+// in engine.go is gated behind runtime.GOOS == "windows". Falls back to
 // the heuristic PS transform if this method is not called or returns an error.
 func (e *Extractor) EnablePSWorker(pwshPath string) error {
 	pool, err := pwsh.NewWorkerPool(pwshPath, 0) // 0 = auto-size
@@ -760,6 +761,7 @@ func defaultCommandDB() map[string]CommandInfo {
 		"pwsh":           {Operation: OpExecute, PathFlags: []string{"-File"}, SkipFlags: []string{"-NoProfile", "-NonInteractive", "-NoLogo", "-ExecutionPolicy", "-WindowStyle", "-OutputFormat", "-InputFormat"}},
 		"pwsh.exe":       {Operation: OpExecute, PathFlags: []string{"-File"}, SkipFlags: []string{"-NoProfile", "-NonInteractive", "-NoLogo", "-ExecutionPolicy", "-WindowStyle", "-OutputFormat", "-InputFormat"}},
 		"cmd.exe":        {Operation: OpExecute, PathArgIndex: []int{0}},
+		"cmd":            {Operation: OpExecute, PathArgIndex: []int{0}},
 		"mshta":          {Operation: OpExecute, PathArgIndex: []int{0}},
 		"cscript":        {Operation: OpExecute, PathArgIndex: []int{0}},
 		"wscript":        {Operation: OpExecute, PathArgIndex: []int{0}},
@@ -786,6 +788,7 @@ func defaultCommandDB() map[string]CommandInfo {
 		"sc":       {Operation: OpWrite, PathArgIndex: []int{1, 2, 3}},
 		"schtasks": {Operation: OpExecute, PathArgIndex: []int{0, 1, 2}},
 		"forfiles": {Operation: OpExecute, PathArgIndex: []int{0, 1}, PathFlags: []string{"/P", "/M", "/C"}},
+		"call":     {Operation: OpExecute, PathArgIndex: []int{0}}, // cmd.exe CALL built-in: executes a .bat/.cmd script
 
 		// Scheduled task commands
 		"crontab": {Operation: OpExecute, PathArgIndex: []int{}},
@@ -866,6 +869,8 @@ func defaultCommandDB() map[string]CommandInfo {
 		"Invoke-Expression":      {Operation: OpExecute, PathArgIndex: []int{0}}, // -Command handled by recursive PS parser above
 		"iex":                    {Operation: OpExecute, PathArgIndex: []int{0}},
 		"Start-Process":          {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-FilePath", "-ArgumentList"}},
+		"Invoke-Item":            {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-Path", "-LiteralPath"}},
+		"ii":                     {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-Path", "-LiteralPath"}},
 		"saps":                   {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-FilePath"}},
 		"Invoke-Command":         {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-ScriptBlock", "-FilePath", "-ComputerName"}},
 		"icm":                    {Operation: OpExecute, PathArgIndex: []int{0}, PathFlags: []string{"-ScriptBlock", "-FilePath"}},
@@ -1104,19 +1109,23 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 
 		// When the pwsh worker is available (Windows), use dual-parse:
 		// bash parser + PS native AST. The heuristic transform (substitutePSVariables
-		// + normalizePSBackslashPaths) is the fallback when pwsh is not available.
+		// + normalizeWinPaths) is the fallback when pwsh is not available.
 		// HasPwsh() covers both native Windows and MSYS2/Git Bash, where users
 		// can invoke pwsh.exe directly even from a bash-compatible shell.
+		rawCmd := cmd // save before transformations; used by PS worker
 		if ShellEnvironment().HasPwsh() && e.pwshWorker == nil && looksLikePowerShell(cmd) {
 			cmd = substitutePSVariables(cmd)
-			cmd = normalizePSBackslashPaths(cmd)
 		}
+		// Normalize Windows-style backslash paths to forward slashes so the POSIX
+		// bash parser doesn't treat \ as an escape character.
+		// Applied universally: C:\path→C:/path and %VAR%\path→%VAR%/path.
+		cmd = normalizeWinPaths(cmd)
 		file, err := parser.Parse(strings.NewReader(cmd), "")
 		if err != nil {
 			// Bash parse failed. On Windows, try the pwsh worker as the authoritative
 			// PS parser — the command may be valid PowerShell even if bash rejects it.
 			if e.pwshWorker != nil {
-				if psResp, psErr := e.pwshWorker.Parse(cmd); psErr == nil && len(psResp.ParseErrors) == 0 {
+				if psResp, psErr := e.pwshWorker.Parse(rawCmd); psErr == nil && len(psResp.ParseErrors) == 0 {
 					if len(psResp.Commands) > 0 {
 						e.extractFromParsedCommandsDepth(info, convertPSCommands(psResp.Commands), 0, nil)
 					}
@@ -1190,11 +1199,11 @@ func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 		// hosts accumulate, operation takes the highest-severity value.
 		// Gated on looksLikePowerShell to avoid unnecessary IPC round-trips and
 		// duplicate path entries for plain bash commands.
-		if e.pwshWorker != nil && looksLikePowerShell(cmd) {
-			psResp, psErr := e.pwshWorker.Parse(cmd)
+		if e.pwshWorker != nil && looksLikePowerShell(rawCmd) {
+			psResp, psErr := e.pwshWorker.Parse(rawCmd)
 			if psErr != nil {
-				// IPC failure means the PS subprocess crashed while parsing this
-				// command. That is suspicious for a PS-looking command — block it
+				// IPC failure means a pool worker crashed or timed out while parsing
+				// this command. That is suspicious for a PS-looking command — block it
 				// rather than silently ignoring the analysis gap.
 				info.Evasive = true
 				info.EvasiveReason = "pwsh worker crashed parsing command: " + psErr.Error()
@@ -1295,6 +1304,10 @@ var unquotedAbsPathRe = regexp.MustCompile(`(?:/[a-zA-Z0-9_.~/-]+|[A-Za-z]:[/\\]
 // Examples: C:\Users\user\.env, \\server\share\.env
 var winBackslashPathRe = regexp.MustCompile(`(?:[A-Za-z]:\\|\\\\)(?:[a-zA-Z0-9_.~-]+\\)*[a-zA-Z0-9_.~*-]+`)
 
+// winCmdEnvPathRe matches cmd.exe-style %VAR%\path patterns.
+// Examples: %USERPROFILE%\.env, %APPDATA%\config\settings.ini
+var winCmdEnvPathRe = regexp.MustCompile(`%[A-Z_][A-Z_0-9]*%(?:\\[a-zA-Z0-9_.~-]+)+`)
+
 // psVarAssignRe matches PowerShell-style variable assignments: $varName = "value" or $varName = value
 var psVarAssignRe = regexp.MustCompile(`\$([a-zA-Z_]\w*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s;|]+))`)
 
@@ -1320,13 +1333,14 @@ func looksLikePowerShell(cmd string) bool {
 	return strings.Contains(cmd, "[System.") || strings.Contains(cmd, "[Microsoft.")
 }
 
-// normalizePSBackslashPaths converts Windows backslash paths to forward slashes
-// so the bash parser doesn't mangle them. Only called when the command looks like
-// PowerShell. E.g., C:\Users\user\.env → C:/Users/user/.env
-func normalizePSBackslashPaths(cmd string) string {
-	return winBackslashPathRe.ReplaceAllStringFunc(cmd, func(match string) string {
-		return strings.ReplaceAll(match, `\`, `/`)
-	})
+// normalizeWinPaths converts Windows backslash paths to forward slashes so the
+// POSIX bash parser doesn't interpret \ as an escape character. Handles both
+// drive-letter paths (C:\path → C:/path) and cmd.exe env-var paths (%VAR%\path → %VAR%/path).
+func normalizeWinPaths(cmd string) string {
+	slash := func(match string) string { return strings.ReplaceAll(match, `\`, `/`) }
+	cmd = winBackslashPathRe.ReplaceAllStringFunc(cmd, slash)
+	cmd = winCmdEnvPathRe.ReplaceAllStringFunc(cmd, slash)
+	return cmd
 }
 
 // substitutePSVariables finds PowerShell $var=value assignments and replaces
@@ -1528,6 +1542,15 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 		// "xargs -a /etc/paths cat" → /etc/paths must be captured before the wrapper
 		// resolution replaces xargs with its wrapped command and discards its own flags.
 		origCmdBase := strings.ToLower(stripPathPrefix(pc.Name))
+
+		// Windows batch files executed directly (e.g., C:\scripts\deploy.bat).
+		// The command name IS the path — record it as an execute target.
+		if strings.HasSuffix(origCmdBase, ".bat") || strings.HasSuffix(origCmdBase, ".cmd") {
+			info.Paths = append(info.Paths, pc.Name)
+			info.addOperation(OpExecute)
+			continue
+		}
+
 		if origCmdBase == "xargs" {
 			if val := extractFlagValue(pc.Args, "-a"); val != "" {
 				info.Paths = append(info.Paths, val)
@@ -1609,6 +1632,29 @@ func (e *Extractor) extractFromParsedCommandsDepth(info *ExtractedInfo, commands
 				if found {
 					continue
 				}
+			}
+		}
+
+		// cmd.exe /c and /k: recursively parse the inner command string.
+		// "cmd /c type C:\file" → inner = "type C:\file" parsed as sub-commands.
+		// WSL is in wrapperCommands so "wsl cat /path" already resolves to "cat"
+		// before reaching here; cmd.exe needs dedicated handling because /c
+		// consumes all remaining args (not just the next one).
+		if cmdBaseName == "cmd" && depth < maxShellRecursionDepth {
+			cmdHandled := false
+			for i, arg := range args {
+				if fl := strings.ToLower(arg); (fl == "/c" || fl == "/k") && i+1 < len(args) {
+					innerCmd := strings.Join(args[i+1:], " ")
+					parsed, resolvedSymtab := e.parseShellCommandsExpand(innerCmd, parentSymtab)
+					if len(parsed) > 0 {
+						e.extractFromParsedCommandsDepth(info, parsed, depth+1, resolvedSymtab)
+						cmdHandled = true
+					}
+					break
+				}
+			}
+			if cmdHandled {
+				continue
 			}
 		}
 
@@ -1905,6 +1951,10 @@ var wrapperCommands = map[string]bool{
 	// Shell builtins that wrap commands
 	"exec": true, // exec replaces process but underlying command is the real one
 
+	// Windows Subsystem for Linux — forwards args to a Linux shell environment.
+	// "wsl cat /home/user/.env" resolves to "cat /home/user/.env".
+	"wsl": true, "wsl.exe": true,
+
 	// Misc
 	"flock":   true,
 	"busybox": true,
@@ -1951,6 +2001,9 @@ var wrapperFlagsWithValue = map[string]map[string]bool{
 	"ionice":      {"-p": true},
 	"chrt":        {"-p": true},
 	"xargs":       {"-a": true, "--arg-file": true, "-E": true, "-I": true, "-L": true, "-n": true, "-P": true, "-s": true},
+	// wsl flags that consume a value before the inner command
+	"wsl":     {"-d": true, "--distribution": true, "-u": true, "--user": true, "--cd": true},
+	"wsl.exe": {"-d": true, "--distribution": true, "-u": true, "--user": true, "--cd": true},
 }
 
 // resolveCommand skips wrapper commands and returns the actual command name

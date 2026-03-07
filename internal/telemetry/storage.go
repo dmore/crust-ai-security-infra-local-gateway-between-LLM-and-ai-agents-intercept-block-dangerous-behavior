@@ -331,7 +331,7 @@ func (s *Storage) UpdateTraceEndTime(traceID types.TraceID, endTime time.Time) e
 // spanToInsertParams converts a Span to the db insert parameters.
 func spanToInsertParams(span *Span) db.InsertSpanParams {
 	return db.InsertSpanParams{
-		TraceRowid:    int64Ptr(span.TraceRowID),
+		TraceRowid:    new(span.TraceRowID),
 		SpanID:        span.SpanID.String(),
 		ParentSpanID:  strPtr(span.ParentSpanID.String()),
 		Name:          span.Name,
@@ -340,8 +340,8 @@ func spanToInsertParams(span *Span) db.InsertSpanParams {
 		EndTime:       timePtr(span.EndTime),
 		Attributes:    span.Attributes,
 		Events:        span.Events,
-		InputTokens:   int64Ptr(span.InputTokens),
-		OutputTokens:  int64Ptr(span.OutputTokens),
+		InputTokens:   new(span.InputTokens),
+		OutputTokens:  new(span.OutputTokens),
 		StatusCode:    strPtr(span.StatusCode),
 		StatusMessage: strPtr(span.StatusMessage),
 	}
@@ -795,10 +795,6 @@ func strPtr(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-func int64Ptr(i int64) *int64 {
-	return &i
 }
 
 func timePtr(t time.Time) *time.Time {

@@ -1,311 +1,174 @@
 #!/bin/bash
+#
+# Crust Installer for OpenClaw
+# https://getcrust.io
+#
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/BakeLens/crust/main/install_openclaw.sh | bash
+#
+
 set -e
 
-echo ""
-echo "Crust Installer for OpenClaw"
-echo "https://getcrust.io"
-echo ""
-echo "OpenClaw, you give your agents real power — executing code, reading files,"
-echo "making API calls. That's what makes you great. But it also means a single"
-echo "hallucination or prompt injection could read .env files, leak SSH keys,"
-echo "or run rm -rf on a user's project."
-echo ""
-echo "Crust is here to watch your back. It's a lightweight security"
-echo "gateway that sits between your agents and LLM providers. It inspects"
-echo "every tool call and blocks the dangerous ones before they happen — so"
-echo "your users get all of your power without the risk."
-echo ""
-echo "Here's how it works once installed:"
-echo "  1. Point your API endpoint to http://localhost:9090"
-echo "  2. Crust figures out the right provider from the model name"
-echo "  3. Auth tokens pass straight through — nothing for you to configure"
-echo "  4. Every tool call is checked against security rules before execution"
-echo ""
-echo "It runs 100% locally. Your users' data never leaves their machine."
-echo ""
-
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
-
-# Configuration
-GITHUB_REPO="BakeLens/crust"
-INSTALL_DIR="$HOME/.local/bin"
-BINARY_NAME="crust"
-DATA_DIR="$HOME/.crust"
-
-# Parse arguments
-VERSION="latest"
-BUILD_TAGS=""
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --version|-v)
-            VERSION="$2"
-            shift 2
-            ;;
-        --no-tui)
-            BUILD_TAGS="notui"
-            shift
-            ;;
-        --help|-h)
-            echo "Crust Installer for OpenClaw"
-            echo ""
-            echo "Usage: curl -fsSL https://raw.githubusercontent.com/BakeLens/crust/main/install_openclaw.sh | bash"
-            echo ""
-            echo "Options:"
-            echo "  --version, -v    Install specific version (default: latest)"
-            echo "  --no-tui         Build without TUI dependencies (plain text only)"
-            echo "  --help, -h       Show this help"
-            exit 0
-            ;;
-        *)
-            echo "Unknown option: $1"
-            exit 1
-            ;;
-    esac
-done
-
-# Print banner
-echo -e "${BOLD}"
-echo "  ____                _   "
-echo " / ___|_ __ _   _ ___| |_ "
-echo "| |   | '__| | | / __| __|"
-echo "| |___| |  | |_| \\__ \\ |_ "
-echo " \\____|_|   \\__,_|___/\\__|"
-echo -e "${NC}"
-echo -e "${BLUE}Secure gateway for AI agents — protecting OpenClaw${NC}"
-echo ""
-
-# Detect OS
-detect_os() {
-    local os
-    os="$(uname -s)"
-    case "$os" in
-        Darwin) echo "darwin" ;;
-        Linux) echo "linux" ;;
-        *) echo "unsupported" ;;
-    esac
-}
-
-# Detect architecture
-detect_arch() {
-    local arch
-    arch="$(uname -m)"
-    case "$arch" in
-        x86_64|amd64) echo "amd64" ;;
-        arm64|aarch64) echo "arm64" ;;
-        *) echo "unsupported" ;;
-    esac
-}
-
-# Check for required commands
-check_requirements() {
-    local missing=()
-
-    if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
-        missing+=("curl or wget")
-    fi
-
-    if ! command -v git &> /dev/null; then
-        missing+=("git")
-    fi
-
-    if ! command -v go &> /dev/null; then
-        missing+=("go")
-    fi
-
-    if [ ${#missing[@]} -gt 0 ]; then
-        echo -e "${RED}Error: Missing required commands: ${missing[*]}${NC}"
-        echo "Install the missing tools and try again."
+# Source shared functions (works for both local and piped execution)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/scripts/install-common.sh" ]; then
+    # shellcheck source=scripts/install-common.sh
+    source "$SCRIPT_DIR/scripts/install-common.sh"
+else
+    # When piped via curl, download common script to temp
+    _common_tmp=$(mktemp)
+    trap 'rm -f "$_common_tmp"' EXIT
+    if command -v curl &>/dev/null; then
+        curl -fsSL "https://raw.githubusercontent.com/BakeLens/crust/main/scripts/install-common.sh" -o "$_common_tmp"
+    elif command -v wget &>/dev/null; then
+        wget -q "https://raw.githubusercontent.com/BakeLens/crust/main/scripts/install-common.sh" -O "$_common_tmp"
+    else
+        echo "Error: curl or wget required" >&2
         exit 1
     fi
-}
+    # shellcheck source=/dev/null
+    source "$_common_tmp"
+fi
 
-# Download file
-download() {
-    local url="$1"
-    local output="$2"
-
-    if command -v curl &> /dev/null; then
-        curl -fsSL "$url" -o "$output"
-    elif command -v wget &> /dev/null; then
-        wget -q "$url" -O "$output"
-    fi
-}
-
-# Get latest version from GitHub (uses latest tag or main)
-get_latest_version() {
-    local url="https://api.github.com/repos/${GITHUB_REPO}/tags"
-    local version
-    if command -v curl &> /dev/null; then
-        version=$(curl -fsSL "$url" 2>/dev/null | grep '"name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-    elif command -v wget &> /dev/null; then
-        version=$(wget -qO- "$url" 2>/dev/null | grep '"name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-    fi
-    echo "${version:-main}"
-}
-
-# Main installation
 main() {
-    echo -e "${YELLOW}Detecting system...${NC}"
+    parse_args "$@"
 
-    local os
-    local arch
-    os=$(detect_os)
-    arch=$(detect_arch)
-
-    if [ "$os" = "unsupported" ]; then
-        echo -e "${RED}Error: Unsupported operating system: $(uname -s)${NC}"
-        echo "Crust supports macOS and Linux only."
-        exit 1
+    if [ -n "$DO_UNINSTALL" ]; then
+        run_uninstall
+        exit 0
     fi
 
-    if [ "$arch" = "unsupported" ]; then
-        echo -e "${RED}Error: Unsupported architecture: $(uname -m)${NC}"
-        echo "Crust supports amd64 and arm64 only."
-        exit 1
-    fi
+    print_banner ""
 
-    echo -e "  OS: ${GREEN}$os${NC}"
-    echo -e "  Arch: ${GREEN}$arch${NC}"
+    # ── OpenClaw introduction ─────────────────────────────────────────────────
+    echo -e "${BOLD}Why Crust for OpenClaw?${NC}"
+    echo ""
+    echo "  OpenClaw gives your agents real power — executing code, reading files,"
+    echo "  making API calls. That's what makes it great. But it also means a single"
+    echo "  hallucination or prompt injection could read .env files, leak SSH keys,"
+    echo "  or run rm -rf on a user's project."
+    echo ""
+    echo "  Crust is a lightweight security gateway that sits between your agents"
+    echo "  and LLM providers. It inspects every tool call and blocks dangerous ones"
+    echo "  before they execute — so your users get all the power without the risk."
+    echo ""
+    echo "  It runs 100% locally. Your users' data never leaves their machine."
     echo ""
 
-    check_requirements
+    init_steps 7
 
-    # Get version
-    if [ "$VERSION" = "latest" ]; then
-        echo -e "${YELLOW}Fetching latest version...${NC}"
-        VERSION=$(get_latest_version)
-    fi
-    echo -e "  Version: ${GREEN}$VERSION${NC}"
-    echo ""
+    step "Detecting system"
+    detect_platform
 
-    # Create temp directory
+    step "Checking requirements"
+    check_requirements "go"
+
+    step "Fetching version"
+    resolve_version
+
     local tmp_dir
     tmp_dir=$(mktemp -d)
     trap 'rm -rf "$tmp_dir"' EXIT
 
-    echo -e "${YELLOW}Cloning repository...${NC}"
-    if ! git clone --depth 1 --branch "$VERSION" "https://github.com/${GITHUB_REPO}.git" "$tmp_dir/crust" 2>/dev/null; then
-        # Fallback to main if version tag doesn't exist
-        git clone --depth 1 "https://github.com/${GITHUB_REPO}.git" "$tmp_dir/crust"
-    fi
+    step "Cloning repository"
+    clone_repo "$VERSION" "$tmp_dir/crust"
 
-    local tags_flag=""
-    if [ -n "${BUILD_TAGS:-}" ]; then
-        tags_flag="-tags ${BUILD_TAGS}"
-        echo -e "${YELLOW}Building Crust (tags: ${BUILD_TAGS})...${NC}"
+    step "Building Crust"
+    build_go_binary "$tmp_dir/crust" "$VERSION"
+
+    step "Installing"
+    install_go_binary "$tmp_dir/crust"
+    setup_data_dir
+
+    step "Finalizing"
+    setup_completion
+    setup_gitleaks
+
+    echo ""
+    if [ "${_PLAIN:-0}" = "1" ]; then
+        echo "Crust installed successfully!"
     else
-        echo -e "${YELLOW}Building Crust...${NC}"
+        echo -e "  ${GREEN}${BOLD}◆ Crust installed successfully!${NC}"
     fi
-    cd "$tmp_dir/crust"
-    # shellcheck disable=SC2086
-    go build ${tags_flag} -ldflags "-X main.Version=${VERSION#v}" -o crust .
-
-    # Install binary
-    echo -e "${YELLOW}Installing to ${INSTALL_DIR}...${NC}"
-    mkdir -p "$INSTALL_DIR"
-    mv "$tmp_dir/crust/crust" "$INSTALL_DIR/$BINARY_NAME"
-    chmod +x "$INSTALL_DIR/$BINARY_NAME"
-
-    # Create data directory
-    echo -e "${YELLOW}Creating data directory...${NC}"
-    mkdir -p "$DATA_DIR"
-    mkdir -p "$DATA_DIR/rules.d"
-
-    # Verify installation
     echo ""
-    echo -e "${GREEN}${BOLD}Crust installed successfully!${NC}"
-    echo ""
-    echo -e "  Binary: ${BLUE}${INSTALL_DIR}/${BINARY_NAME}${NC}"
-    echo -e "  Data:   ${BLUE}${DATA_DIR}/${NC}"
+    echo -e "  ${BLUE}Binary${NC}  ${INSTALL_DIR}/${BINARY_NAME}"
+    echo -e "  ${BLUE}Data${NC}    ${DATA_DIR}/"
     echo ""
 
-    if ! command -v crust &> /dev/null; then
-        echo -e "${YELLOW}Add ~/.local/bin to your PATH:${NC}"
-        echo ""
-        echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc"
-        echo "  source ~/.bashrc"
-        echo ""
-    fi
+    setup_path_hint
 
-    # Start in auto mode with replace block mode
+    # ── Auto-start in replace-block mode ─────────────────────────────────────
     echo -e "${BOLD}Starting Crust in auto mode...${NC}"
     echo ""
     "$INSTALL_DIR/$BINARY_NAME" start --auto --block-mode replace
     echo ""
 
-    echo -e "${BOLD}Setup for OpenClaw:${NC}"
+    # ── OpenClaw-specific setup instructions ─────────────────────────────────
+    echo -e "${BOLD}Setup for OpenClaw${NC}"
     echo ""
-    echo -e "  ${RED}${BOLD}⚠️  Important: Official Login vs API Key${NC}"
+    echo -e "  ${YELLOW}${BOLD}⚠  Important: Official Login vs API Key${NC}"
     echo ""
     echo -e "  If you're using ${BOLD}OpenAI or Anthropic's official login${NC} (OAuth/session-based):"
-    echo -e "    ${RED}⚠️  Crust is currently not compatible${NC}"
+    echo -e "    ${RED}⚠  Crust is currently not compatible${NC}"
     echo ""
-    echo "    Why: OpenClaw hardcodes the official provider URLs (api.openai.com,"
+    echo "    OpenClaw hardcodes the official provider URLs (api.openai.com,"
     echo "    api.anthropic.com) and bypasses baseUrl configuration when using OAuth."
     echo ""
-    echo "    Workaround: Switch to API key authentication instead of OAuth login."
-    echo "    You can get API keys from:"
-    echo "      • OpenAI: https://platform.openai.com/api-keys"
+    echo "    Workaround: switch to API key authentication instead of OAuth login."
+    echo "      • OpenAI:    https://platform.openai.com/api-keys"
     echo "      • Anthropic: https://console.anthropic.com/settings/keys"
     echo ""
     echo -e "  If you're using ${BOLD}third-party API providers${NC} or ${BOLD}API keys${NC}:"
-    echo -e "    ${GREEN}✓ Follow the setup below${NC}"
+    echo -e "    ${GREEN}✔  Follow the setup below${NC}"
     echo ""
-    echo "  ────────────────────────────────────────────────────────────────"
+    echo "  ──────────────────────────────────────────────────────────────────"
     echo ""
-    echo "  Modify ~/.openclaw/openclaw.json to route traffic through Crust."
-    echo "  Pick the option that matches your setup."
+    echo "  Edit ~/.openclaw/openclaw.json to route traffic through Crust."
     echo ""
-    echo -e "  ${YELLOW}Option A) Third-party API providers (OpenRouter, etc.)${NC}"
+    echo -e "  ${YELLOW}Option A — Third-party API providers (OpenRouter, etc.)${NC}"
     echo ""
-    echo "    Find your provider config in openclaw.json and change the baseUrl:"
+    echo "    Change the baseUrl in your provider config:"
     echo ""
     echo -e "    ${GREEN}\"models\": {"
     echo "      \"providers\": {"
     echo "        \"your-provider\": {"
-    echo -e "          \"baseUrl\": \"http://localhost:9090\",${NC}  ${BLUE}← Change this${NC}"
-    echo -e "    ${GREEN}          \"apiKey\": \"...\","
+    echo -e "          \"baseUrl\": \"http://localhost:9090\",  ${BLUE}← change this${NC}"
+    echo -e "    ${GREEN}          \"apiKey\":  \"...\","
     echo "          ..."
     echo "        }"
     echo "      }"
     echo -e "    }${NC}"
     echo ""
-    echo -e "  ${YELLOW}Option B) Direct API keys (with custom provider config)${NC}"
+    echo -e "  ${YELLOW}Option B — Direct API keys (custom provider config)${NC}"
     echo ""
-    echo "    Add a provider under models.providers in openclaw.json:"
+    echo "    Add a provider under models.providers:"
     echo ""
     echo -e "    ${GREEN}\"models\": {"
     echo "      \"mode\": \"merge\","
     echo "      \"providers\": {"
     echo "        \"crust\": {"
     echo "          \"baseUrl\": \"http://localhost:9090\","
-    echo "          \"apiKey\": \"sk-ant-...\","
-    echo "          \"api\": \"anthropic-messages\","
-    echo "          \"models\": [{ \"id\": \"claude-sonnet-4-5\", \"name\": \"Claude Sonnet 4.5\" }]"
+    echo "          \"apiKey\":  \"sk-ant-...\","
+    echo "          \"api\":     \"anthropic-messages\","
+    echo "          \"models\":  [{ \"id\": \"claude-sonnet-4-5\", \"name\": \"Claude Sonnet 4.5\" }]"
     echo "        }"
     echo "      }"
     echo -e "    }${NC}"
     echo ""
-    echo "    And set your model to crust/claude-sonnet-4-5."
+    echo "    Then set your model to crust/claude-sonnet-4-5."
     echo ""
-    echo "  Crust auto-routes to the right provider based on model name"
-    echo "  and passes through your auth tokens. No extra config needed."
+    echo "  Crust auto-routes to the right provider from the model name"
+    echo "  and passes through your auth tokens — no extra config needed."
     echo ""
     echo "  After updating openclaw.json, restart the gateway:"
     echo ""
     echo -e "    ${GREEN}systemctl --user restart openclaw-gateway${NC}"
     echo ""
-    echo -e "${BOLD}Commands:${NC}"
+    echo -e "${BOLD}Commands${NC}"
     echo ""
-    echo "  crust status                   # Check status"
-    echo "  crust logs -f                  # Follow logs"
-    echo "  crust stop                     # Stop crust"
+    echo "    crust status     # Check status"
+    echo "    crust logs -f    # Follow logs"
+    echo "    crust stop       # Stop crust"
     echo ""
 }
 

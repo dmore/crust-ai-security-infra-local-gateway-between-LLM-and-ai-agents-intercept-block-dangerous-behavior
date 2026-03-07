@@ -199,7 +199,7 @@ func checkProvider(client *http.Client, entry providerEntry) DoctorResult {
 	}
 
 	start := time.Now()
-	resp, err := client.Do(req) //nolint:gosec // doctor checks known provider URLs, not user-tainted input
+	resp, err := client.Do(req)
 	result.Duration = time.Since(start)
 
 	if err != nil || resp == nil {
@@ -289,12 +289,10 @@ func normalizeProviderURL(rawURL string) string {
 
 // classifyConnError returns a human-readable diagnosis for a connection error.
 func classifyConnError(err error) string {
-	var netErr net.Error
-	if ok := errors.As(err, &netErr); ok && netErr.Timeout() {
+	if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
 		return "connection timed out"
 	}
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
+	if dnsErr, ok := errors.AsType[*net.DNSError](err); ok {
 		return "DNS lookup failed: " + dnsErr.Name
 	}
 	return fmt.Sprintf("connection error: %v", err)

@@ -14,6 +14,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint-shell:
+    name: Shell Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: '.'
+          additional_files: 'install.sh install_openclaw.sh scripts/install-common.sh'
+          severity: warning
+
   lint-go:
     name: Go Lint
     runs-on: ubuntu-latest
@@ -228,7 +241,12 @@ jobs:
           release: '15.0'
           usesh: true
           prepare: |
-            pkg install -y go
+            # FreeBSD ports ships Go 1.25 — install 1.26.1 directly to match go.mod
+            fetch -o /tmp/go.tar.gz https://dl.google.com/go/go1.26.1.freebsd-amd64.tar.gz
+            tar -C /usr/local -xzf /tmp/go.tar.gz
+            ln -sf /usr/local/go/bin/go    /usr/local/bin/go
+            ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+            rm /tmp/go.tar.gz
           run: |
             go version
             go build ./...
@@ -264,6 +282,209 @@ jobs:
 
       - name: ACP E2E tests
         run: go test -race ./internal/acpwrap/... -v -run E2E -timeout 60s
+
+  e2e-install:
+    name: Install & Agent Config E2E
+    needs: [lint-go]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build and install crust binary from current branch
+        run: |
+          mkdir -p "$HOME/.local/bin" "$HOME/.crust" "$HOME/.crust/rules.d"
+          go build -ldflags "-X main.Version=e2e-test" -o "$HOME/.local/bin/crust" .
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Verify binary works
+        run: crust version
+
+      - name: Create fake OpenClaw config
+        run: |
+          mkdir -p "$HOME/.openclaw"
+          printf '{"baseUrl":"https://api.openai.com","apiKey":"sk-test"}' \
+            > "$HOME/.openclaw/openclaw.json"
+
+      - name: Start crust daemon (auto mode, no upstream required)
+        run: |
+          crust start --auto --no-color
+          # Poll for the backup file created by PatchAgentConfigs (max 15s)
+          n=0
+          while [ "$n" -lt 15 ]; do
+            test -f "$HOME/.openclaw/openclaw.json.crust-backup" && break
+            sleep 1; n=$((n + 1))
+          done
+          test -f "$HOME/.openclaw/openclaw.json.crust-backup" || {
+            echo "ERROR: timeout waiting for daemon to patch OpenClaw config"
+            exit 1
+          }
+
+      - name: Verify OpenClaw config was patched
+        run: |
+          patched=$(jq -r '.baseUrl' "$HOME/.openclaw/openclaw.json")
+          echo "baseUrl after start: $patched"
+          echo "$patched" | grep -q "localhost:9090" || {
+            echo "ERROR: baseUrl not patched to localhost:9090 (got: $patched)"
+            cat "$HOME/.openclaw/openclaw.json"
+            exit 1
+          }
+          test -f "$HOME/.openclaw/openclaw.json.crust-backup" || {
+            echo "ERROR: backup file missing"
+            exit 1
+          }
+
+      - name: Stop crust daemon
+        run: crust stop
+
+      - name: Verify OpenClaw config was restored
+        run: |
+          restored=$(jq -r '.baseUrl' "$HOME/.openclaw/openclaw.json")
+          echo "baseUrl after stop: $restored"
+          test "$restored" = "https://api.openai.com" || {
+            echo "ERROR: baseUrl not restored (got: $restored)"
+            cat "$HOME/.openclaw/openclaw.json"
+            exit 1
+          }
+          test ! -f "$HOME/.openclaw/openclaw.json.crust-backup" || {
+            echo "ERROR: backup file was not removed after restore"
+            exit 1
+          }
+
+      - name: Uninstall crust
+        run: bash install.sh --purge
+
+      - name: Verify uninstall cleaned up
+        run: |
+          test ! -f "$HOME/.local/bin/crust"      || { echo "ERROR: binary not removed"; exit 1; }
+          test ! -f "$HOME/.crust/crust.pid"       || { echo "ERROR: PID file not removed"; exit 1; }
+          test ! -f "$HOME/.crust/crust.log"       || { echo "ERROR: log file not removed"; exit 1; }
+
+      - name: Logs on failure
+        if: failure()
+        run: |
+          cat "$HOME/.crust/crust.log" 2>/dev/null || echo "(no log file found)"
+          echo "--- openclaw config ---"
+          cat "$HOME/.openclaw/openclaw.json" 2>/dev/null || echo "(no openclaw config)"
+          echo "--- backup ---"
+          cat "$HOME/.openclaw/openclaw.json.crust-backup" 2>/dev/null || echo "(no backup)"
+
+  e2e-install-windows:
+    name: Install & Agent Config E2E (Windows)
+    needs: [lint-go]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build and install crust binary from current branch
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:LOCALAPPDATA "Crust"
+          $dataDir    = Join-Path $env:USERPROFILE  ".crust"
+          New-Item -ItemType Directory -Path $installDir                     -Force | Out-Null
+          New-Item -ItemType Directory -Path $dataDir                        -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $dataDir "rules.d")  -Force | Out-Null
+          go build -ldflags "-X main.Version=e2e-test" -o (Join-Path $installDir "crust.exe") .
+          "$installDir" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      - name: Verify binary works
+        shell: pwsh
+        run: crust version
+
+      - name: Create fake OpenClaw config
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:USERPROFILE ".openclaw"
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          '{"baseUrl":"https://api.openai.com","apiKey":"sk-test"}' |
+            Set-Content (Join-Path $dir "openclaw.json") -Encoding utf8
+
+      - name: Start crust daemon (auto mode, no upstream required)
+        shell: pwsh
+        run: |
+          crust start --auto --no-color
+          # Poll for the backup file created by PatchAgentConfigs (max 15s)
+          $backup = Join-Path $env:USERPROFILE ".openclaw\openclaw.json.crust-backup"
+          $n = 0
+          while ($n -lt 15 -and -not (Test-Path $backup)) { Start-Sleep 1; $n++ }
+          if (-not (Test-Path $backup)) {
+            Write-Error "ERROR: timeout waiting for daemon to patch OpenClaw config"
+            exit 1
+          }
+
+      - name: Verify OpenClaw config was patched
+        shell: pwsh
+        run: |
+          $config  = Join-Path $env:USERPROFILE ".openclaw\openclaw.json"
+          $backup  = "$config.crust-backup"
+          $patched = (Get-Content $config | ConvertFrom-Json).baseUrl
+          Write-Host "baseUrl after start: $patched"
+          if ($patched -notlike "*localhost:9090*") {
+            Write-Error "ERROR: baseUrl not patched to localhost:9090 (got: $patched)"
+            Get-Content $config
+            exit 1
+          }
+          if (-not (Test-Path $backup)) {
+            Write-Error "ERROR: backup file missing"
+            exit 1
+          }
+
+      - name: Stop crust daemon
+        shell: pwsh
+        run: crust stop
+
+      - name: Verify OpenClaw config was restored
+        shell: pwsh
+        run: |
+          $config   = Join-Path $env:USERPROFILE ".openclaw\openclaw.json"
+          $backup   = "$config.crust-backup"
+          $restored = (Get-Content $config | ConvertFrom-Json).baseUrl
+          Write-Host "baseUrl after stop: $restored"
+          if ($restored -ne "https://api.openai.com") {
+            Write-Error "ERROR: baseUrl not restored (got: $restored)"
+            Get-Content $config
+            exit 1
+          }
+          if (Test-Path $backup) {
+            Write-Error "ERROR: backup file was not removed after restore"
+            exit 1
+          }
+
+      - name: Uninstall crust
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\install.ps1" -Purge
+
+      - name: Verify uninstall cleaned up
+        shell: pwsh
+        run: |
+          $bin    = Join-Path $env:LOCALAPPDATA "Crust\crust.exe"
+          $pid    = Join-Path $env:USERPROFILE  ".crust\crust.pid"
+          $log    = Join-Path $env:USERPROFILE  ".crust\crust.log"
+          if (Test-Path $bin) { Write-Error "ERROR: binary not removed"; exit 1 }
+          if (Test-Path $pid) { Write-Error "ERROR: PID file not removed"; exit 1 }
+          if (Test-Path $log) { Write-Error "ERROR: log file not removed"; exit 1 }
+
+      - name: Logs on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          $log    = Join-Path $env:USERPROFILE ".crust\crust.log"
+          $config = Join-Path $env:USERPROFILE ".openclaw\openclaw.json"
+          $backup = "$config.crust-backup"
+          Write-Host "--- crust log ---"
+          if (Test-Path $log)    { Get-Content $log }    else { Write-Host "(no log file found)" }
+          Write-Host "--- openclaw config ---"
+          if (Test-Path $config) { Get-Content $config } else { Write-Host "(no openclaw config)" }
+          Write-Host "--- backup ---"
+          if (Test-Path $backup) { Get-Content $backup } else { Write-Host "(no backup)" }
 
   docker-test:
     name: Docker
@@ -308,7 +529,7 @@ jobs:
 
       - name: Graceful shutdown
         run: |
-          docker stop --time 5 crust-ci
+          docker stop --timeout 5 crust-ci
           EXIT_CODE=$(docker inspect crust-ci --format='{{.State.ExitCode}}')
           [ "$EXIT_CODE" = "0" ] || { echo "Exit code: $EXIT_CODE"; docker logs crust-ci; exit 1; }
 

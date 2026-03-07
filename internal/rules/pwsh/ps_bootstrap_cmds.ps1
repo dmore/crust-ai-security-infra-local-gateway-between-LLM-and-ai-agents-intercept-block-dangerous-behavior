@@ -11,7 +11,7 @@
                                 } elseif ($_ -is [VariableExpressionAst]) {
                                     $k = $_.VariablePath.UserPath
                                     if ($_.Splatted) { if ($htVars.ContainsKey($k)) { foreach ($v in $htVars[$k]) { $ag.Add($v) } } }
-                                    else { if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) } }
+                                    else { & $resolveVar $k $ag }
                                 } elseif ($_ -is [ExpandableStringExpressionAst]) {
                                     & $addExp $_ $ag
                                 } elseif ($_ -is [ArrayExpressionAst] -or $_ -is [ArrayLiteralAst]) {
@@ -25,7 +25,7 @@
                                             $ag.Add($_.Argument.Value)
                                         } elseif ($_.Argument -is [VariableExpressionAst]) {
                                             $k = $_.Argument.VariablePath.UserPath
-                                            if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) }
+                                            & $resolveVar $k $ag
                                         } elseif ($_.Argument -is [ExpandableStringExpressionAst]) {
                                             & $addExp $_.Argument $ag
                                         } elseif ($_.Argument -is [ArrayExpressionAst] -or
@@ -53,7 +53,7 @@
                                             & $addExp $e $ag
                                         } elseif ($e -is [VariableExpressionAst]) {
                                             $k = $e.VariablePath.UserPath
-                                            if ($vars.ContainsKey($k)) { $ag.Add($vars[$k]) }
+                                            & $resolveVar $k $ag
                                         }
                                     } catch { $null = $_ }
                                 }

@@ -1984,3 +1984,361 @@ func TestPSWorker_StaticMethod_HasSubst(t *testing.T) {
 		}
 	})
 }
+
+// =============================================================================
+// Windows shell gap tests
+// Each test documents a known coverage gap and will FAIL until the gap is
+// fixed. Keeping them in-tree ensures we don't regress once a fix lands.
+// =============================================================================
+
+// TestExtract_CmdExeSlashC verifies that "cmd /c <inner>" recursively parses
+// the inner command and extracts its paths/operation.
+// Gap: cmd.exe is in commandDB as OpExecute but is not in shellInterpreters,
+// so the /c argument is never parsed as a sub-command.
+func TestExtract_CmdExeSlashC(t *testing.T) {
+	ext := NewExtractor()
+
+	tests := []struct {
+		name      string
+		cmd       string
+		wantOp    Operation
+		wantPaths []string
+	}{
+		{
+			name:      "cmd /c type reads file",
+			cmd:       `cmd /c type C:\Users\user\.env`,
+			wantOp:    OpRead,
+			wantPaths: []string{`C:/Users/user/.env`}, // backslashes normalized to / before bash parse
+		},
+		{
+			name:      "cmd.exe /c type with forward-slash path",
+			cmd:       `cmd.exe /c type C:/Users/user/.env`,
+			wantOp:    OpRead,
+			wantPaths: []string{`C:/Users/user/.env`},
+		},
+		{
+			name:      "cmd /c del deletes file",
+			cmd:       `cmd /c del C:\Users\user\secret.txt`,
+			wantOp:    OpDelete,
+			wantPaths: []string{`C:/Users/user/secret.txt`},
+		},
+		{
+			name:      "cmd /c copy copies file",
+			cmd:       `cmd /c copy C:\Users\user\.env C:\tmp\out.txt`,
+			wantOp:    OpCopy,
+			wantPaths: []string{`C:/Users/user/.env`},
+		},
+		{
+			name:      "cmd /k type keeps file open",
+			cmd:       `cmd /k type C:\Users\user\.ssh\id_rsa`,
+			wantOp:    OpRead,
+			wantPaths: []string{`C:/Users/user/.ssh/id_rsa`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"command": tt.cmd})
+			info := ext.Extract("Bash", json.RawMessage(args))
+			if tt.wantOp != OpNone && info.Operation != tt.wantOp {
+				t.Errorf("Operation = %v, want %v (cmd=%q)", info.Operation, tt.wantOp, tt.cmd)
+			}
+			for _, wantPath := range tt.wantPaths {
+				if !slices.Contains(info.Paths, wantPath) {
+					t.Errorf("path %q not found in %v (cmd=%q)", wantPath, info.Paths, tt.cmd)
+				}
+			}
+		})
+	}
+}
+
+// TestExtract_WslExeCommands verifies that wsl / wsl.exe is treated as a
+// wrapper that forwards its arguments to a Linux command.
+// Gap: wsl.exe has no commandDB entry; Unix-style paths inside WSL
+// invocations are invisible to the extractor.
+func TestExtract_WslExeCommands(t *testing.T) {
+	ext := NewExtractor()
+
+	tests := []struct {
+		name      string
+		cmd       string
+		wantOp    Operation
+		wantPaths []string
+	}{
+		{
+			name:      "wsl cat reads Unix path",
+			cmd:       "wsl cat /home/user/.env", // ~ expands to the host home dir; use absolute path
+			wantOp:    OpRead,
+			wantPaths: []string{"/home/user/.env"},
+		},
+		{
+			name:      "wsl.exe cat reads absolute Unix path",
+			cmd:       "wsl.exe cat /home/user/.ssh/id_rsa",
+			wantOp:    OpRead,
+			wantPaths: []string{"/home/user/.ssh/id_rsa"},
+		},
+		{
+			name:      "wsl rm deletes file",
+			cmd:       "wsl rm /home/user/.env",
+			wantOp:    OpDelete,
+			wantPaths: []string{"/home/user/.env"},
+		},
+		{
+			name:      "wsl with -- separator",
+			cmd:       "wsl -- cat /home/user/.aws/credentials",
+			wantOp:    OpRead,
+			wantPaths: []string{"/home/user/.aws/credentials"},
+		},
+		{
+			name:      "wsl python3 executes script",
+			cmd:       "wsl python3 /home/user/exploit.py",
+			wantOp:    OpExecute,
+			wantPaths: []string{"/home/user/exploit.py"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"command": tt.cmd})
+			info := ext.Extract("Bash", json.RawMessage(args))
+			if tt.wantOp != OpNone && info.Operation != tt.wantOp {
+				t.Errorf("Operation = %v, want %v (cmd=%q)", info.Operation, tt.wantOp, tt.cmd)
+			}
+			for _, wantPath := range tt.wantPaths {
+				if !slices.Contains(info.Paths, wantPath) {
+					t.Errorf("path %q not found in %v (cmd=%q)", wantPath, info.Paths, tt.cmd)
+				}
+			}
+		})
+	}
+}
+
+// TestExtract_PSInvokeItem verifies that Invoke-Item and its alias ii are
+// recognized as OpExecute with the target path extracted.
+// Gap: Invoke-Item is absent from the commandDB.
+func TestExtract_PSInvokeItem(t *testing.T) {
+	ext := NewExtractor()
+
+	tests := []struct {
+		name      string
+		cmd       string
+		wantOp    Operation
+		wantPaths []string
+	}{
+		{
+			name:      "Invoke-Item positional path",
+			cmd:       `Invoke-Item C:\Users\user\.env`,
+			wantOp:    OpExecute,
+			wantPaths: []string{`C:/Users/user/.env`}, // backslashes normalized to /
+		},
+		{
+			name:      "Invoke-Item -Path flag",
+			cmd:       `Invoke-Item -Path C:\Users\user\Documents\secret.pdf`,
+			wantOp:    OpExecute,
+			wantPaths: []string{`C:/Users/user/Documents/secret.pdf`},
+		},
+		{
+			name:      "ii alias",
+			cmd:       `ii C:\Users\user\.ssh\id_rsa`,
+			wantOp:    OpExecute,
+			wantPaths: []string{`C:/Users/user/.ssh/id_rsa`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"command": tt.cmd})
+			info := ext.Extract("Bash", json.RawMessage(args))
+			if tt.wantOp != OpNone && info.Operation != tt.wantOp {
+				t.Errorf("Operation = %v, want %v (cmd=%q)", info.Operation, tt.wantOp, tt.cmd)
+			}
+			for _, wantPath := range tt.wantPaths {
+				if !slices.Contains(info.Paths, wantPath) {
+					t.Errorf("path %q not found in %v (cmd=%q)", wantPath, info.Paths, tt.cmd)
+				}
+			}
+		})
+	}
+}
+
+// TestExtract_BatchFileExecution verifies that .bat and .cmd files are
+// detected as OpExecute targets with their paths extracted.
+// Gap: no commandDB entries or extension-based detection for .bat/.cmd files.
+func TestExtract_BatchFileExecution(t *testing.T) {
+	ext := NewExtractor()
+
+	tests := []struct {
+		name      string
+		cmd       string
+		wantOp    Operation
+		wantPaths []string
+	}{
+		{
+			name:      "absolute .bat execution",
+			cmd:       `C:\scripts\deploy.bat`,
+			wantOp:    OpExecute,
+			wantPaths: []string{`C:/scripts/deploy.bat`}, // backslashes normalized to /
+		},
+		{
+			name:      "absolute .cmd execution",
+			cmd:       `C:\scripts\setup.cmd`,
+			wantOp:    OpExecute,
+			wantPaths: []string{`C:/scripts/setup.cmd`},
+		},
+		{
+			name:      "relative .bat execution",
+			cmd:       `./deploy.bat`, // forward slash; .\deploy.bat would be mangled by bash
+			wantOp:    OpExecute,
+			wantPaths: []string{`./deploy.bat`},
+		},
+		{
+			name:      "call built-in invokes .bat",
+			cmd:       `call deploy.bat`,
+			wantOp:    OpExecute,
+			wantPaths: []string{`deploy.bat`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"command": tt.cmd})
+			info := ext.Extract("Bash", json.RawMessage(args))
+			if tt.wantOp != OpNone && info.Operation != tt.wantOp {
+				t.Errorf("Operation = %v, want %v (cmd=%q)", info.Operation, tt.wantOp, tt.cmd)
+			}
+			for _, wantPath := range tt.wantPaths {
+				if !slices.Contains(info.Paths, wantPath) {
+					t.Errorf("path %q not found in %v (cmd=%q)", wantPath, info.Paths, tt.cmd)
+				}
+			}
+		})
+	}
+}
+
+// TestExtract_CmdPercentVarExpansion verifies that %VAR% environment variable
+// syntax used by cmd.exe is expanded using the extractor's env map.
+// Gap: the extractor's env expansion handles $VAR and ${VAR} (bash/PS) but
+// not the %VAR% syntax native to cmd.exe.
+//
+// cmd /c recursion is implemented; %VAR% expansion is not yet implemented.
+// The literal %VAR%/path token appears in Paths until percent-expansion lands.
+// TODO: Once percent-expansion is implemented, assert the resolved paths
+// (e.g. C:\Users\user\.env) instead of the raw %USERPROFILE%\.env tokens.
+func TestExtract_CmdPercentVarExpansion(t *testing.T) {
+	ext := NewExtractorWithEnv(map[string]string{
+		"USERPROFILE": `C:\Users\user`,
+		"APPDATA":     `C:\Users\user\AppData\Roaming`,
+		"TEMP":        `C:\Users\user\AppData\Local\Temp`,
+	})
+
+	tests := []struct {
+		name        string
+		cmd         string
+		wantOp      Operation
+		wantRawPath string // literal unexpanded token; %VAR% expansion not yet implemented
+	}{
+		{
+			name:        "type with %USERPROFILE%",
+			cmd:         `cmd /c type %USERPROFILE%\.env`,
+			wantOp:      OpRead,
+			wantRawPath: `%USERPROFILE%/.env`, // backslash normalized to /
+		},
+		{
+			name:        "del with %TEMP%",
+			cmd:         `cmd /c del %TEMP%\secret.txt`,
+			wantOp:      OpDelete,
+			wantRawPath: `%TEMP%/secret.txt`,
+		},
+		{
+			name:        "copy with %APPDATA%",
+			cmd:         `cmd /c copy %APPDATA%\config.ini C:\tmp\out`,
+			wantOp:      OpCopy,
+			wantRawPath: `%APPDATA%/config.ini`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"command": tt.cmd})
+			info := ext.Extract("Bash", json.RawMessage(args))
+			// cmd /c recursion is implemented; operation check is active.
+			if tt.wantOp != OpNone && info.Operation != tt.wantOp {
+				t.Errorf("Operation = %v, want %v (cmd=%q)", info.Operation, tt.wantOp, tt.cmd)
+			}
+			// Until %VAR% expansion is implemented, assert the raw unexpanded token.
+			if !slices.Contains(info.Paths, tt.wantRawPath) {
+				t.Errorf("raw path %q not found in %v (cmd=%q)", tt.wantRawPath, info.Paths, tt.cmd)
+			}
+		})
+	}
+}
+
+// TestPSWorker_EnvVarExpansion verifies that $env:VAR references in
+// PowerShell commands are resolved to their actual values by the pwsh worker.
+// Gap: ps_bootstrap_vars.ps1 only handles simple $var assignments; $env:VAR
+// is a scoped MemberExpressionAst that falls through to empty string.
+func TestPSWorker_EnvVarExpansion(t *testing.T) {
+	pwshPath, ok := FindPwsh()
+	if !ok {
+		t.Skip("pwsh.exe / powershell.exe not found")
+	}
+
+	t.Setenv("USERPROFILE", `C:\Users\user`)
+	t.Setenv("APPDATA", `C:\Users\user\AppData\Roaming`)
+
+	ext := NewExtractorWithEnv(map[string]string{
+		"USERPROFILE": `C:\Users\user`,
+		"APPDATA":     `C:\Users\user\AppData\Roaming`,
+	})
+	if err := ext.EnablePSWorker(pwshPath); err != nil {
+		t.Fatalf("EnablePSWorker: %v", err)
+	}
+	defer ext.Close()
+
+	tests := []struct {
+		name      string
+		command   string
+		wantOp    Operation
+		wantPaths []string
+	}{
+		{
+			name:      "Get-Content with $env:USERPROFILE",
+			command:   `Get-Content $env:USERPROFILE\.env`,
+			wantOp:    OpRead,
+			wantPaths: []string{`C:\Users\user\.env`},
+		},
+		{
+			name:      "Remove-Item with $env:APPDATA",
+			command:   `Remove-Item $env:APPDATA\secrets\token.txt`,
+			wantOp:    OpDelete,
+			wantPaths: []string{`C:\Users\user\AppData\Roaming\secrets\token.txt`},
+		},
+		{
+			name:      "Copy-Item source uses $env:USERPROFILE",
+			command:   `Copy-Item $env:USERPROFILE\.ssh\id_rsa C:\tmp\key`,
+			wantOp:    OpCopy,
+			wantPaths: []string{`C:\Users\user\.ssh\id_rsa`},
+		},
+		{
+			name:      "$env:VAR inside expandable string",
+			command:   `Get-Content "$env:USERPROFILE\.aws\credentials"`,
+			wantOp:    OpRead,
+			wantPaths: []string{`C:\Users\user\.aws\credentials`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"command": tt.command})
+			info := ext.Extract("Bash", json.RawMessage(args))
+			if tt.wantOp != OpNone && info.Operation != tt.wantOp {
+				t.Errorf("Operation = %v, want %v (cmd=%q)", info.Operation, tt.wantOp, tt.command)
+			}
+			for _, wantPath := range tt.wantPaths {
+				if !slices.Contains(info.Paths, wantPath) {
+					t.Errorf("path %q not found in %v (cmd=%q)", wantPath, info.Paths, tt.command)
+				}
+			}
+		})
+	}
+}

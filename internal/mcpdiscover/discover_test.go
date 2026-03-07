@@ -27,7 +27,7 @@ func TestDiscoverWithClients_StdioServer(t *testing.T) {
 		}
 	}`)
 
-	clients := []clientDef{{
+	clients := []ClientDef{{
 		Client:     ClientCursor,
 		ConfigPath: func() string { return path },
 		ServersKey: "mcpServers",
@@ -76,7 +76,7 @@ func TestDiscoverWithClients_HTTPServer(t *testing.T) {
 		}
 	}`)
 
-	clients := []clientDef{{
+	clients := []ClientDef{{
 		Client:     ClientClaudeDesktop,
 		ConfigPath: func() string { return path },
 		ServersKey: "mcpServers",
@@ -107,7 +107,7 @@ func TestDiscoverWithClients_ServerUrl(t *testing.T) {
 		}
 	}`)
 
-	clients := []clientDef{{
+	clients := []ClientDef{{
 		Client:     ClientWindsurf,
 		ConfigPath: func() string { return path },
 		ServersKey: "mcpServers",
@@ -137,7 +137,7 @@ func TestDiscoverWithClients_MixedServers(t *testing.T) {
 		}
 	}`)
 
-	clients := []clientDef{{
+	clients := []ClientDef{{
 		Client:     ClientClaudeCode,
 		ConfigPath: func() string { return path },
 		ServersKey: "mcpServers",
@@ -174,7 +174,7 @@ func TestDiscoverWithClients_AlreadyWrapped(t *testing.T) {
 		}
 	}`)
 
-	clients := []clientDef{{
+	clients := []ClientDef{{
 		Client:     ClientCursor,
 		ConfigPath: func() string { return path },
 		ServersKey: "mcpServers",
@@ -191,7 +191,7 @@ func TestDiscoverWithClients_AlreadyWrapped(t *testing.T) {
 }
 
 func TestDiscoverWithClients_MissingFile(t *testing.T) {
-	clients := []clientDef{{
+	clients := []ClientDef{{
 		Client:     ClientCursor,
 		ConfigPath: func() string { return "/nonexistent/path/config.json" },
 		ServersKey: "mcpServers",
@@ -211,7 +211,7 @@ func TestDiscoverWithClients_InvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFixture(t, dir, "config.json", `{invalid}`)
 
-	clients := []clientDef{{
+	clients := []ClientDef{{
 		Client:     ClientCursor,
 		ConfigPath: func() string { return path },
 		ServersKey: "mcpServers",
@@ -231,7 +231,7 @@ func TestDiscoverWithClients_EmptyServers(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFixture(t, dir, "config.json", `{"mcpServers": {}}`)
 
-	clients := []clientDef{{
+	clients := []ClientDef{{
 		Client:     ClientCursor,
 		ConfigPath: func() string { return path },
 		ServersKey: "mcpServers",
@@ -248,7 +248,7 @@ func TestDiscoverWithClients_NoServersKey(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFixture(t, dir, "config.json", `{"otherKey": "value"}`)
 
-	clients := []clientDef{{
+	clients := []ClientDef{{
 		Client:     ClientCursor,
 		ConfigPath: func() string { return path },
 		ServersKey: "mcpServers",
@@ -262,7 +262,7 @@ func TestDiscoverWithClients_NoServersKey(t *testing.T) {
 }
 
 func TestDiscoverWithClients_EmptyConfigPath(t *testing.T) {
-	clients := []clientDef{{
+	clients := []ClientDef{{
 		Client:     ClientCursor,
 		ConfigPath: func() string { return "" },
 		ServersKey: "mcpServers",

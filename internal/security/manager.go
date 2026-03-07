@@ -112,18 +112,15 @@ func Init(cfg Config) (*Manager, error) {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
+	m.wg.Go(func() {
 		if err := m.apiHTTPServer.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Error("API server error: %v", err)
 		}
-	}()
+	})
 
 	// Start periodic cleanup if retention is enabled
 	if cfg.RetentionDays > 0 {
-		m.wg.Add(1)
-		go m.cleanupLoop()
+		m.wg.Go(m.cleanupLoop)
 	}
 
 	globalManagerMu.Lock()
@@ -134,8 +131,6 @@ func Init(cfg Config) (*Manager, error) {
 
 // cleanupLoop runs periodic data cleanup
 func (m *Manager) cleanupLoop() {
-	defer m.wg.Done()
-
 	// Run cleanup every hour
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()

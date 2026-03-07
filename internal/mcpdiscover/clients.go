@@ -6,13 +6,17 @@ import (
 	"runtime"
 )
 
-// clientDef describes how to find and parse one client's MCP config.
-type clientDef struct {
+// ClientDef describes how to find and parse one MCP client's config.
+// Add new MCP clients by appending a ClientDef to knownClients below.
+type ClientDef struct {
 	Client     ClientType
 	ConfigPath func() string // returns the config file path (empty if unknown)
 	ServersKey string        // JSON key holding the servers map ("mcpServers" or "servers")
 	URLKeys    []string      // JSON keys for HTTP server URL ("url", "serverUrl")
 }
+
+// ClientName returns the human-readable client name.
+func (c ClientDef) ClientName() string { return string(c.Client) }
 
 // homeJoin returns filepath.Join(home, elems...) or "" if home dir is unavailable.
 func homeJoin(elems ...string) string {
@@ -24,7 +28,7 @@ func homeJoin(elems ...string) string {
 }
 
 // knownClients lists MCP clients whose configs are scanned for auto-discovery.
-var knownClients = []clientDef{
+var knownClients = []ClientDef{
 	{
 		Client: ClientClaudeDesktop,
 		ConfigPath: func() string {
@@ -68,3 +72,7 @@ var knownClients = []clientDef{
 		URLKeys:    []string{"url"},
 	},
 }
+
+// BuiltinClients returns all built-in MCP client definitions.
+// Used by the daemon registry to register each client as a patch target.
+func BuiltinClients() []ClientDef { return knownClients }

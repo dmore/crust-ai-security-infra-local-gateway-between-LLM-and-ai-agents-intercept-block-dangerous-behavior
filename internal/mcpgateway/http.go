@@ -113,7 +113,7 @@ func (g *HTTPGateway) handlePost(w http.ResponseWriter, r *http.Request) {
 	upReq.Header.Set("Accept", "application/json, text/event-stream")
 	g.copyMCPHeaders(r, upReq)
 
-	upResp, err := g.client.Do(upReq) //nolint:gosec // upstream URL is user-configured, not tainted
+	upResp, err := g.client.Do(upReq)
 	if err != nil || upResp == nil {
 		log.Warn("Upstream request failed: %v", err)
 		http.Error(w, "Upstream request failed", http.StatusBadGateway)
@@ -150,7 +150,7 @@ func (g *HTTPGateway) handleGet(w http.ResponseWriter, r *http.Request) {
 	upReq.Header.Set("Accept", "text/event-stream")
 	g.copyMCPHeaders(r, upReq)
 
-	upResp, err := g.client.Do(upReq) //nolint:gosec // upstream URL is user-configured, not tainted
+	upResp, err := g.client.Do(upReq)
 	if err != nil || upResp == nil {
 		log.Warn("Upstream request failed: %v", err)
 		http.Error(w, "Upstream request failed", http.StatusBadGateway)
@@ -214,7 +214,7 @@ func (g *HTTPGateway) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	g.copyMCPHeaders(r, upReq)
 
-	upResp, err := g.client.Do(upReq) //nolint:gosec // upstream URL is user-configured, not tainted
+	upResp, err := g.client.Do(upReq)
 	if err != nil || upResp == nil {
 		log.Warn("Upstream request failed: %v", err)
 		http.Error(w, "Upstream request failed", http.StatusBadGateway)

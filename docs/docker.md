@@ -1,6 +1,6 @@
 # Docker
 
-A [`Dockerfile`](../Dockerfile) is included in the repo.
+A [`Dockerfile`](../Dockerfile) is included in the repo. The builder stage uses `golang:1.26.1-bookworm`; the runtime stage uses `debian:bookworm-slim`.
 
 ## Quick Start
 

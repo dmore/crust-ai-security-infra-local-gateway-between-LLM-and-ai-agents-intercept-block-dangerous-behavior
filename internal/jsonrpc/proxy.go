@@ -88,9 +88,7 @@ func RunProxy(engine *rules.Engine, cmd []string, stdin io.ReadCloser, stdout io
 	var wg sync.WaitGroup
 
 	// Goroutine 1: Inbound (client/IDE -> child subprocess)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer childStdin.Close()
 		if cfg.Inbound.Convert != nil {
 			PipeInspect(log, engine, stdin, childWriter, clientWriter,
@@ -98,12 +96,10 @@ func RunProxy(engine *rules.Engine, cmd []string, stdin io.ReadCloser, stdout io
 		} else {
 			PipePassthrough(log, stdin, childWriter, cfg.Inbound.Label)
 		}
-	}()
+	})
 
 	// Goroutine 2: Outbound (child subprocess -> client/IDE)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer stdoutR.Close()
 		if cfg.Outbound.Convert != nil {
 			PipeInspect(log, engine, stdoutR, clientWriter, childWriter,
@@ -111,14 +107,12 @@ func RunProxy(engine *rules.Engine, cmd []string, stdin io.ReadCloser, stdout io
 		} else {
 			PipePassthrough(log, stdoutR, clientWriter, cfg.Outbound.Label)
 		}
-	}()
+	})
 
 	// Goroutine 3: Forward signals to child
 	// Bug fix #2: signal goroutine tracked in WaitGroup
 	sigCh := ForwardSignals()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for sig := range sigCh {
 			if child.Process != nil {
 				if err := child.Process.Signal(sig); err != nil {
@@ -126,7 +120,7 @@ func RunProxy(engine *rules.Engine, cmd []string, stdin io.ReadCloser, stdout io
 				}
 			}
 		}
-	}()
+	})
 
 	waitErr := child.Wait()
 	StopSignals(sigCh)
@@ -142,8 +136,7 @@ func RunProxy(engine *rules.Engine, cmd []string, stdin io.ReadCloser, stdout io
 	wg.Wait()
 
 	if waitErr != nil {
-		var exitErr *exec.ExitError
-		if errors.As(waitErr, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](waitErr); ok {
 			return exitErr.ExitCode()
 		}
 		return 1

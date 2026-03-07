@@ -25,7 +25,7 @@
   <a href="https://github.com/BakeLens/crust/releases"><img src="https://img.shields.io/github/v/release/BakeLens/crust" alt="Release" /></a>
   <img src="https://img.shields.io/github/go-mod/go-version/BakeLens/crust" alt="Go Version" />
   <img src="https://img.shields.io/badge/License-Elastic%202.0-blue.svg" alt="License" />
-  <img src="https://img.shields.io/badge/Platform-macOS%2011%2B%20%7C%20Linux%20%7C%20Windows%2010%2B%20%7C%20FreeBSD%2014%2B-lightgrey" alt="Platform" />
+  <img src="https://img.shields.io/badge/Platform-macOS%2012%2B%20%7C%20Linux%20%7C%20Windows%2010%2B%20%7C%20FreeBSD%2014%2B-lightgrey" alt="Platform" />
 </p>
 
 <p align="center">
@@ -61,7 +61,7 @@ Crust has five entry points — use one or combine them:
 | **ACP Stdio Proxy** | `crust acp-wrap` | Wraps any [ACP](https://agentclientprotocol.com) agent, intercepting file reads, writes, and terminal commands before the IDE executes them. |
 | **Auto-detect** | `crust wrap` | Inspects both MCP and ACP methods simultaneously — use when you don't know which protocol a subprocess speaks. |
 
-All entry points apply the same [13-step evaluation pipeline](docs/how-it-works.md) — self-protection, input sanitization, Unicode normalization, obfuscation detection, DLP secret scanning, path normalization, symlink resolution, and rule matching — each step in microseconds.
+All entry points apply the same [evaluation pipeline](docs/how-it-works.md) — self-protection, input sanitization, Unicode normalization, obfuscation detection, DLP secret scanning, path normalization, symlink resolution, and rule matching — each step in microseconds.
 
 All activity is logged locally to encrypted storage.
 
@@ -247,7 +247,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## Build from Source
 
-Requires Go 1.24.13+ and a C compiler (CGO is needed for SQLite).
+Requires Go 1.26.1+ and a C compiler (CGO is needed for SQLite).
 
 ```bash
 git clone https://github.com/BakeLens/crust.git
@@ -255,6 +255,8 @@ cd crust
 go build .
 ./crust version   # Windows: .\crust.exe version
 ```
+
+Go 1.26 enables the [Green Tea garbage collector](https://go.dev/blog/go1.26) by default, which reduces GC overhead by 10–40% — this meaningfully improves latency for the hot-path proxy pipeline. Run `go fix ./...` before submitting PRs to apply any pending modernizations automatically.
 
 ## Contributing
 

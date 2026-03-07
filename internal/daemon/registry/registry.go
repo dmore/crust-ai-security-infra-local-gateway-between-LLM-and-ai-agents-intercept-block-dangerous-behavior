@@ -1,0 +1,58 @@
+// Package registry manages all config targets that Crust patches on daemon
+// start and restores on daemon stop.
+//
+// # Adding a new HTTP-proxy agent
+//
+// Add one [HTTPAgent] entry to the init() function in builtin.go:
+//
+//	Register(&HTTPAgent{
+//	    AgentName:  "MyAgent",
+//	    ConfigPath: func() string { home, _ := os.UserHomeDir(); return filepath.Join(home, ".myagent", "config.json") },
+//	    URLKey:     "baseUrl",  // JSON key holding the API endpoint
+//	    PathSuffix: "",         // or "/v1" for OpenAI-compat endpoints
+//	})
+//
+// # Adding a new MCP client
+//
+// Add one ClientDef entry to knownClients in internal/mcpdiscover/clients.go.
+// It is automatically included in the registry via BuiltinClients().
+package registry
+
+import "log"
+
+// Default is the global registry used by the daemon.
+var Default = &Registry{}
+
+// Registry holds all patch targets and provides PatchAll/RestoreAll operations.
+type Registry struct{ targets []Target }
+
+// Register adds a target to the registry.
+func (r *Registry) Register(t Target) { r.targets = append(r.targets, t) }
+
+// Register adds a target to the Default registry.
+// Called from init() in builtin.go for all built-in targets.
+func Register(t Target) { Default.Register(t) }
+
+// PatchAll routes every registered target through the Crust proxy.
+// proxyPort is the listening port; crustBin is the resolved crust binary path.
+// Errors are non-fatal — a failed patch is logged and skipped.
+func (r *Registry) PatchAll(proxyPort int, crustBin string) {
+	for _, t := range r.targets {
+		if err := t.Patch(proxyPort, crustBin); err != nil {
+			log.Printf("crust: patch %s: %v", t.Name(), err)
+		}
+	}
+}
+
+// RestoreAll restores every registered target to its original config.
+// Best-effort: errors are logged and skipped.
+func (r *Registry) RestoreAll() {
+	for _, t := range r.targets {
+		if err := t.Restore(); err != nil {
+			log.Printf("crust: restore %s: %v", t.Name(), err)
+		}
+	}
+}
+
+// Targets returns the registered targets (for testing).
+func (r *Registry) Targets() []Target { return r.targets }

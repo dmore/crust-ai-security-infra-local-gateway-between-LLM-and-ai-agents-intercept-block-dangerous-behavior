@@ -60,16 +60,14 @@ func TestSessionStore_Concurrent(t *testing.T) {
 
 	// Concurrent writers
 	for i := range n {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			id := fmt.Sprintf("session-%d", i)
 			s.Track(id)
 			s.Exists(id)
 			if i%2 == 0 {
 				s.Remove(id)
 			}
-		}(i)
+		})
 	}
 	wg.Wait()
 

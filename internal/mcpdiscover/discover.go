@@ -12,7 +12,7 @@ func Discover() DiscoverResult {
 }
 
 // DiscoverWithClients scans the given client definitions (used for testing).
-func DiscoverWithClients(clients []clientDef) DiscoverResult {
+func DiscoverWithClients(clients []ClientDef) DiscoverResult {
 	var result DiscoverResult
 	for _, client := range clients {
 		path := client.ConfigPath()
@@ -74,7 +74,7 @@ func extractArgs(def map[string]any) []string {
 }
 
 // parseConfigFile reads a config file and extracts MCP server definitions.
-func parseConfigFile(path string, client clientDef) ([]MCPServer, error) {
+func parseConfigFile(path string, client ClientDef) ([]MCPServer, error) {
 	_, servers, _, err := readServersMap(path, client.ServersKey)
 	if err != nil {
 		return nil, err

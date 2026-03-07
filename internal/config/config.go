@@ -51,7 +51,7 @@ type ServerConfig struct {
 // Supports both short form (just a URL string) and expanded form (url + api_key).
 type ProviderConfig struct {
 	URL    string `yaml:"url"`
-	APIKey string `yaml:"api_key"` //nolint:gosec // not a hardcoded credential, user-configured field
+	APIKey string `yaml:"api_key"`
 }
 
 // UnmarshalYAML allows ProviderConfig to be specified as either a plain string
@@ -80,7 +80,7 @@ func (p *ProviderConfig) MarshalJSON() ([]byte, error) {
 	if p.APIKey != "" {
 		return json.Marshal(struct {
 			URL    string `json:"url"`
-			APIKey string `json:"api_key"` //nolint:gosec // redacted value, not a credential
+			APIKey string `json:"api_key"`
 		}{URL: p.URL, APIKey: "***"})
 	}
 	return json.Marshal(p.URL)
@@ -101,7 +101,7 @@ type UpstreamConfig struct {
 	// Timeout in seconds for upstream requests
 	Timeout int `yaml:"timeout"`
 	// APIKey for upstream authentication (set at runtime, not from config file)
-	APIKey string `yaml:"-"` //nolint:gosec // not a hardcoded credential, runtime-set field
+	APIKey string `yaml:"-"`
 	// Providers maps user-defined model keywords to provider configs.
 	// Short form: "my-llama": "http://localhost:11434/v1"
 	// Expanded form: "openai": {url: "https://api.openai.com", api_key: "$OPENAI_API_KEY"}

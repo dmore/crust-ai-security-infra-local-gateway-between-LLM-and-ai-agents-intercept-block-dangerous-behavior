@@ -90,7 +90,7 @@ func NewWorker(pwshPath string) (*Worker, error) {
 	scriptPath := f.Name() // capture once; gosec taint analysis requires consistent path source
 	if _, err := f.WriteString(psBootstrapScript); err != nil {
 		f.Close()
-		os.Remove(scriptPath) //nolint:gosec // path comes from os.CreateTemp, not user input
+		os.Remove(scriptPath)
 		return nil, err
 	}
 	f.Close()
@@ -100,7 +100,7 @@ func NewWorker(pwshPath string) (*Worker, error) {
 		scriptPath: scriptPath,
 	}
 	if err := w.start(); err != nil {
-		os.Remove(scriptPath) //nolint:gosec // path comes from os.CreateTemp, not user input
+		os.Remove(scriptPath)
 		return nil, err
 	}
 	return w, nil

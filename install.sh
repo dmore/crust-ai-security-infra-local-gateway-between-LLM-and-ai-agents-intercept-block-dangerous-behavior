@@ -1,16 +1,14 @@
 #!/bin/bash
 #
-# Crust Installer (Open Source)
+# Crust Installer
 # https://getcrust.io
-#
-# Installs the Crust Go binary only.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/BakeLens/crust/main/install.sh | bash
 #
-# Or with options:
-#   curl -fsSL https://raw.githubusercontent.com/BakeLens/crust/main/install.sh | bash -s -- --version v2.0.0
-#   curl -fsSL https://raw.githubusercontent.com/BakeLens/crust/main/install.sh | bash -s -- --version main
+# With options:
+#   curl -fsSL .../install.sh | bash -s -- --version v2.0.0
+#   curl -fsSL .../install.sh | bash -s -- --no-tui
 #
 
 set -e
@@ -24,9 +22,9 @@ else
     # When piped via curl, download common script to temp
     _common_tmp=$(mktemp)
     trap 'rm -f "$_common_tmp"' EXIT
-    if command -v curl &> /dev/null; then
+    if command -v curl &>/dev/null; then
         curl -fsSL "https://raw.githubusercontent.com/BakeLens/crust/main/scripts/install-common.sh" -o "$_common_tmp"
-    elif command -v wget &> /dev/null; then
+    elif command -v wget &>/dev/null; then
         wget -q "https://raw.githubusercontent.com/BakeLens/crust/main/scripts/install-common.sh" -O "$_common_tmp"
     else
         echo "Error: curl or wget required" >&2
@@ -45,39 +43,55 @@ main() {
     fi
 
     print_banner ""
+    init_steps 7
+
+    step "Detecting system"
     detect_platform
+
+    step "Checking requirements"
     check_requirements "go"
+
+    step "Fetching version"
     resolve_version
 
-    # Create temp directory
     local tmp_dir
     tmp_dir=$(mktemp -d)
     trap 'rm -rf "$tmp_dir"' EXIT
 
+    step "Cloning repository"
     clone_repo "$VERSION" "$tmp_dir/crust"
+
+    step "Building Crust"
     build_go_binary "$tmp_dir/crust" "$VERSION"
+
+    step "Installing"
     install_go_binary "$tmp_dir/crust"
     setup_data_dir
+
+    step "Finalizing"
     setup_completion
     setup_gitleaks
     setup_font
 
-    # Success
     echo ""
-    echo -e "${GREEN}${BOLD}Crust installed successfully!${NC}"
+    if [ "${_PLAIN:-0}" = "1" ]; then
+        echo "Crust installed successfully!"
+    else
+        echo -e "  ${GREEN}${BOLD}◆ Crust installed successfully!${NC}"
+    fi
     echo ""
-    echo -e "  Binary: ${BLUE}${INSTALL_DIR}/${BINARY_NAME}${NC}"
-    echo -e "  Data:   ${BLUE}${DATA_DIR}/${NC}"
+    echo -e "  ${BLUE}Binary${NC}  ${INSTALL_DIR}/${BINARY_NAME}"
+    echo -e "  ${BLUE}Data${NC}    ${DATA_DIR}/"
     echo ""
 
     setup_path_hint
 
-    echo -e "${BOLD}Quick Start:${NC}"
+    echo -e "  ${BOLD}Quick Start${NC}"
     echo ""
-    echo "  crust start                    # Start with interactive setup"
-    echo "  crust status                   # Check status"
-    echo "  crust logs -f                  # Follow logs"
-    echo "  crust stop                     # Stop crust"
+    echo "    crust start      # Start with interactive setup"
+    echo "    crust status     # Check status"
+    echo "    crust logs -f    # Follow logs"
+    echo "    crust stop       # Stop crust"
     echo ""
 }
 

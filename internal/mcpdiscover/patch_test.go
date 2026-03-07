@@ -21,7 +21,7 @@ func TestPatchConfigFile_BasicRoundTrip(t *testing.T) {
 	path := writeFixture(t, dir, "config.json", original)
 	crustBin := "/usr/local/bin/crust"
 
-	client := clientDef{
+	client := ClientDef{
 		Client:     ClientClaudeDesktop,
 		ConfigPath: func() string { return path },
 		ServersKey: "mcpServers",
@@ -122,7 +122,7 @@ func TestPatchConfigFile_Idempotent(t *testing.T) {
 		}
 	}`)
 
-	client := clientDef{
+	client := ClientDef{
 		Client:     ClientCursor,
 		ConfigPath: func() string { return path },
 		ServersKey: "mcpServers",
@@ -159,7 +159,7 @@ func TestPatchConfigFile_SkipsHTTP(t *testing.T) {
 		}
 	}`)
 
-	client := clientDef{
+	client := ClientDef{
 		Client:     ClientClaudeDesktop,
 		ConfigPath: func() string { return path },
 		ServersKey: "mcpServers",
@@ -193,7 +193,7 @@ func TestPatchConfigFile_PreservesNonServerKeys(t *testing.T) {
 		"theme": "dark"
 	}`)
 
-	client := clientDef{
+	client := ClientDef{
 		Client:     ClientClaudeDesktop,
 		ConfigPath: func() string { return path },
 		ServersKey: "mcpServers",
@@ -238,7 +238,7 @@ func TestPatchConfigs_Integration(t *testing.T) {
 		}
 	}`)
 
-	clients := []clientDef{
+	clients := []ClientDef{
 		{Client: ClientCursor, ConfigPath: func() string { return path1 }, ServersKey: "mcpServers", URLKeys: []string{"url"}},
 		{Client: ClientClaudeCode, ConfigPath: func() string { return path2 }, ServersKey: "mcpServers", URLKeys: []string{"url"}},
 	}
@@ -288,7 +288,7 @@ func TestPatchConfigFile_MultipleStdioServers(t *testing.T) {
 		}
 	}`)
 
-	client := clientDef{
+	client := ClientDef{
 		Client:     ClientCursor,
 		ConfigPath: func() string { return path },
 		ServersKey: "mcpServers",
@@ -319,7 +319,7 @@ func TestPatchConfigFile_SkipsAlreadyWrapped(t *testing.T) {
 		}
 	}`)
 
-	client := clientDef{
+	client := ClientDef{
 		Client:     ClientCursor,
 		ConfigPath: func() string { return path },
 		ServersKey: "mcpServers",

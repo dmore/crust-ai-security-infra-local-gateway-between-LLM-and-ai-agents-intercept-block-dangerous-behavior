@@ -63,6 +63,9 @@ linters:
     errcheck:
       check-blank: true
       exclude-functions:
+        # errors.AsType[E](err) returns (E, bool) — E implements error but is the
+        # matched value, not a new error to propagate; blank discard is intentional.
+        - errors.AsType
         # Cleanup/defer operations
         - (*os.File).Close
         - (io.Closer).Close
@@ -169,6 +172,35 @@ linters:
         linters:
           - revive
         text: "var-naming: avoid package names that conflict"
+
+      # gosec taint-analysis false positives — rules are kept enabled to catch real issues;
+      # these specific patterns are architecturally safe by design:
+
+      # G704: client.Do with user-configured provider URLs — this is an intentional
+      # HTTP proxy; forwarding to provider URLs is the core function, not an SSRF bug.
+      - path: internal/(httpproxy|mcpgateway)/
+        linters: [gosec]
+        text: "G704"
+
+      # G705: writes to http.ResponseWriter and os.Stderr — SSE protocol frames
+      # and diagnostic output are not HTML; these are not XSS sinks.
+      - path: internal/(httpproxy|mcpgateway)/
+        linters: [gosec]
+        text: "G705"
+      - path: cmd/mock-acp-agent/
+        linters: [gosec]
+        text: "G705"
+
+      # G703: os.Remove on a path returned by os.CreateTemp — the path is from
+      # the stdlib, not user input; taint analysis is overly conservative here.
+      - path: internal/rules/pwsh/
+        linters: [gosec]
+        text: "G703"
+
+      # G117: struct fields named APIKey — these are user-provided configuration
+      # fields, not hardcoded credentials; the name follows the API's own convention.
+      - linters: [gosec]
+        text: "G117"
 
 issues:
   max-issues-per-linter: 50

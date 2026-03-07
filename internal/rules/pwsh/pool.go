@@ -1,6 +1,9 @@
 package pwsh
 
-import "runtime"
+import (
+	"runtime"
+	"sync"
+)
 
 // defaultPoolSize is the number of pwsh workers to keep ready.
 // Capped at 4: each worker is a full pwsh subprocess (~50 MB RSS + JIT warm-up).
@@ -10,8 +13,7 @@ const defaultPoolSize = 4
 // Callers acquire a worker for the duration of one Parse() call and return it
 // immediately after, allowing N concurrent parses with N workers.
 type WorkerPool struct {
-	workers  chan *Worker
-	pwshPath string
+	workers chan *Worker
 }
 
 // NewWorkerPool creates a pool of size workers, all pointing to pwshPath.
@@ -20,34 +22,53 @@ func NewWorkerPool(pwshPath string, size int) (*WorkerPool, error) {
 	if size <= 0 {
 		size = min(runtime.GOMAXPROCS(0), defaultPoolSize)
 	}
-	ch := make(chan *Worker, size)
-	for range size {
+	workers := make([]*Worker, size)
+	for i := range size {
 		w, err := NewWorker(pwshPath)
 		if err != nil {
-			close(ch)
-			for w := range ch {
+			for _, w := range workers[:i] {
 				w.Stop()
 			}
 			return nil, err
 		}
+		workers[i] = w
+	}
+
+	// Warm up all workers concurrently: each sends a trivial parse so the
+	// pwsh process initializes its bootstrap script and JIT-compiles the hot
+	// path before any real test or production parse arrives. Without warmup,
+	// workers that lose the CPU lottery during parallel startup can still be
+	// cold when first acquired, triggering the 30 s parseTimeout on slow CI
+	// runners. Warmup errors are intentionally ignored — a failed warmup kills
+	// the worker (proc=nil) so Worker.Parse() will restart it automatically.
+	var wg sync.WaitGroup
+	for _, w := range workers {
+		wg.Go(func() {
+			w.Parse("$null") //nolint:errcheck // warmup only; restart handled by Parse()
+		})
+	}
+	wg.Wait()
+
+	ch := make(chan *Worker, size)
+	for _, w := range workers {
 		ch <- w
 	}
-	return &WorkerPool{workers: ch, pwshPath: pwshPath}, nil
+	return &WorkerPool{workers: ch}, nil
 }
 
 // Parse acquires an idle worker, delegates the parse, then returns the worker.
 // Blocks if all workers are busy. Safe for concurrent use.
 func (p *WorkerPool) Parse(cmd string) (Response, error) {
 	w := <-p.workers
-	resp, err := w.Parse(cmd)
-	p.workers <- w
-	return resp, err
+	defer func() { p.workers <- w }()
+	return w.Parse(cmd)
 }
 
-// Stop shuts down all workers in the pool.
+// Stop waits for all in-flight Parse calls to complete, then shuts down every
+// worker. Must not be called concurrently with itself.
 func (p *WorkerPool) Stop() {
-	close(p.workers)
-	for w := range p.workers {
+	for range cap(p.workers) {
+		w := <-p.workers
 		w.Stop()
 	}
 }

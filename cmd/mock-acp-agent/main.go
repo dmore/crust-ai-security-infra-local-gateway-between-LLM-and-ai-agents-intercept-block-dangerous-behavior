@@ -74,7 +74,7 @@ func main() {
 
 		var msg jsonRPCMessage
 		if err := json.Unmarshal(line, &msg); err != nil {
-			fmt.Fprintf(os.Stderr, "[mock-agent] invalid JSON: %s\n", line) //nolint:gosec // stderr, not HTTP
+			fmt.Fprintf(os.Stderr, "[mock-agent] invalid JSON: %s\n", line)
 			continue
 		}
 

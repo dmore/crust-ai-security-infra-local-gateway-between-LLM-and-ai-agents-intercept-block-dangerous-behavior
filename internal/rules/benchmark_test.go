@@ -73,7 +73,7 @@ func BenchmarkRuleMatching(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				_ = engine.Evaluate(tc.call)
 			}
 		})
@@ -137,7 +137,7 @@ func BenchmarkRegexMatching(b *testing.B) {
 				Arguments: json.RawMessage(`{"command": "` + cmd + `"}`),
 			}
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				_ = engine.Evaluate(call)
 			}
 		})
@@ -149,7 +149,7 @@ func BenchmarkEngineCreation(b *testing.B) {
 	b.ReportAllocs()
 	b.Run("with_builtin", func(b *testing.B) {
 		b.ReportAllocs()
-		for range b.N {
+		for b.Loop() {
 			cfg := EngineConfig{
 				DisableBuiltin: false,
 				UserRulesDir:   b.TempDir(),
@@ -160,7 +160,7 @@ func BenchmarkEngineCreation(b *testing.B) {
 
 	b.Run("without_builtin", func(b *testing.B) {
 		b.ReportAllocs()
-		for range b.N {
+		for b.Loop() {
 			cfg := EngineConfig{
 				DisableBuiltin: true,
 				UserRulesDir:   b.TempDir(),
@@ -190,7 +190,7 @@ func BenchmarkParseShellCommandsExpand(b *testing.B) {
 	for _, tc := range commands {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
-			for range b.N {
+			for b.Loop() {
 				NewExtractorWithEnv(nil).parseShellCommandsExpand(tc.cmd, nil)
 			}
 		})
