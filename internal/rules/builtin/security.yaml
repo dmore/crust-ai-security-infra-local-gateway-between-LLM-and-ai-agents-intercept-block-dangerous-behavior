@@ -493,6 +493,10 @@ rules:
       - "**/.cursor/mcp.json"
       # Project-level MCP consent bypass (CVE-2026-21852)
       - "**/.mcp.json"
+      # Zed agent config (CVE-2025-55012)
+      - "$HOME/.config/zed/settings.json"
+      - "$HOME/.config/zed/tasks.json"
+      - "$HOME/.config/zed/extensions.json"
     actions: [write, delete]
     message: "Blocked: agent config files control hooks and MCP trust — modifying them is a privilege escalation vector."
     severity: critical
@@ -512,7 +516,7 @@ rules:
       - "**/.vscode/launch.json"
       - "**/.vscode/tasks.json"
     actions: [write, delete]
-    message: "Blocked: .vscode config files can be abused to auto-approve commands, specify malicious executables, or define arbitrary shell tasks (CVE-2025-53773, CVE-2025-54130). Disable this rule if your agent needs to edit VS Code settings."
+    message: "Blocked: .vscode config files can be abused to auto-approve commands, specify malicious executables, or define arbitrary shell tasks (CVE-2025-53773, CVE-2025-54130, CVE-2025-64660). Disable this rule if your agent needs to edit VS Code settings."
     severity: high
 
   # ===========================================================================

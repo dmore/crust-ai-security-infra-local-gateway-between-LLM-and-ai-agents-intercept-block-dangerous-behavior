@@ -1,9 +1,6 @@
 package pwsh
 
-import (
-	"runtime"
-	"sync"
-)
+import "runtime"
 
 // defaultPoolSize is the number of pwsh workers to keep ready.
 // Capped at 4: each worker is a full pwsh subprocess (~50 MB RSS + JIT warm-up).
@@ -34,20 +31,9 @@ func NewWorkerPool(pwshPath string, size int) (*WorkerPool, error) {
 		workers[i] = w
 	}
 
-	// Warm up all workers concurrently: each sends a trivial parse so the
-	// pwsh process initializes its bootstrap script and JIT-compiles the hot
-	// path before any real test or production parse arrives. Without warmup,
-	// workers that lose the CPU lottery during parallel startup can still be
-	// cold when first acquired, triggering the 30 s parseTimeout on slow CI
-	// runners. Warmup errors are intentionally ignored — a failed warmup kills
-	// the worker (proc=nil) so Worker.Parse() will restart it automatically.
-	var wg sync.WaitGroup
-	for _, w := range workers {
-		wg.Go(func() {
-			w.Parse("$null") //nolint:errcheck // warmup only; restart handled by Parse()
-		})
-	}
-	wg.Wait()
+	// Workers are already warmed up: NewWorker() runs a readiness probe
+	// (Parse("$null")) before returning, so every worker in the pool is
+	// guaranteed responsive.
 
 	ch := make(chan *Worker, size)
 	for _, w := range workers {

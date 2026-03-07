@@ -103,6 +103,48 @@ func NewWorker(pwshPath string) (*Worker, error) {
 		os.Remove(scriptPath)
 		return nil, err
 	}
+
+	// Readiness probe: verify the worker responds before returning it.
+	// Under MSYS2 (MINGW64), PowerShell can hang due to MSYSTEM/SHELL
+	// environment conflicts. A quick probe with startTimeout prevents the
+	// caller from blocking indefinitely on a dead worker.
+	//
+	// We bypass w.Parse() (which holds w.mu for up to parseTimeout=30s)
+	// and drive stdin/stdout directly. Since NewWorker hasn't returned yet,
+	// no other goroutine can access w, so no mutex is needed. This lets
+	// w.kill() run immediately on timeout without waiting for a lock.
+	probeCh := make(chan error, 1)
+	encoder := w.encoder
+	scanner := w.scanner
+	go func() {
+		if err := encoder.Encode(pwshWorkerRequest{Command: "$null"}); err != nil {
+			probeCh <- err
+			return
+		}
+		if scanner.Scan() {
+			probeCh <- nil
+		} else {
+			err := scanner.Err()
+			if err == nil {
+				err = errors.New("pwsh worker: unexpected EOF during startup probe")
+			}
+			probeCh <- err
+		}
+	}()
+	select {
+	case err := <-probeCh:
+		if err != nil {
+			w.Stop()
+			return nil, errors.New("pwsh worker: startup probe failed: " + err.Error())
+		}
+	case <-time.After(startTimeout):
+		// kill() closes stdin/stdout, unblocking the goroutine above.
+		// No mutex needed: we are the sole owner of w before returning.
+		w.kill()
+		os.Remove(scriptPath)
+		return nil, errors.New("pwsh worker: startup probe timed out (possible MSYS2/environment conflict)")
+	}
+
 	return w, nil
 }
 
@@ -136,6 +178,12 @@ func (w *Worker) start() error {
 // parseTimeout is the maximum time to wait for a single Parse response.
 // pwsh startup + JIT can be slow; 30 s is generous but prevents infinite hangs.
 const parseTimeout = 30 * time.Second
+
+// startTimeout is the maximum time to wait for a pwsh process to become
+// responsive during startup. Under MSYS2 (MINGW64 shell), PowerShell can
+// hang indefinitely due to environment conflicts (MSYSTEM, SHELL, etc.).
+// A 15 s timeout lets us fail fast and fall back to heuristic parsing.
+const startTimeout = 15 * time.Second
 
 // Parse sends a command to the pwsh worker and returns the parsed result.
 // Returns an error if the worker died, timed out, or the response was malformed;
