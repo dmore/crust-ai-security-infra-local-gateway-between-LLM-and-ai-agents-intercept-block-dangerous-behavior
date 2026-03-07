@@ -58,15 +58,15 @@ func docContains(t *testing.T, relPath, substr string) {
 const wantDLPPatternCount = 42
 
 // Docs that reference the DLP pattern count:
-//   - README.md: "34 DLP token-detection patterns"
-//   - docs/how-it-works.md: should mention 34
+//   - README.md: "42 DLP token-detection patterns"
+//   - docs/how-it-works.md: should mention 42
 
 func TestDocConsistency_DLPPatternCount(t *testing.T) {
 	got := len(dlpPatterns)
 	if got != wantDLPPatternCount {
 		t.Errorf("len(dlpPatterns) = %d, want %d\n"+
 			"  → Update wantDLPPatternCount in this file AND:\n"+
-			"    - README.md  (\"34 DLP token-detection patterns\")\n"+
+			"    - README.md  (\"42 DLP token-detection patterns\")\n"+
 			"    - docs/how-it-works.md",
 			got, wantDLPPatternCount)
 	}
@@ -102,8 +102,8 @@ func TestDocConsistency_ProtectionRules(t *testing.T) {
 // wantUserDisablableCount = total - locked
 //
 // Docs that reference these numbers:
-//   - README.md: "27 security rules (19 locked, 8 user-disablable)"
-//   - docs/cli.md: "19 locked" rules note for --disable-builtin
+//   - README.md: "27 security rules (24 locked, 3 user-disablable)"
+//   - docs/cli.md: "24 locked" rules note for --disable-builtin
 
 const (
 	wantTotalRuleCount      = 27
@@ -139,14 +139,14 @@ func TestDocConsistency_BuiltinRuleCounts(t *testing.T) {
 	if locked != wantLockedRuleCount {
 		t.Errorf("locked builtin rules = %d, want %d\n"+
 			"  → Update wantLockedRuleCount in this file AND:\n"+
-			"    - README.md  (\"19 locked\")\n"+
+			"    - README.md  (\"24 locked\")\n"+
 			"    - docs/cli.md  (--disable-builtin description)",
 			locked, wantLockedRuleCount)
 	}
 	if userDisablable != wantUserDisablableCount {
 		t.Errorf("user-disablable rules = %d, want %d\n"+
 			"  → Update wantUserDisablableCount in this file AND:\n"+
-			"    - README.md  (\"7 user-disablable\")",
+			"    - README.md  (\"3 user-disablable\")",
 			userDisablable, wantUserDisablableCount)
 	}
 
