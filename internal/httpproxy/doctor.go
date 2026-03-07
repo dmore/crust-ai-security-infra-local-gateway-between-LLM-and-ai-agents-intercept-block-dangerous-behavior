@@ -2,6 +2,7 @@ package httpproxy
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -11,7 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -272,8 +273,8 @@ func mergeProviders(userProviders map[string]config.ProviderConfig) []providerEn
 		entries = append(entries, providerEntry{name: name, config: prov})
 	}
 
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].name < entries[j].name
+	slices.SortFunc(entries, func(a, b providerEntry) int {
+		return cmp.Compare(a.name, b.name)
 	})
 	return entries
 }

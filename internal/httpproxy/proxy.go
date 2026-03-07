@@ -348,7 +348,7 @@ func readAndDecompressBody(w http.ResponseWriter, r *http.Request) (
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		if errors.As(err, new(*http.MaxBytesError)) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok { //nolint:errcheck // AsType returns (E, bool), not error
 			log.Warn("Request body too large (limit: %dMB)", maxRequestBodySize/(1024*1024))
 			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
 			return nil, nil, RequestBody{}, false

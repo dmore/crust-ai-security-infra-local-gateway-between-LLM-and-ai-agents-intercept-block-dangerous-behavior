@@ -102,9 +102,8 @@ Write-Output $out
 	cmd := exec.Command(pwshPath, "-NoProfile", "-NonInteractive", "-Command", psScript)
 	raw, err := cmd.Output()
 	if err != nil {
-		var ee *exec.ExitError
 		stderr := ""
-		if errors.As(err, &ee) {
+		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 			stderr = string(ee.Stderr)
 		}
 		t.Fatalf("PSScriptAnalyzer invocation failed: %v\nstderr: %s", err, stderr)
@@ -178,9 +177,8 @@ Write-Output $out
 	cmd := exec.Command(pwshPath, "-NoProfile", "-NonInteractive", "-Command", psScript)
 	raw, err := cmd.Output()
 	if err != nil {
-		var ee *exec.ExitError
 		stderr := ""
-		if errors.As(err, &ee) {
+		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 			stderr = string(ee.Stderr)
 		}
 		t.Fatalf("PSScriptAnalyzer invocation failed: %v\nstderr: %s", err, stderr)
