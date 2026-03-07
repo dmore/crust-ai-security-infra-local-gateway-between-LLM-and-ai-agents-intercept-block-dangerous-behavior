@@ -638,7 +638,7 @@ parse_args() {
 
 # ─── Uninstall ────────────────────────────────────────────────────────────────
 
-# Uninstall crust. Pass optional extra paths to remove (e.g. sandbox libexec dir).
+# Uninstall crust. Pass optional extra paths to remove.
 run_uninstall() {
     print_banner ""
     echo -e "${BOLD}Uninstalling Crust...${NC}"
