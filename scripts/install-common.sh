@@ -218,10 +218,7 @@ ensure_go() {
         info "Go not found — installing ${GO_MIN_VERSION}"
     fi
 
-    local os; os=$(detect_os)
-    local arch; arch=$(detect_arch)
-
-    case "$os" in
+    case "$OS_NAME" in
         darwin)
             if command -v brew &>/dev/null; then
                 spinner_start "Installing Go via Homebrew"
@@ -234,7 +231,7 @@ ensure_go() {
                 fi
                 spinner_warn "Homebrew install failed — trying direct download"
             fi
-            _install_go_tarball "$os" "$arch"
+            _install_go_tarball "$OS_NAME" "$ARCH_NAME"
             ;;
         linux)
             # Alpine: apk community ships a recent Go — try first, fall back if too old
@@ -262,7 +259,7 @@ ensure_go() {
                 fi
                 spinner_warn "snap install failed — trying direct download"
             fi
-            _install_go_tarball "$os" "$arch"
+            _install_go_tarball "$OS_NAME" "$ARCH_NAME"
             ;;
         freebsd)
             # FreeBSD ports may ship Go 1.25 — try pkg first, fall back if too old
@@ -277,7 +274,7 @@ ensure_go() {
             else
                 spinner_warn "pkg install failed — trying direct download"
             fi
-            _install_go_tarball "$os" "$arch"
+            _install_go_tarball "$OS_NAME" "$ARCH_NAME"
             ;;
     esac
 
@@ -292,9 +289,8 @@ ensure_git() {
     fi
 
     info "git not found — installing"
-    local os; os=$(detect_os)
 
-    case "$os" in
+    case "$OS_NAME" in
         darwin)
             if command -v brew &>/dev/null; then
                 spinner_start "Installing git via Homebrew"
@@ -346,9 +342,8 @@ ensure_download_tool() {
     command -v curl &>/dev/null || command -v wget &>/dev/null && return 0
 
     info "curl/wget not found — installing curl"
-    local os; os=$(detect_os)
 
-    case "$os" in
+    case "$OS_NAME" in
         darwin)
             # curl ships with macOS
             fail "curl not found on macOS — please check your system."
@@ -526,7 +521,8 @@ setup_gitleaks() {
     fi
 
     spinner_start "Installing gitleaks via go install"
-    if go install github.com/zricethezav/gitleaks/v8@v8.30.0 >/dev/null 2>&1; then
+    # Install directly into INSTALL_DIR so it lands on PATH alongside crust.
+    if GOBIN="$INSTALL_DIR" go install github.com/zricethezav/gitleaks/v8@v8.30.0 >/dev/null 2>&1; then
         spinner_ok "gitleaks installed"
         return 0
     fi
@@ -640,7 +636,11 @@ parse_args() {
 # Uninstall crust. Pass optional extra paths to remove.
 run_uninstall() {
     print_banner ""
-    echo -e "${BOLD}Uninstalling Crust...${NC}"
+    if [ "$_PLAIN" = "1" ]; then
+        echo "Uninstalling Crust..."
+    else
+        echo -e "${BOLD}Uninstalling Crust...${NC}"
+    fi
     echo ""
 
     if command -v crust &>/dev/null; then
@@ -687,6 +687,10 @@ run_uninstall() {
     fi
 
     echo ""
-    echo -e "${GREEN}${BOLD}Crust uninstalled successfully.${NC}"
+    if [ "$_PLAIN" = "1" ]; then
+        echo "Crust uninstalled successfully."
+    else
+        echo -e "${GREEN}${BOLD}Crust uninstalled successfully.${NC}"
+    fi
     echo ""
 }

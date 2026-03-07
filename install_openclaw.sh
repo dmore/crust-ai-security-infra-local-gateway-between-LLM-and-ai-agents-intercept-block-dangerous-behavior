@@ -33,6 +33,11 @@ fi
 main() {
     parse_args "$@"
 
+    if [ -n "$DO_UNINSTALL" ]; then
+        run_uninstall
+        exit 0
+    fi
+
     print_banner ""
 
     # ── OpenClaw introduction ─────────────────────────────────────────────────

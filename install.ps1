@@ -146,14 +146,21 @@ function Get-GoVersion {
 function Test-GoVersionOk {
     $v = Get-GoVersion
     if (-not $v) { return $false }
-    $parts = $v -split '\.'
-    $maj = [int]$parts[0]
-    $min = [int]$parts[1]
-    $pat = if ($parts.Count -ge 3) { [int]$parts[2] } else { 0 }
-    if ($maj -gt 1)                           { return $true }
-    if ($maj -eq 1 -and $min -gt 26)          { return $true }
-    if ($maj -eq 1 -and $min -eq 26 -and $pat -ge 1) { return $true }
-    return $false
+    $vp = $v       -split '\.'
+    $rp = $GoMinVer -split '\.'
+    for ($i = 0; $i -lt $rp.Count; $i++) {
+        $vn = if ($i -lt $vp.Count) { [int]$vp[$i] } else { 0 }
+        $rn = [int]$rp[$i]
+        if ($vn -gt $rn) { return $true }
+        if ($vn -lt $rn) { return $false }
+    }
+    return $true  # equal to minimum
+}
+
+# Refresh the current process PATH from the Windows registry (Machine + User).
+function Update-ProcessPath {
+    $env:PATH = [Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
+                [Environment]::GetEnvironmentVariable("PATH", "User")
 }
 
 # ─── Dependency auto-install ──────────────────────────────────────────────────
@@ -176,8 +183,7 @@ function Install-GoLang {
             $null = & winget install --id GoLang.Go --silent `
                 --accept-package-agreements --accept-source-agreements 2>&1
             # Refresh PATH from registry
-            $env:PATH = [Environment]::GetEnvironmentVariable("PATH","Machine") + ";" +
-                        [Environment]::GetEnvironmentVariable("PATH","User")
+            Update-ProcessPath
             if (Test-GoVersionOk) {
                 Write-Ok "Go $(Get-GoVersion) installed via winget"
                 return
@@ -209,8 +215,7 @@ function Install-GoLang {
     }
 
     # Refresh PATH after MSI install
-    $env:PATH = [Environment]::GetEnvironmentVariable("PATH","Machine") + ";" +
-                [Environment]::GetEnvironmentVariable("PATH","User")
+    Update-ProcessPath
 
     if (Test-GoVersionOk) {
         Write-Ok "Go $(Get-GoVersion) installed"
@@ -233,8 +238,7 @@ function Install-GitTool {
         try {
             $null = & winget install --id Git.Git --silent `
                 --accept-package-agreements --accept-source-agreements 2>&1
-            $env:PATH = [Environment]::GetEnvironmentVariable("PATH","Machine") + ";" +
-                        [Environment]::GetEnvironmentVariable("PATH","User")
+            Update-ProcessPath
             if (Test-Command "git") {
                 Write-Ok "git installed via winget"
                 return

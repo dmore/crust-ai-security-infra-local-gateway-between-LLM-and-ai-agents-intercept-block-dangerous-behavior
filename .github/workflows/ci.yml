@@ -312,8 +312,12 @@ jobs:
       - name: Start crust daemon (auto mode, no upstream required)
         run: |
           crust start --auto --no-color
-          # PatchAgentConfigs is called after WritePID; give the daemon a moment
-          sleep 2
+          # Poll for the backup file created by PatchAgentConfigs (max 15s)
+          n=0
+          while [ "$n" -lt 15 ]; do
+            test -f "$HOME/.openclaw/openclaw.json.crust-backup" && break
+            sleep 1; n=$((n + 1))
+          done
 
       - name: Verify OpenClaw config was patched
         run: |
@@ -401,8 +405,10 @@ jobs:
         shell: pwsh
         run: |
           crust start --auto --no-color
-          # PatchAgentConfigs runs after WritePID; give the daemon a moment
-          Start-Sleep -Seconds 3
+          # Poll for the backup file created by PatchAgentConfigs (max 15s)
+          $backup = Join-Path $env:USERPROFILE ".openclaw\openclaw.json.crust-backup"
+          $n = 0
+          while ($n -lt 15 -and -not (Test-Path $backup)) { Start-Sleep 1; $n++ }
 
       - name: Verify OpenClaw config was patched
         shell: pwsh
