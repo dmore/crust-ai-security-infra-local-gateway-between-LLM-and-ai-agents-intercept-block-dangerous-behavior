@@ -89,6 +89,10 @@ info() {
         echo -e "    ${CYAN}${ICON_INFO}${NC}  $*"; fi
 }
 
+print_bold() {
+    if [ "$_PLAIN" = "1" ]; then echo "$*"; else echo -e "${BOLD}$*${NC}"; fi
+}
+
 # ─── Spinner (TTY only; plain mode prints a static dot line) ─────────────────
 _SPINNER_PID=""
 
@@ -636,11 +640,7 @@ parse_args() {
 # Uninstall crust. Pass optional extra paths to remove.
 run_uninstall() {
     print_banner ""
-    if [ "$_PLAIN" = "1" ]; then
-        echo "Uninstalling Crust..."
-    else
-        echo -e "${BOLD}Uninstalling Crust...${NC}"
-    fi
+    print_bold "Uninstalling Crust..."
     echo ""
 
     if command -v crust &>/dev/null; then

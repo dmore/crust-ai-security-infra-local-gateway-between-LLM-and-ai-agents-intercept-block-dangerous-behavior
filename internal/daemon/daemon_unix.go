@@ -108,6 +108,11 @@ func Stop() error {
 	for range 30 {
 		time.Sleep(100 * time.Millisecond)
 		if running, _ := IsRunning(); !running {
+			// Daemon exited. Call stopCleanup() even on graceful exit: it is
+			// idempotent (no backup file → no-op) and covers the case where
+			// the daemon crashed after PatchAgentConfigs but before its defers
+			// (e.g. os.Exit from a failed security.Init).
+			stopCleanup()
 			return nil
 		}
 	}

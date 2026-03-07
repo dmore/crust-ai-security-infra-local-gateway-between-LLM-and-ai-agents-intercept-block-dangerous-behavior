@@ -318,6 +318,10 @@ jobs:
             test -f "$HOME/.openclaw/openclaw.json.crust-backup" && break
             sleep 1; n=$((n + 1))
           done
+          test -f "$HOME/.openclaw/openclaw.json.crust-backup" || {
+            echo "ERROR: timeout waiting for daemon to patch OpenClaw config"
+            exit 1
+          }
 
       - name: Verify OpenClaw config was patched
         run: |
@@ -409,6 +413,10 @@ jobs:
           $backup = Join-Path $env:USERPROFILE ".openclaw\openclaw.json.crust-backup"
           $n = 0
           while ($n -lt 15 -and -not (Test-Path $backup)) { Start-Sleep 1; $n++ }
+          if (-not (Test-Path $backup)) {
+            Write-Error "ERROR: timeout waiting for daemon to patch OpenClaw config"
+            exit 1
+          }
 
       - name: Verify OpenClaw config was patched
         shell: pwsh
