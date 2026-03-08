@@ -216,7 +216,7 @@ func main() {
 		os.Exit(1)
 	}
 	// ValidSeverities and ValidResponseActions live in internal/rules.
-	rulesDir, err := filepath.Abs("../../rules")
+	rulesDir, err := filepath.Abs("../rules")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "abs path rules: %v\n", err)
 		os.Exit(1)

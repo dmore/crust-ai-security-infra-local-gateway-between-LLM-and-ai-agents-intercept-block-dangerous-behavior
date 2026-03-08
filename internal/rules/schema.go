@@ -1,3 +1,5 @@
+//go:generate go run ./cmd/schema-check
+
 package rules
 
 import (
@@ -67,6 +69,7 @@ const (
 	OpMove    Operation = "move"
 	OpExecute Operation = "execute"
 	OpNetwork Operation = "network"
+	OpAll     Operation = "all" // expands to AllOperations at parse time
 )
 
 // ValidOperations is the set of all valid operation types.

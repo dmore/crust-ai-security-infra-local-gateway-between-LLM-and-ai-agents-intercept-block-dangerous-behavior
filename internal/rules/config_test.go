@@ -214,7 +214,7 @@ rules:
 rules:
   - block: "**/.env"
     actions: [reed]`,
-			wantErr: "unknown action",
+			wantErr: "unknown operation",
 		},
 		{
 			name: "duplicate name",

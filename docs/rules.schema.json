@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/BakeLens/crust/docs/rules.schema.json",
+  "title": "Crust Security Rules",
+  "description": "JSON Schema for crust YAML security rules (~/.crust/rules.d/*.yaml). Supports progressive disclosure from simple glob patterns (Level 1) to composite conditions (Level 5).",
+
+  "$defs": {
+    "stringOrArray": {
+      "title": "StringOrArray",
+      "description": "A single string or an array of strings. Both forms are equivalent.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 }
+      ]
+    },
+
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "high", "warning", "info"],
+      "title": "Severity",
+      "description": "Rule severity level. Defaults to 'critical' if omitted."
+    },
+
+    "operation": {
+      "type": "string",
+      "enum": ["read", "write", "delete", "copy", "move", "execute", "network", "all"],
+      "title": "Operation",
+      "description": "A filesystem or network operation type. 'all' expands to all operation types."
+    },
+
+    "matchConfig": {
+      "type": "object",
+      "title": "MatchConfig",
+      "description": "A single match condition. At least one field must be set.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Regex pattern to match against resolved filesystem paths.",
+          "examples": [".*\\.env$", "/etc/.*"]
+        },
+        "command": {
+          "type": "string",
+          "description": "Regex pattern to match against shell commands (Bash tool only).",
+          "examples": ["\\beval\\b", "curl.*\\|.*sh"]
+        },
+        "host": {
+          "type": "string",
+          "description": "Regex pattern to match against hostnames and IP addresses.",
+          "examples": [".*\\.onion$", "169\\.254\\..*"]
+        },
+        "content": {
+          "type": "string",
+          "description": "Regex pattern to match against write content or raw JSON arguments.",
+          "examples": ["(?i)password\\s*="]
+        },
+        "tool": {
+          "$ref": "#/$defs/stringOrArray",
+          "description": "Tool name(s) this condition applies to. Case-insensitive.",
+          "examples": ["bash", ["bash", "write"]]
+        }
+      },
+      "anyOf": [
+        { "required": ["path"] },
+        { "required": ["command"] },
+        { "required": ["host"] },
+        { "required": ["content"] },
+        { "required": ["tool"] }
+      ],
+      "additionalProperties": false
+    },
+
+    "ruleConfig": {
+      "title": "RuleConfig",
+      "description": "A security rule definition. Exactly one of block, match, all, or any must be present.",
+      "oneOf": [
+        {
+          "title": "Simple Block Rule (Level 1-3)",
+          "description": "Block access to paths matching glob patterns, with optional exceptions.",
+          "required": ["block"],
+          "properties": {
+            "block": {
+              "$ref": "#/$defs/stringOrArray",
+              "description": "Glob pattern(s) to block.",
+              "examples": ["**/.env", ["/etc/**", "/var/log/**"]]
+            },
+            "except": {
+              "$ref": "#/$defs/stringOrArray",
+              "description": "Glob pattern(s) to exclude from blocking.",
+              "examples": ["**/.env.example", ["/etc/hostname"]]
+            },
+            "name": {
+              "type": "string",
+              "description": "Rule identifier. Auto-generated from the block pattern if omitted."
+            },
+            "locked": {
+              "type": "boolean",
+              "description": "If true, the rule survives --disable-builtin."
+            },
+            "actions": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/operation" },
+              "description": "Operations this rule applies to. Defaults to all operations if omitted.",
+              "examples": [["read", "write"], ["execute"]]
+            },
+            "message": {
+              "type": "string",
+              "description": "Message shown when the rule blocks. Auto-generated if omitted.",
+              "examples": ["Access to .env files is blocked"]
+            },
+            "severity": {
+              "$ref": "#/$defs/severity"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "title": "Advanced Match Rule (Level 4)",
+          "description": "Match using regex patterns on paths, commands, hosts, content, or tool names.",
+          "required": ["match", "name"],
+          "properties": {
+            "match": { "$ref": "#/$defs/matchConfig" },
+            "name": {
+              "type": "string",
+              "description": "Rule identifier (required for match rules)."
+            },
+            "locked": {
+              "type": "boolean",
+              "description": "If true, the rule survives --disable-builtin."
+            },
+            "actions": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/operation" },
+              "description": "Operations this rule applies to. Defaults to all operations if omitted."
+            },
+            "message": {
+              "type": "string",
+              "description": "Message shown when the rule blocks."
+            },
+            "severity": {
+              "$ref": "#/$defs/severity"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "title": "Composite AND Rule (Level 5)",
+          "description": "Block when ALL conditions match (logical AND).",
+          "required": ["all", "name"],
+          "properties": {
+            "all": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/matchConfig" },
+              "minItems": 1,
+              "description": "All conditions must match for the rule to trigger."
+            },
+            "name": {
+              "type": "string",
+              "description": "Rule identifier (required for composite rules)."
+            },
+            "locked": {
+              "type": "boolean",
+              "description": "If true, the rule survives --disable-builtin."
+            },
+            "actions": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/operation" },
+              "description": "Operations this rule applies to. Defaults to all operations if omitted."
+            },
+            "message": {
+              "type": "string",
+              "description": "Message shown when the rule blocks."
+            },
+            "severity": {
+              "$ref": "#/$defs/severity"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "title": "Composite OR Rule (Level 5)",
+          "description": "Block when ANY condition matches (logical OR).",
+          "required": ["any", "name"],
+          "properties": {
+            "any": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/matchConfig" },
+              "minItems": 1,
+              "description": "Any condition matching triggers the rule."
+            },
+            "name": {
+              "type": "string",
+              "description": "Rule identifier (required for composite rules)."
+            },
+            "locked": {
+              "type": "boolean",
+              "description": "If true, the rule survives --disable-builtin."
+            },
+            "actions": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/operation" },
+              "description": "Operations this rule applies to. Defaults to all operations if omitted."
+            },
+            "message": {
+              "type": "string",
+              "description": "Message shown when the rule blocks."
+            },
+            "severity": {
+              "$ref": "#/$defs/severity"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+
+  "type": "object",
+  "required": ["rules"],
+  "properties": {
+    "rules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ruleConfig" },
+      "minItems": 1,
+      "description": "List of security rules."
+    }
+  },
+  "additionalProperties": false
+}
