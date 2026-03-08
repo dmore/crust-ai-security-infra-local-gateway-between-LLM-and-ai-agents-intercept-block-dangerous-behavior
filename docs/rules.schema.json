@@ -28,6 +28,13 @@
       "description": "A filesystem or network operation type. 'all' expands to all operation types."
     },
 
+    "ruleSource": {
+      "type": "string",
+      "enum": ["builtin", "user", "cli"],
+      "title": "RuleSource",
+      "description": "Origin of a rule. Set at load time, not user-configurable."
+    },
+
     "matchConfig": {
       "type": "object",
       "title": "MatchConfig",

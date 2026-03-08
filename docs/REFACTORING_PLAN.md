@@ -8,17 +8,9 @@ Systematically verified against codebase on 2026-03-08. All findings confirmed w
 
 **Problem:** 5 panics in production code crash the entire proxy on unknown APIType. All confirmed in security-critical request/response paths.
 
-| # | File | Line | Panic Message |
-|---|------|------|---------------|
-| 1 | `internal/security/interceptor.go` | 246 | `panic("unhandled types.APIType: " + ...)` |
-| 2 | `internal/httpproxy/sse_buffer.go` | 348 | `panic("unhandled types.APIType: " + ...)` |
-| 3 | `internal/httpproxy/sse_buffer.go` | 501 | `panic("unhandled types.APIType: " + ...)` |
-| 4 | `internal/httpproxy/sse_parser.go` | 296 | `panic("unhandled types.APIType: " + ...)` |
-| 5 | `internal/rules/dlp_crypto.go` | 68  | `panic("bip39: cannot read embedded ...")` |
+**Fix:** Replaced panics #1-4 with error returns / no-op fallbacks. #5 replaced `panic()` with `fmt.Fprintf(os.Stderr, ...) + os.Exit(1)` for graceful shutdown.
 
-**Fix:** Replace panics #1-4 with error returns. For #5 (init with embedded FS), keep as-is — truly unreachable unless binary is corrupted.
-
-**Effort:** S (1 day)
+**Status:** DONE
 
 ### P0-2: Add `go generate` drift check to CI
 
@@ -50,17 +42,11 @@ Systematically verified against codebase on 2026-03-08. All findings confirmed w
 
 ### P1-1: Extract shared schema-check library
 
-**Problem:** `internal/rules/cmd/schema-check/main.go` (322 lines) and `internal/plugin/cmd/schema-check/main.go` (427 lines) share ~200 lines of nearly identical code: `mapKeys()`, `structFields()`, error collection, output generation.
+**Problem:** `internal/rules/cmd/schema-check/main.go` (322 lines) and `internal/plugin/cmd/schema-check/main.go` (427 lines) share ~200 lines of nearly identical code.
 
-**Fix:** Create `internal/schemacheck/` package with shared helpers:
-- `ParseSchema(path) (*SchemaDoc, error)`
-- `ExtractStructFields(dir, name, tagName) (map[string]bool, error)` — parameterize yaml vs json tag
-- `ExtractMapKeys(dir, varName) ([]string, error)`
-- `ExtractConstValues(dir, names) ([]string, error)`
+**Fix:** Created `internal/schemacheck/` package. Both tools now import shared helpers. rules: 322→119 lines, plugin: 427→150 lines.
 
-Both tools import and call these. ~200 lines removed, ~100 lines added = net -100 lines.
-
-**Effort:** M (2-3 days)
+**Status:** DONE
 
 ### ~~P1-2: Deduplicate APIType switch statements~~
 
@@ -123,9 +109,9 @@ Unexport `CompiledMatch` and `CompiledRule` (verified: only used within rules pa
 
 **Problem:** Secret scanning only runs locally via pre-commit. If developer skips hooks, secrets can leak.
 
-**Fix:** Add `gitleaks/gitleaks-action@v2` to lint or security job.
+**Fix:** Added `gitleaks/gitleaks-action@v2` to security job.
 
-**Effort:** S (30 min)
+**Status:** DONE
 
 ---
 
@@ -141,10 +127,10 @@ Split into db.go, encryption.go, schema.go. **Effort:** M
 Engine uses `Close()`, Manager uses `Shutdown(ctx)`. Pick one pattern. **Effort:** S
 
 ### P2-4: Add benchmark CI
-Run `scripts/bench.sh --quick` on PRs. Detect performance regressions. **Effort:** S
+Run `scripts/bench.sh --quick` on PRs. Detect performance regressions. **Status:** DONE
 
 ### P2-5: Add semgrep SAST to CI
-Currently pre-push only. Add to security job for PR coverage. **Effort:** S
+Currently pre-push only. Add to security job for PR coverage. **Status:** DONE
 
 ### P2-6: Move magic constants to config
 `maxSocketPathLen=104`, `maxRequestBody=100MB`, `DefaultPoolSize=8` etc. scattered in code. Centralize. **Effort:** S
@@ -162,14 +148,14 @@ Currently pre-push only. Add to security job for PR coverage. **Effort:** S
 | Path normalization overlap | normalizer.go delegates to pathutil.go by design | No change |
 | TUI severity functions accept `string` | Intentional — handles both `rules.Severity` and `LintSeverity` | No change |
 | ValidOperations/ValidSeverities runtime maps | Necessary for YAML-sourced input validation | No change |
-| dlp_crypto.go init() panic | Embedded FS, unreachable unless binary corrupted | No change |
+| dlp_crypto.go init() exit | Embedded FS, unreachable unless binary corrupted; uses `os.Exit(1)` instead of panic | No change |
 
 ---
 
 ## Recommended Execution Order
 
-**Phase 1 (1 week):** P0-1 + P1-2 (panics → error returns + APIType dispatch helper)
-**Phase 2 (1 week):** P1-1 + P1-7 + P2-4 + P2-5 (schema dedup, CI hardening)
-**Phase 3 (2 weeks):** P1-3 + P1-4 + P1-5 (interfaces, file splits)
-**Phase 4 (2 weeks):** P1-6 + P2-1 + P2-2 (DI refactor, proxy/storage splits)
+**Phase 1:** ~~P0-1 + P1-2~~ DONE
+**Phase 2:** ~~P1-1 + P1-7 + P2-4 + P2-5~~ DONE
+**Phase 3 (next):** P1-3 + P1-4 + P1-5 (interfaces, file splits)
+**Phase 4:** P1-6 + P2-1 + P2-2 (DI refactor, proxy/storage splits)
 **Phase 5 (ongoing):** P2-3, P2-6, P2-7 (cleanup)

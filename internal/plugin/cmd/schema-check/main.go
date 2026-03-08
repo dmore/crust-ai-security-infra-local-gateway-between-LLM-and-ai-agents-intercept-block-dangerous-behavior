@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/BakeLens/crust/internal/schemacheck"
 )
@@ -140,8 +139,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := schemacheck.WriteGenerated(outputFile, "plugin", "docs/plugin-protocol.schema.json",
-		time.Now().UTC().Format(time.RFC3339)); err != nil {
+	if err := schemacheck.WriteGenerated(outputFile, "plugin", "docs/plugin-protocol.schema.json"); err != nil {
 		fmt.Fprintf(os.Stderr, "write %s: %v\n", outputFile, err)
 		os.Exit(1)
 	}

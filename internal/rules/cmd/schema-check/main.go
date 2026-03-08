@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"time"
 
 	"github.com/BakeLens/crust/internal/schemacheck"
 )
@@ -104,13 +103,22 @@ func main() {
 		}
 	}
 
+	// --- Check ruleSource enum ---
+	if srcDef, ok := doc.Defs["ruleSource"]; ok {
+		goSrc, err := schemacheck.MapKeys(goDir, "ValidSources")
+		if err != nil {
+			c.Check("ValidSources: parse error: %v", err)
+		} else {
+			c.CheckEnumMatch(goSrc, srcDef.Enum, "ValidSources", "ruleSource", false)
+		}
+	}
+
 	if c.Failed() {
 		c.Report("rules schema validation failed")
 		os.Exit(1)
 	}
 
-	if err := schemacheck.WriteGenerated(outputFile, "rules", "docs/rules.schema.json",
-		time.Now().UTC().Format(time.RFC3339)); err != nil {
+	if err := schemacheck.WriteGenerated(outputFile, "rules", "docs/rules.schema.json"); err != nil {
 		fmt.Fprintf(os.Stderr, "write %s: %v\n", outputFile, err)
 		os.Exit(1)
 	}
