@@ -80,6 +80,35 @@ func BenchmarkRuleMatching(b *testing.B) {
 	}
 }
 
+// BenchmarkScanDLP isolates the in-process gitleaks DLP scan cost.
+func BenchmarkScanDLP(b *testing.B) {
+	b.ReportAllocs()
+	scanner, err := NewDLPScanner()
+	if err != nil {
+		b.Fatalf("NewDLPScanner: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{"clean_short", "hello world"},
+		{"clean_code", "func main() {\n\tfmt.Println(\"hello\")\n}"},
+		{"aws_key", "AWS_KEY = 'AKIAIOSFODNN7REALKEY1'"},
+		{"github_pat", "token = ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123"},
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				_ = scanner.Scan(tc.content)
+			}
+		})
+	}
+}
+
 // BenchmarkRuleMatchingParallel benchmarks concurrent rule evaluation.
 func BenchmarkRuleMatchingParallel(b *testing.B) {
 	b.ReportAllocs()

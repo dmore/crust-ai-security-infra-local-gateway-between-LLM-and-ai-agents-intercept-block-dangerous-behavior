@@ -1,22 +1,17 @@
 package rules
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"errors"
-	"os/exec"
-	"strings"
+	"fmt"
 	"sync"
-	"time"
+
+	"github.com/zricethezav/gitleaks/v8/detect"
 )
 
-// DLPScanner provides secret detection via an external gitleaks binary.
-// Required dependency — engine creation fails if gitleaks is not installed.
+// DLPScanner provides secret detection via the gitleaks library (in-process).
+// The detector is created once at init and reused for all scans.
 type DLPScanner struct {
-	binaryPath string
+	detector   *detect.Detector // created once, reused
 	available  bool
-	timeout    time.Duration
 	mu         sync.RWMutex
 	scanCount  int64
 	blockCount int64
@@ -33,36 +28,29 @@ type DLPFinding struct {
 // newDLPScanner creates a scanner, optionally disabled (e.g., for fuzz/unit tests).
 func newDLPScanner(disabled bool) (*DLPScanner, error) {
 	if disabled {
-		return &DLPScanner{timeout: 5 * time.Second}, nil
+		return &DLPScanner{}, nil
 	}
 	return NewDLPScanner()
 }
 
-// NewDLPScanner creates a scanner. Returns an error if gitleaks is not installed.
+// NewDLPScanner creates a scanner with the default gitleaks config.
 func NewDLPScanner() (*DLPScanner, error) {
-	s := &DLPScanner{
-		timeout: 5 * time.Second,
-	}
-
-	path, err := exec.LookPath("gitleaks")
+	det, err := detect.NewDetectorDefaultConfig()
 	if err != nil {
-		return nil, errors.New("gitleaks not found in PATH — required for DLP secret detection. " +
-			"Install: brew install gitleaks  OR  go install github.com/zricethezav/gitleaks/v8@v8.30.0")
+		return nil, fmt.Errorf("gitleaks detector init: %w", err)
 	}
 
-	s.binaryPath = path
-	s.available = true
-	log.Info("DLP enabled: gitleaks found at %s", path)
-	return s, nil
+	log.Info("DLP enabled: gitleaks library loaded (in-process)")
+	return &DLPScanner{detector: det, available: true}, nil
 }
 
-// Available reports whether gitleaks is installed.
+// Available reports whether gitleaks is loaded.
 func (s *DLPScanner) Available() bool {
 	return s != nil && s.available
 }
 
 // Scan checks content for secrets using gitleaks. Returns nil if unavailable.
-func (s *DLPScanner) Scan(content string) []DLPFinding {
+func (s *DLPScanner) Scan(content string) (findings []DLPFinding) {
 	if !s.Available() || content == "" {
 		return nil
 	}
@@ -71,57 +59,32 @@ func (s *DLPScanner) Scan(content string) []DLPFinding {
 	s.scanCount++
 	s.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
-	defer cancel()
-
-	findings := s.runGitleaks(ctx, content, "stdin")
-	if findings == nil {
-		findings = s.runGitleaks(ctx, content, "detect", "--pipe") // older gitleaks
-	}
-
-	if len(findings) > 0 {
-		s.mu.Lock()
-		s.blockCount += int64(len(findings))
-		s.mu.Unlock()
-	}
-
-	return findings
-}
-
-// runGitleaks executes gitleaks and returns parsed findings.
-func (s *DLPScanner) runGitleaks(ctx context.Context, content string, args ...string) []DLPFinding {
-	cmdArgs := make([]string, 0, len(args)+5)
-	cmdArgs = append(cmdArgs, args...)
-	cmdArgs = append(cmdArgs, "--report-format", "json", "--no-banner", "--exit-code", "0")
-	cmd := exec.CommandContext(ctx, s.binaryPath, cmdArgs...) //nolint:gosec // binaryPath is resolved via exec.LookPath at init
-	// WaitDelay forces stdin/stdout goroutines to stop 1s after context cancels.
-	// Without this, a timed-out or killed gitleaks process leaves pipe goroutines
-	// blocked indefinitely — particularly on Windows where killing a process does
-	// not automatically close its pipe handles.
-	cmd.WaitDelay = 1 * time.Second
-	cmd.Stdin = strings.NewReader(content)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			log.Warn("DLP gitleaks scan timed out after %s", s.timeout)
+	// recover() catches any panic in gitleaks (pure Go, no segfaults).
+	defer func() {
+		if r := recover(); r != nil {
+			log.Warn("DLP gitleaks panic (recovered): %v", r)
+			findings = nil
 		}
+	}()
+
+	results := s.detector.DetectString(content)
+	if len(results) == 0 {
 		return nil
 	}
 
-	output := stdout.Bytes()
-	if len(output) == 0 {
-		return nil
-	}
+	s.mu.Lock()
+	s.blockCount += int64(len(results))
+	s.mu.Unlock()
 
-	var findings []DLPFinding
-	if err := json.Unmarshal(output, &findings); err != nil {
-		return nil
+	findings = make([]DLPFinding, len(results))
+	for i, f := range results {
+		findings[i] = DLPFinding{
+			RuleID:      f.RuleID,
+			Description: f.Description,
+			Match:       f.Match,
+			StartLine:   f.StartLine,
+		}
 	}
-
 	return findings
 }
 

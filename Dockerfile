@@ -24,7 +24,6 @@ RUN useradd -m -u 1000 crust && \
     mkdir -p /home/crust/.crust/rules.d && chown -R crust:crust /home/crust/.crust
 
 COPY --from=builder /usr/local/bin/crust /usr/local/bin/crust
-COPY --from=builder /usr/local/bin/gitleaks /usr/local/bin/gitleaks
 
 USER crust
 WORKDIR /home/crust

@@ -255,24 +255,6 @@ function Install-GitTool {
     Write-Fail "git not found. Install from https://git-scm.com/ and re-run."
 }
 
-function Install-Gitleaks {
-    if (Test-Command "gitleaks") {
-        Write-Ok "gitleaks already installed"
-        return
-    }
-    # Read version from GITLEAKS_VERSION (single source of truth)
-    $glVer = "v8.30.0"
-    $glVerFile = Join-Path $PSScriptRoot "GITLEAKS_VERSION"
-    if (Test-Path $glVerFile) { $glVer = (Get-Content $glVerFile -Raw).Trim() }
-    Write-Running "Installing gitleaks $glVer via go install"
-    & go install "github.com/zricethezav/gitleaks/v8@$glVer" 2>&1 | Write-Host
-    if ($LASTEXITCODE -eq 0) {
-        Write-Ok "gitleaks installed"
-        return
-    }
-    Write-Fail "gitleaks install failed — required for DLP secret detection. Install manually: go install github.com/zricethezav/gitleaks/v8@$glVer"
-}
-
 function Install-NerdFont {
     if ($NoTUI -or $NoFont) { return }
 
@@ -318,7 +300,7 @@ function Install-NerdFont {
 
 # ─── Source-only mode ─────────────────────────────────────────────────────
 # When dot-sourced with -SourceOnly, export functions without running main.
-# Usage: . .\install.ps1 -SourceOnly; Install-Gitleaks
+# Usage: . .\install.ps1 -SourceOnly
 if ($SourceOnly) { return }
 
 # ─── Uninstall ────────────────────────────────────────────────────────────────
@@ -494,7 +476,6 @@ try {
         Write-Warn "Shell completion skipped (non-fatal)"
     }
 
-    Install-Gitleaks
     Install-NerdFont
 
     Write-Host ""

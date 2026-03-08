@@ -38,14 +38,6 @@ BINARY_NAME="crust"
 DATA_DIR="${DATA_DIR:-$HOME/.crust}"
 GO_MIN_VERSION="1.26.1"
 GO_DL_BASE="https://dl.google.com/go"
-# Gitleaks version — single source of truth is GITLEAKS_VERSION at repo root.
-# When piped via curl the file isn't available, so we embed a default here.
-GITLEAKS_VERSION="v8.30.0"
-if [ -f "${SCRIPT_DIR:-}/GITLEAKS_VERSION" ]; then
-    GITLEAKS_VERSION="$(tr -d '[:space:]' < "$SCRIPT_DIR/GITLEAKS_VERSION")"
-elif [ -f "${SCRIPT_DIR:-}/../GITLEAKS_VERSION" ]; then
-    GITLEAKS_VERSION="$(tr -d '[:space:]' < "$SCRIPT_DIR/../GITLEAKS_VERSION")"
-fi
 
 # ─── Step counter & progress bar ─────────────────────────────────────────────
 _STEP_N=0
@@ -553,37 +545,6 @@ setup_completion() {
     else
         warn "Shell completion skipped (non-fatal)"
     fi
-}
-
-# Install gitleaks — required for DLP secret detection (200+ patterns).
-setup_gitleaks() {
-    if command -v gitleaks &>/dev/null; then
-        ok "gitleaks already installed"
-        return 0
-    fi
-
-    # Try system package manager (brew on macOS/Linux; no FreeBSD port exists).
-    if sys_install gitleaks; then return 0; fi
-
-    # Fallback: build from source via go install.
-    if ! command -v go &>/dev/null; then
-        spinner_fail "gitleaks install failed — go not found. Install manually: go install github.com/zricethezav/gitleaks/v8@${GITLEAKS_VERSION}"
-    fi
-
-    spinner_start "Installing gitleaks via go install"
-    local go_install_log
-    go_install_log=$(mktemp)
-    if GOBIN="$INSTALL_DIR" go install "github.com/zricethezav/gitleaks/v8@${GITLEAKS_VERSION}" >"$go_install_log" 2>&1; then
-        rm -f "$go_install_log"
-        spinner_ok "gitleaks installed"
-        return 0
-    fi
-    # Show why it failed so CI logs are debuggable.
-    spinner_stop
-    warn "go install output:"
-    cat "$go_install_log" >&2
-    rm -f "$go_install_log"
-    spinner_fail "gitleaks install failed — required for DLP secret detection. Install manually: go install github.com/zricethezav/gitleaks/v8@${GITLEAKS_VERSION}"
 }
 
 # Install Cascadia Mono NF from Nerd Fonts (optional, non-fatal).

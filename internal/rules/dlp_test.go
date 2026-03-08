@@ -620,3 +620,26 @@ func TestCommandUnicodeNormalization(t *testing.T) {
 		})
 	}
 }
+
+// TestDLPScanner_PanicRecovery verifies that a panic inside the gitleaks
+// detector is caught by recover() and Scan returns nil instead of crashing.
+func TestDLPScanner_PanicRecovery(t *testing.T) {
+	scanner, err := NewDLPScanner()
+	if err != nil {
+		t.Fatalf("NewDLPScanner: %v", err)
+	}
+
+	// Swap the detector with nil to force a nil-pointer panic inside Scan.
+	scanner.detector = nil
+
+	findings := scanner.Scan("AKIAIOSFODNN7REALKEY1")
+	if findings != nil {
+		t.Errorf("expected nil findings after panic recovery, got %d", len(findings))
+	}
+
+	// Scanner should still be usable after recovery.
+	scans, _ := scanner.Stats()
+	if scans != 1 {
+		t.Errorf("scanCount = %d, want 1 (scan should be counted before panic)", scans)
+	}
+}

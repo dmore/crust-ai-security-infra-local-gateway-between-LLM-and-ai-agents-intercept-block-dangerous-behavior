@@ -120,7 +120,7 @@ type CompiledRule struct {
 type EngineConfig struct {
 	UserRulesDir        string
 	DisableBuiltin      bool
-	DisableDLP          bool // Skip gitleaks-based DLP scanning (useful in fuzz/unit tests)
+	DisableDLP          bool // Skip DLP scanning via gitleaks library (useful in fuzz/unit tests)
 	SubprocessIsolation bool // Isolate shell interpreter in a subprocess for crash safety
 
 	// PreChecker is called before the evaluation pipeline (e.g., self-protection).

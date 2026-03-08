@@ -66,9 +66,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install crust + gitleaks
-        run: bash install.sh --local . --prefix "$(go env GOPATH)/bin" --no-font --no-completion
-
       - name: Verify PIE binary
         run: |
           go build -buildmode=pie -o crust-pie .
@@ -181,17 +178,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install crust + gitleaks (Linux)
-        if: matrix.os != 'windows-latest'
-        run: bash install.sh --local . --prefix "$(go env GOPATH)/bin" --no-font --no-completion
-
-      - name: Install gitleaks (DLP dependency, Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          . .\install.ps1 -SourceOnly
-          Install-Gitleaks
-
       - name: Build (notui tag check)
         run: go build -tags notui ./...
 
@@ -262,20 +248,9 @@ jobs:
           update: false
           path-type: inherit  # inherit Windows PATH so the Go toolchain is visible
 
-      - name: Install crust + gitleaks (macOS)
-        if: github.ref == 'refs/heads/main' && !matrix.msys2
-        run: bash install.sh --local . --prefix "$(go env GOPATH)/bin" --no-font --no-completion
-
       - name: Build (notui tag check)
         if: github.ref == 'refs/heads/main' && !matrix.msys2
         run: go build -tags notui ./...
-
-      - name: Install gitleaks (DLP dependency, Windows MSYS2)
-        if: github.ref == 'refs/heads/main' && matrix.msys2
-        shell: pwsh
-        run: |
-          . .\install.ps1 -SourceOnly
-          Install-Gitleaks
 
       - name: Unit tests (with race detector)
         if: github.ref == 'refs/heads/main' && !matrix.msys2
@@ -317,10 +292,9 @@ jobs:
             pkg install -y bash
           run: |
             go version
-            # Test install.sh on FreeBSD (builds from source, installs gitleaks)
+            # Test install.sh on FreeBSD (builds from source)
             bash install.sh --local . --prefix /usr/local/bin --no-font --no-completion
             which crust && crust version
-            which gitleaks
             go test -short ./...
 
   e2e:
@@ -343,7 +317,7 @@ jobs:
           npm install -g @modelcontextprotocol/server-filesystem
           npm install -g @modelcontextprotocol/server-everything
 
-      - name: Install crust + gitleaks
+      - name: Install crust
         run: bash install.sh --local . --prefix "$(go env GOPATH)/bin" --no-font --no-completion
 
       - name: MCP E2E tests (stdio + HTTP)
@@ -363,7 +337,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build and install crust + gitleaks
+      - name: Build and install crust
         run: |
           bash install.sh --local . --prefix "$HOME/.local/bin" --no-font --no-completion
           # Rebuild with e2e-test version tag for test assertions
@@ -452,12 +426,6 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-
-      - name: Install gitleaks (DLP dependency)
-        shell: pwsh
-        run: |
-          . .\install.ps1 -SourceOnly
-          Install-Gitleaks
 
       - name: Build and install crust binary from current branch
         shell: pwsh

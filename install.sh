@@ -88,7 +88,6 @@ main() {
 
     step "Finalizing"
     setup_completion
-    setup_gitleaks
     setup_font
 
     echo ""

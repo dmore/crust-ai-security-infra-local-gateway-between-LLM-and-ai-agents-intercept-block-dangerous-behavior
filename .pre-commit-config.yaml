@@ -86,7 +86,7 @@ repos:
         language: system
         pass_filenames: false
         files: (go\.mod|go\.sum|\.go)$
-        stages: [pre-push]
+        stages: [pre-commit]
 
   # Semgrep SAST scan
   - repo: local

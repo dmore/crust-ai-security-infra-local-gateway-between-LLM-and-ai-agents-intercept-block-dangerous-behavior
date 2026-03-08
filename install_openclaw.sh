@@ -82,7 +82,6 @@ main() {
 
     step "Finalizing"
     setup_completion
-    setup_gitleaks
 
     echo ""
     if [ "${_PLAIN:-0}" = "1" ]; then
