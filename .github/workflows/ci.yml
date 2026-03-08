@@ -66,8 +66,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install gitleaks (DLP dependency)
-        run: INSTALL_DIR="$(go env GOPATH)/bin" source scripts/install-common.sh && setup_gitleaks
+      - name: Install crust + gitleaks
+        run: bash install.sh --local . --prefix "$(go env GOPATH)/bin" --no-font --no-completion
 
       - name: Verify PIE binary
         run: |
@@ -181,9 +181,9 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install gitleaks (DLP dependency, Linux)
+      - name: Install crust + gitleaks (Linux)
         if: matrix.os != 'windows-latest'
-        run: INSTALL_DIR="$(go env GOPATH)/bin" source scripts/install-common.sh && setup_gitleaks
+        run: bash install.sh --local . --prefix "$(go env GOPATH)/bin" --no-font --no-completion
 
       - name: Install gitleaks (DLP dependency, Windows)
         if: matrix.os == 'windows-latest'
@@ -192,10 +192,8 @@ jobs:
           . .\install.ps1 -SourceOnly
           Install-Gitleaks
 
-      - name: Build (default + notui)
-        run: |
-          go build ./...
-          go build -tags notui ./...
+      - name: Build (notui tag check)
+        run: go build -tags notui ./...
 
       - name: Install PSScriptAnalyzer (Windows only)
         if: matrix.os == 'windows-latest'
@@ -264,9 +262,13 @@ jobs:
           update: false
           path-type: inherit  # inherit Windows PATH so the Go toolchain is visible
 
-      - name: Install gitleaks (DLP dependency, macOS)
+      - name: Install crust + gitleaks (macOS)
         if: github.ref == 'refs/heads/main' && !matrix.msys2
-        run: INSTALL_DIR="$(go env GOPATH)/bin" source scripts/install-common.sh && setup_gitleaks
+        run: bash install.sh --local . --prefix "$(go env GOPATH)/bin" --no-font --no-completion
+
+      - name: Build (notui tag check)
+        if: github.ref == 'refs/heads/main' && !matrix.msys2
+        run: go build -tags notui ./...
 
       - name: Install gitleaks (DLP dependency, Windows MSYS2)
         if: github.ref == 'refs/heads/main' && matrix.msys2
@@ -274,14 +276,6 @@ jobs:
         run: |
           . .\install.ps1 -SourceOnly
           Install-Gitleaks
-
-      - name: Build
-        if: github.ref == 'refs/heads/main' && !matrix.msys2
-        run: go build ./...
-
-      - name: Build (notui)
-        if: github.ref == 'refs/heads/main' && !matrix.msys2
-        run: go build -tags notui ./...
 
       - name: Unit tests (with race detector)
         if: github.ref == 'refs/heads/main' && !matrix.msys2
@@ -349,8 +343,8 @@ jobs:
           npm install -g @modelcontextprotocol/server-filesystem
           npm install -g @modelcontextprotocol/server-everything
 
-      - name: Install gitleaks (DLP dependency)
-        run: INSTALL_DIR="$(go env GOPATH)/bin" source scripts/install-common.sh && setup_gitleaks
+      - name: Install crust + gitleaks
+        run: bash install.sh --local . --prefix "$(go env GOPATH)/bin" --no-font --no-completion
 
       - name: MCP E2E tests (stdio + HTTP)
         run: go test -race ./internal/mcpgateway/... -v -run E2E -timeout 180s
@@ -369,12 +363,10 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install gitleaks (DLP dependency)
-        run: INSTALL_DIR="$(go env GOPATH)/bin" source scripts/install-common.sh && setup_gitleaks
-
-      - name: Build and install crust binary from current branch
+      - name: Build and install crust + gitleaks
         run: |
-          mkdir -p "$HOME/.local/bin" "$HOME/.crust" "$HOME/.crust/rules.d"
+          bash install.sh --local . --prefix "$HOME/.local/bin" --no-font --no-completion
+          # Rebuild with e2e-test version tag for test assertions
           go build -ldflags "-X main.Version=e2e-test" -o "$HOME/.local/bin/crust" .
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 

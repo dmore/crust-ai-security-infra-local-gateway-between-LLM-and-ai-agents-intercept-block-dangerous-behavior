@@ -173,6 +173,85 @@ detect_platform() {
     ok "OS: ${OS_NAME}  ·  Arch: ${ARCH_NAME}"
 }
 
+# ─── System package install ──────────────────────────────────────────────────
+# sys_install <pkg> — install a package via the system package manager.
+# Tries: brew (macOS/Linux) → apk → apt → dnf → pacman → zypper → pkg (FreeBSD).
+# Returns 0 on success, 1 on failure. Caller decides whether to fail/warn.
+sys_install() {
+    local pkg="$1"
+
+    case "$OS_NAME" in
+        darwin)
+            if command -v brew &>/dev/null; then
+                spinner_start "Installing $pkg via Homebrew"
+                if brew install "$pkg" >/dev/null 2>&1; then
+                    spinner_ok "$pkg installed via Homebrew"
+                    return 0
+                fi
+                spinner_warn "Homebrew install failed"
+            fi
+            return 1
+            ;;
+        linux)
+            if command -v brew &>/dev/null; then
+                spinner_start "Installing $pkg via Homebrew"
+                if brew install "$pkg" >/dev/null 2>&1; then
+                    spinner_ok "$pkg installed via Homebrew"
+                    return 0
+                fi
+                spinner_warn "Homebrew install failed"
+            fi
+            if command -v apk &>/dev/null; then
+                spinner_start "Installing $pkg via apk"
+                if apk add --no-cache "$pkg" >/dev/null 2>&1; then
+                    spinner_ok "$pkg installed"
+                    return 0
+                fi
+                spinner_warn "apk install failed"
+            elif command -v apt-get &>/dev/null; then
+                spinner_start "Installing $pkg via apt"
+                if sudo apt-get install -y "$pkg" >/dev/null 2>&1; then
+                    spinner_ok "$pkg installed"
+                    return 0
+                fi
+                spinner_warn "apt install failed"
+            elif command -v dnf &>/dev/null; then
+                spinner_start "Installing $pkg via dnf"
+                if sudo dnf install -y "$pkg" >/dev/null 2>&1; then
+                    spinner_ok "$pkg installed"
+                    return 0
+                fi
+                spinner_warn "dnf install failed"
+            elif command -v pacman &>/dev/null; then
+                spinner_start "Installing $pkg via pacman"
+                if sudo pacman -Sy --noconfirm "$pkg" >/dev/null 2>&1; then
+                    spinner_ok "$pkg installed"
+                    return 0
+                fi
+                spinner_warn "pacman install failed"
+            elif command -v zypper &>/dev/null; then
+                spinner_start "Installing $pkg via zypper"
+                if sudo zypper install -y "$pkg" >/dev/null 2>&1; then
+                    spinner_ok "$pkg installed"
+                    return 0
+                fi
+                spinner_warn "zypper install failed"
+            fi
+            return 1
+            ;;
+        freebsd)
+            spinner_start "Installing $pkg via pkg"
+            if sudo pkg install -y "$pkg" >/dev/null 2>&1; then
+                spinner_ok "$pkg installed"
+                return 0
+            fi
+            spinner_warn "pkg install failed"
+            return 1
+            ;;
+    esac
+    return 1
+}
+
 # ─── Go version helpers ───────────────────────────────────────────────────────
 
 _go_current_version() {
@@ -304,51 +383,17 @@ ensure_git() {
 
     info "git not found — installing"
 
-    case "$OS_NAME" in
-        darwin)
-            if command -v brew &>/dev/null; then
-                spinner_start "Installing git via Homebrew"
-                if brew install git >/dev/null 2>&1; then
-                    spinner_ok "git installed via Homebrew"
-                    return 0
-                fi
-                spinner_warn "Homebrew install failed"
-            fi
-            info "Triggering Xcode Command Line Tools installer (includes git)..."
-            xcode-select --install 2>/dev/null || true
-            warn "Complete the Xcode CLT installation, then re-run this installer."
-            exit 1
-            ;;
-        linux)
-            if command -v apk &>/dev/null; then
-                spinner_start "Installing git via apk"
-                apk add --no-cache git >/dev/null 2>&1 && spinner_ok "git installed" && return 0
-                spinner_warn "apk install failed"
-            elif command -v apt-get &>/dev/null; then
-                spinner_start "Installing git via apt"
-                sudo apt-get install -y git >/dev/null 2>&1 && spinner_ok "git installed" && return 0
-                spinner_warn "apt install failed"
-            elif command -v dnf &>/dev/null; then
-                spinner_start "Installing git via dnf"
-                sudo dnf install -y git >/dev/null 2>&1 && spinner_ok "git installed" && return 0
-                spinner_warn "dnf install failed"
-            elif command -v pacman &>/dev/null; then
-                spinner_start "Installing git via pacman"
-                sudo pacman -Sy --noconfirm git >/dev/null 2>&1 && spinner_ok "git installed" && return 0
-                spinner_warn "pacman install failed"
-            elif command -v zypper &>/dev/null; then
-                spinner_start "Installing git via zypper"
-                sudo zypper install -y git >/dev/null 2>&1 && spinner_ok "git installed" && return 0
-                spinner_warn "zypper install failed"
-            fi
-            fail "Cannot install git automatically. Run: apk add git  (or your distro's equivalent)"
-            ;;
-        freebsd)
-            spinner_start "Installing git via pkg"
-            sudo pkg install -y git >/dev/null 2>&1 && spinner_ok "git installed" && return 0
-            spinner_fail "Cannot install git. Run: sudo pkg install git"
-            ;;
-    esac
+    if sys_install git; then return 0; fi
+
+    # macOS fallback: Xcode CLT includes git
+    if [ "$OS_NAME" = "darwin" ]; then
+        info "Triggering Xcode Command Line Tools installer (includes git)..."
+        xcode-select --install 2>/dev/null || true
+        warn "Complete the Xcode CLT installation, then re-run this installer."
+        exit 1
+    fi
+
+    fail "Cannot install git automatically. Run: sudo pkg install git  (or your distro's equivalent)"
 }
 
 # Ensure curl, wget, or fetch is available; auto-installs curl if missing.
@@ -357,30 +402,13 @@ ensure_download_tool() {
 
     info "curl/wget not found — installing curl"
 
-    case "$OS_NAME" in
-        darwin)
-            # curl ships with macOS
-            fail "curl not found on macOS — please check your system."
-            ;;
-        linux)
-            if command -v apk &>/dev/null; then
-                apk add --no-cache curl >/dev/null 2>&1 && ok "curl installed" && return 0
-            elif command -v apt-get &>/dev/null; then
-                sudo apt-get install -y curl >/dev/null 2>&1 && ok "curl installed" && return 0
-            elif command -v dnf &>/dev/null; then
-                sudo dnf install -y curl >/dev/null 2>&1 && ok "curl installed" && return 0
-            elif command -v pacman &>/dev/null; then
-                sudo pacman -Sy --noconfirm curl >/dev/null 2>&1 && ok "curl installed" && return 0
-            elif command -v zypper &>/dev/null; then
-                sudo zypper install -y curl >/dev/null 2>&1 && ok "curl installed" && return 0
-            fi
-            fail "Cannot install curl. Run: apk add curl  (or your distro's equivalent)"
-            ;;
-        freebsd)
-            sudo pkg install -y curl >/dev/null 2>&1 && ok "curl installed" && return 0
-            fail "Cannot install curl. Run: sudo pkg install curl"
-            ;;
-    esac
+    if [ "$OS_NAME" = "darwin" ]; then
+        fail "curl not found on macOS — please check your system."
+    fi
+
+    if sys_install curl; then return 0; fi
+
+    fail "Cannot install curl. Run: sudo pkg install curl  (or your distro's equivalent)"
 }
 
 # Check requirements: always ensures git + download tool; pass "go" for Go check.
@@ -534,22 +562,27 @@ setup_gitleaks() {
         return 0
     fi
 
-    local os; os="$(uname -s)"
-    if [ "$os" = "Darwin" ] && command -v brew &>/dev/null; then
-        spinner_start "Installing gitleaks via Homebrew"
-        if brew install gitleaks >/dev/null 2>&1; then
-            spinner_ok "gitleaks installed via Homebrew"
-            return 0
-        fi
-        spinner_warn "Homebrew install failed — trying go install"
+    # Try system package manager (brew on macOS/Linux; no FreeBSD port exists).
+    if sys_install gitleaks; then return 0; fi
+
+    # Fallback: build from source via go install.
+    if ! command -v go &>/dev/null; then
+        spinner_fail "gitleaks install failed — go not found. Install manually: go install github.com/zricethezav/gitleaks/v8@${GITLEAKS_VERSION}"
     fi
 
     spinner_start "Installing gitleaks via go install"
-    # Install directly into INSTALL_DIR so it lands on PATH alongside crust.
-    if GOBIN="$INSTALL_DIR" go install "github.com/zricethezav/gitleaks/v8@${GITLEAKS_VERSION}" >/dev/null 2>&1; then
+    local go_install_log
+    go_install_log=$(mktemp)
+    if GOBIN="$INSTALL_DIR" go install "github.com/zricethezav/gitleaks/v8@${GITLEAKS_VERSION}" >"$go_install_log" 2>&1; then
+        rm -f "$go_install_log"
         spinner_ok "gitleaks installed"
         return 0
     fi
+    # Show why it failed so CI logs are debuggable.
+    spinner_stop
+    warn "go install output:"
+    cat "$go_install_log" >&2
+    rm -f "$go_install_log"
     spinner_fail "gitleaks install failed — required for DLP secret detection. Install manually: go install github.com/zricethezav/gitleaks/v8@${GITLEAKS_VERSION}"
 }
 
