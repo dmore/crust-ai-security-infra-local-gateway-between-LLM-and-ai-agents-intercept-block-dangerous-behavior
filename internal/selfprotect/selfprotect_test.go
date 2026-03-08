@@ -123,10 +123,8 @@ func TestCheck_SocketAllows(t *testing.T) {
 	}
 }
 
-// FuzzSelfProtectAPIRegex tries to find loopback representations that bypass
-// the API regex while still containing "crust" and a loopback-like host.
 // FuzzSelfProtectBypass attempts to find inputs that bypass self-protection.
-// Merges API regex, socket regex, and bypass detection seeds.
+// Tests API regex, socket regex, and loopback+crust bypass detection.
 func FuzzSelfProtectBypass(f *testing.F) {
 	// API regex seeds
 	f.Add("localhost:9090/api/crust/rules")

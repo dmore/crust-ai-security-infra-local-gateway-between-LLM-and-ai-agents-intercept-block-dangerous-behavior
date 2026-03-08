@@ -80,6 +80,11 @@ jobs:
           # Pre-build test binaries once; fuzz targets reuse the cached binary.
           go test -c -o /tmp/rules.fuzz ./internal/rules/
           go test -c -o /tmp/httpproxy.fuzz ./internal/httpproxy/
+          go test -c -o /tmp/config.fuzz ./internal/config/
+          go test -c -o /tmp/mcpdiscover.fuzz ./internal/mcpdiscover/
+          go test -c -o /tmp/pathutil.fuzz ./internal/pathutil/
+          go test -c -o /tmp/security.fuzz ./internal/security/
+          go test -c -o /tmp/selfprotect.fuzz ./internal/selfprotect/
           mkdir -p /tmp/fuzz-cache
           # Critical fuzz targets (30s each, sequential — these are the most
           # security-sensitive and get more fuzzing time).
@@ -88,7 +93,7 @@ jobs:
           /tmp/rules.fuzz -test.fuzz=FuzzNormalizeUnicode -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache
           /tmp/rules.fuzz -test.fuzz=FuzzLoopbackRegex -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache
           /tmp/rules.fuzz -test.fuzz=FuzzMCPToolBypass -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache
-          /tmp/rules.fuzz -test.fuzz=FuzzPipeBypass -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache -test.parallel=1
+          GOMEMLIMIT=4GiB /tmp/rules.fuzz -test.fuzz=FuzzPipeBypass -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache -test.parallel=1
           /tmp/rules.fuzz -test.fuzz=FuzzConfusableBypass -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache
 
       - name: Fuzz tests (full suite, 10s each — parallelized)
@@ -136,9 +141,14 @@ jobs:
             || rc=1
           parallel_fuzz /tmp/httpproxy.fuzz \
             FuzzParseSSEEventData FuzzCopyHeaders FuzzStripHopByHopHeaders \
-            FuzzParseAnthropicEvent FuzzParseOpenAIEvent FuzzParseEvent \
-            FuzzApplyResultToToolCalls \
+            FuzzParseEvent FuzzApplyResultToToolCalls \
+            FuzzBufferEvent FuzzForceNonStreaming \
             || rc=1
+          parallel_fuzz /tmp/config.fuzz FuzzKeystoreJSON || rc=1
+          parallel_fuzz /tmp/mcpdiscover.fuzz FuzzMCPConfigPatch || rc=1
+          parallel_fuzz /tmp/pathutil.fuzz FuzzExpandMSYS2Path || rc=1
+          parallel_fuzz /tmp/security.fuzz FuzzInterceptAnthropicResponse || rc=1
+          parallel_fuzz /tmp/selfprotect.fuzz FuzzSelfProtectBypass || rc=1
           exit $rc
 
       - name: Upload failing fuzz corpus
@@ -149,6 +159,11 @@ jobs:
           path: |
             internal/rules/testdata/fuzz/
             internal/httpproxy/testdata/fuzz/
+            internal/config/testdata/fuzz/
+            internal/mcpdiscover/testdata/fuzz/
+            internal/pathutil/testdata/fuzz/
+            internal/security/testdata/fuzz/
+            internal/selfprotect/testdata/fuzz/
           retention-days: 30
           if-no-files-found: ignore
 

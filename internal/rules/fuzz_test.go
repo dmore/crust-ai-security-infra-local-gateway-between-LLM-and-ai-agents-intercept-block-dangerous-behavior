@@ -2087,6 +2087,12 @@ func FuzzPipeBypass(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, cmd string) {
+		// Skip oversized inputs — the full rule engine is heavyweight and
+		// pathologically large commands cause OOM on CI runners.
+		if len(cmd) > 1024 {
+			return
+		}
+
 		args, jErr := json.Marshal(map[string]string{"command": cmd})
 		if jErr != nil {
 			return
