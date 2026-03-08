@@ -52,6 +52,11 @@ jobs:
       - name: rule-coverage (ensure rules have unit + fuzz tests)
         run: bash scripts/check-rule-coverage.sh
 
+      - name: rule-lint (validate security.yaml syntax)
+        run: |
+          go build -o /tmp/crust-lint .
+          /tmp/crust-lint lint-rules
+
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -76,6 +81,11 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+      - name: semgrep (SAST)
+        run: |
+          pip install semgrep
+          semgrep scan --config auto --error .
 
       - uses: actions/setup-go@v6
         with:
@@ -596,3 +606,23 @@ jobs:
       - name: Logs on failure
         if: failure()
         run: docker logs crust-ci 2>&1 || true
+
+  benchmark:
+    name: Benchmark (PR only)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run benchmarks (quick)
+        run: |
+          go test -bench="Extractor|Normalizer|Matcher|JSONParsing|ContainsRegex" \
+            -benchmem -count=3 -short \
+            ./internal/rules/... \
+            ./internal/httpproxy/... \
+            ./internal/security/...
