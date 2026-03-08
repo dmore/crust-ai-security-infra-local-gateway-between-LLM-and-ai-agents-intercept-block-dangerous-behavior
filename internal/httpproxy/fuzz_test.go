@@ -127,6 +127,24 @@ func FuzzBufferEvent(f *testing.F) {
 		// INVARIANT 1: Must not panic (implicit).
 
 		// INVARIANT 2: After overflow (or any error), GetToolCalls must not panic.
-		_ = buf.GetToolCalls()
+		toolCalls := buf.GetToolCalls()
+
+		// INVARIANT 3: Calling GetToolCalls twice must return the same count
+		// (deterministic, no side effects).
+		toolCalls2 := buf.GetToolCalls()
+		if len(toolCalls) != len(toolCalls2) {
+			t.Errorf("GetToolCalls not deterministic: first=%d, second=%d", len(toolCalls), len(toolCalls2))
+		}
+
+		// INVARIANT 4: Each returned tool call must have a non-empty Name if it
+		// was started via a content_block_start event with a name.
+		for i, tc := range toolCalls {
+			if tc.ID != "" && tc.Name == "" {
+				t.Errorf("toolCalls[%d] has ID %q but empty Name", i, tc.ID)
+			}
+		}
+
+		// INVARIANT 5: FlushAll after buffering must not panic.
+		_ = buf.FlushAll()
 	})
 }

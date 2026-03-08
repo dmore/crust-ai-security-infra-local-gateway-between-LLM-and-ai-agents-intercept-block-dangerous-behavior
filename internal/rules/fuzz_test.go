@@ -664,18 +664,19 @@ func FuzzForkBombDetection(f *testing.F) {
 		argsJSON, _ := json.Marshal(map[string]string{"command": cmd})
 		info := ext.Extract("Bash", json.RawMessage(argsJSON))
 
-		// Parse the command ourselves to check for FuncDecl with self-call
+		// Parse the command ourselves to check for FuncDecl with self-call.
+		// We parse the ORIGINAL cmd and apply Simplify, exactly matching
+		// what the extractor does before calling astForkBomb. Using
+		// info.Command (the minPrinter output) would cause false positives
+		// because the minified representation can re-parse into a different
+		// AST structure (e.g., control characters get normalized away,
+		// changing pipeline/call structure).
 		parser := syntax.NewParser(syntax.KeepComments(false), syntax.Variant(syntax.LangBash))
-		// The extractor may pre-process (Unicode normalization, etc.) before
-		// parsing, so we re-parse the normalized form for our oracle.
-		normalized := info.Command
-		if normalized == "" {
-			normalized = cmd
-		}
-		file, err := parser.Parse(strings.NewReader(normalized), "")
+		file, err := parser.Parse(strings.NewReader(cmd), "")
 		if err != nil {
-			return // unparseable after normalization — skip
+			return // unparseable — skip
 		}
+		syntax.Simplify(file)
 
 		// Oracle: check if any FuncDecl has a self-referencing CallExpr
 		hasSelfRecursive := false

@@ -2,6 +2,7 @@ package httpproxy
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -125,19 +126,45 @@ func FuzzParseSSEEventData(f *testing.F) {
 		// Must not panic
 		eventType, data := parseSSEEventData(event)
 
-		// Event type should be valid (no leading/trailing whitespace if non-empty)
-		if eventType != "" {
-			trimmed := eventType
-			if trimmed != eventType {
-				t.Errorf("eventType has untrimmed whitespace: %q", eventType)
+		// INVARIANT 1: If any line starts with "event:" (per SSE spec), eventType must be non-empty.
+		for line := range bytes.SplitSeq(event, []byte("\n")) {
+			line = bytes.TrimSuffix(line, []byte("\r"))
+			if bytes.HasPrefix(line, []byte("event:")) {
+				value := bytes.TrimPrefix(line[len("event:"):], []byte(" "))
+				if len(bytes.TrimSpace(value)) > 0 && eventType == "" {
+					t.Errorf("input has 'event:' line with value %q but eventType is empty", value)
+				}
+				break // only check first event: line
 			}
 		}
 
-		// If input contains "data:" prefix on any line, data should be non-nil
-		if bytes.Contains(event, []byte("data:")) && data == nil {
-			// This is acceptable if "data:" appears inside another field value
-			// or after a colon in a comment, so we don't enforce this strictly.
-			_ = data
+		// INVARIANT 2: If any line starts with "data:", data must be non-nil.
+		for line := range bytes.SplitSeq(event, []byte("\n")) {
+			line = bytes.TrimSuffix(line, []byte("\r"))
+			if bytes.HasPrefix(line, []byte("data:")) {
+				if data == nil {
+					t.Error("input has 'data:' line but data is nil")
+				}
+				break // only need to find one
+			}
+		}
+
+		// INVARIANT 3: eventType must not have leading/trailing whitespace.
+		if eventType != strings.TrimSpace(eventType) {
+			t.Errorf("eventType has untrimmed whitespace: %q", eventType)
+		}
+
+		// INVARIANT 4: If no "data:" line exists, data must be nil.
+		hasDataLine := false
+		for line := range bytes.SplitSeq(event, []byte("\n")) {
+			line = bytes.TrimSuffix(line, []byte("\r"))
+			if bytes.HasPrefix(line, []byte("data:")) {
+				hasDataLine = true
+				break
+			}
+		}
+		if !hasDataLine && data != nil {
+			t.Errorf("no 'data:' line in input but data is non-nil: %q", data)
 		}
 	})
 }

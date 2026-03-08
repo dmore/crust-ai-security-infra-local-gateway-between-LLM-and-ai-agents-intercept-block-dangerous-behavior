@@ -711,162 +711,56 @@ func TestApplyResultToToolCalls(t *testing.T) {
 // Fuzz Tests
 // =============================================================================
 
-func FuzzParseAnthropicEvent(f *testing.F) {
-	// Seed corpus with valid JSON events
-	f.Add([]byte(`{"type":"message_start","message":{"usage":{"input_tokens":100,"output_tokens":0}}}`))
-	f.Add([]byte(`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_123","name":"Bash","input":{}}}`))
-	f.Add([]byte(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`))
-	f.Add([]byte(`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"key\":\"value\"}"}}`))
-	f.Add([]byte(`{"type":"message_delta","usage":{"input_tokens":0,"output_tokens":50}}`))
-
-	// Empty data
-	f.Add([]byte{})
-	f.Add([]byte(""))
-
-	// Truncated JSON
-	f.Add([]byte(`{"type":`))
-	f.Add([]byte(`{"type":"message_start","message":`))
-
-	// Invalid JSON
-	f.Add([]byte(`{not json}`))
-	f.Add([]byte(`{"type":}`))
-	f.Add([]byte(`{{{{{`))
-
-	// Very large data
-	f.Add(bytes.Repeat([]byte("a"), 10000))
-
-	// Null bytes
-	f.Add([]byte{0, 0, 0, 0})
-	f.Add([]byte("{\x00type\x00}"))
-
-	// Unicode
-	f.Add([]byte(`{"type":"message_start","message":{"id":"世界"}}`))
-	f.Add(append([]byte{0xef, 0xbb, 0xbf}, []byte("{}")...)) // UTF-8 BOM
-
-	// Special characters
-	f.Add([]byte(`{"type":"message_start\\n\\r\\t"}`))
-
-	parser := NewSSEParser(false)
-
-	f.Fuzz(func(t *testing.T, data []byte) {
-		// Invariant 1: Must not panic
-		defer func() {
-			if r := recover(); r != nil {
-				t.Errorf("ParseAnthropicEvent panicked on input %q: %v", data, r)
-			}
-		}()
-
-		result := parser.ParseAnthropicEvent(data)
-
-		// Invariant 2: Must not return negative token counts
-		if result.InputTokens < 0 {
-			t.Errorf("InputTokens is negative: %d", result.InputTokens)
-		}
-		if result.OutputTokens < 0 {
-			t.Errorf("OutputTokens is negative: %d", result.OutputTokens)
-		}
-
-		// Invariant 3: Pointer fields must be safe to access
-		if result.ToolCallStart != nil {
-			// Access fields to ensure they're safe (negative index is technically possible in JSON)
-			_ = result.ToolCallStart.Index
-			_ = result.ToolCallStart.ID
-			_ = result.ToolCallStart.Name
-		}
-		if result.ToolCallDelta != nil {
-			_ = result.ToolCallDelta.Index
-			_ = result.ToolCallDelta.Text
-			_ = result.ToolCallDelta.PartialJSON
-		}
-		_ = result.TextContent
-	})
-}
-
-func FuzzParseOpenAIEvent(f *testing.F) {
-	// Seed corpus with valid JSON events
-	f.Add([]byte(`{"choices":[{"delta":{"content":"Hello"}}]}`))
-	f.Add([]byte(`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_123","function":{"name":"Bash","arguments":""}}]}}]}`))
-	f.Add([]byte(`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"key\":\"value\"}"}}]}}]}`))
-	f.Add([]byte(`{"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150}}`))
-
-	// Empty data
-	f.Add([]byte{})
-	f.Add([]byte(""))
-
-	// Truncated JSON
-	f.Add([]byte(`{"choices":`))
-	f.Add([]byte(`{"choices":[{"delta":`))
-
-	// Invalid JSON
-	f.Add([]byte(`{not json}`))
-	f.Add([]byte(`{"choices":}`))
-	f.Add([]byte(`[[[[[`))
-
-	// Very large data
-	f.Add(bytes.Repeat([]byte("a"), 10000))
-
-	// Null bytes
-	f.Add([]byte{0, 0, 0, 0})
-	f.Add([]byte("{\x00choices\x00}"))
-
-	// Unicode
-	f.Add([]byte(`{"choices":[{"delta":{"content":"世界"}}]}`))
-	f.Add(append([]byte{0xef, 0xbb, 0xbf}, []byte("{}")...)) // UTF-8 BOM
-
-	// Special edge cases
-	f.Add([]byte(`{"choices":null}`))
-	f.Add([]byte(`{"choices":[null]}`))
-	f.Add([]byte(`{"choices":[{"delta":null}]}`))
-
-	parser := NewSSEParser(false)
-
-	f.Fuzz(func(t *testing.T, data []byte) {
-		// Invariant 1: Must not panic
-		defer func() {
-			if r := recover(); r != nil {
-				t.Errorf("ParseOpenAIEvent panicked on input %q: %v", data, r)
-			}
-		}()
-
-		result := parser.ParseOpenAIEvent(data)
-
-		// Invariant 2: Must not return negative token counts
-		if result.InputTokens < 0 {
-			t.Errorf("InputTokens is negative: %d", result.InputTokens)
-		}
-		if result.OutputTokens < 0 {
-			t.Errorf("OutputTokens is negative: %d", result.OutputTokens)
-		}
-
-		// Invariant 3: Pointer fields must be safe to access
-		if result.ToolCallStart != nil {
-			_ = result.ToolCallStart.Index
-			_ = result.ToolCallStart.ID
-			_ = result.ToolCallStart.Name
-		}
-		if result.ToolCallDelta != nil {
-			_ = result.ToolCallDelta.Index
-			_ = result.ToolCallDelta.Text
-			_ = result.ToolCallDelta.PartialJSON
-		}
-		_ = result.TextContent
-	})
-}
-
 func FuzzParseEvent(f *testing.F) {
-	// Seed corpus with both API types
-	f.Add([]byte(`{"type":"message_start","message":{"usage":{"input_tokens":100}}}`), byte(0))
+	// Anthropic seeds
+	f.Add([]byte(`{"type":"message_start","message":{"usage":{"input_tokens":100,"output_tokens":0}}}`), byte(0))
+	f.Add([]byte(`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_123","name":"Bash","input":{}}}`), byte(0))
+	f.Add([]byte(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`), byte(0))
+	f.Add([]byte(`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"key\":\"value\"}"}}`), byte(0))
+	f.Add([]byte(`{"type":"message_delta","usage":{"input_tokens":0,"output_tokens":50}}`), byte(0))
+	f.Add([]byte(`{"type":"message_start\\n\\r\\t"}`), byte(0))
+	// OpenAI seeds
 	f.Add([]byte(`{"choices":[{"delta":{"content":"Hello"}}]}`), byte(1))
+	f.Add([]byte(`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_123","function":{"name":"Bash","arguments":""}}]}}]}`), byte(1))
+	f.Add([]byte(`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"key\":\"value\"}"}}]}}]}`), byte(1))
+	f.Add([]byte(`{"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150}}`), byte(1))
+	f.Add([]byte(`{"choices":null}`), byte(1))
+	f.Add([]byte(`{"choices":[null]}`), byte(1))
+	f.Add([]byte(`{"choices":[{"delta":null}]}`), byte(1))
+	// Shared edge cases (test both API types)
+	f.Add([]byte{}, byte(0))
+	f.Add([]byte{}, byte(1))
 	f.Add([]byte(`{}`), byte(0))
 	f.Add([]byte(`{}`), byte(1))
 	f.Add([]byte(`{}`), byte(2)) // Unknown API type
+	// Truncated JSON
+	f.Add([]byte(`{"type":`), byte(0))
+	f.Add([]byte(`{"type":"message_start","message":`), byte(0))
+	f.Add([]byte(`{"choices":`), byte(1))
+	f.Add([]byte(`{"choices":[{"delta":`), byte(1))
+	// Invalid JSON
+	f.Add([]byte(`{not json}`), byte(0))
+	f.Add([]byte(`{"type":}`), byte(0))
+	f.Add([]byte(`{{{{{`), byte(0))
+	f.Add([]byte(`{"choices":}`), byte(1))
+	f.Add([]byte(`[[[[[`), byte(1))
+	// Large data
+	f.Add(bytes.Repeat([]byte("a"), 10000), byte(0))
+	// Null bytes
+	f.Add([]byte{0, 0, 0, 0}, byte(0))
+	f.Add([]byte("{\x00type\x00}"), byte(0))
+	f.Add([]byte("{\x00choices\x00}"), byte(1))
+	// Unicode
+	f.Add([]byte(`{"type":"message_start","message":{"id":"世界"}}`), byte(0))
+	f.Add([]byte(`{"choices":[{"delta":{"content":"世界"}}]}`), byte(1))
+	f.Add(append([]byte{0xef, 0xbb, 0xbf}, []byte("{}")...), byte(0)) // UTF-8 BOM
 
 	parser := NewSSEParser(false)
 
 	f.Fuzz(func(t *testing.T, data []byte, apiTypeFlag byte) {
 		defer func() {
 			if r := recover(); r != nil {
-				t.Errorf("ParseEvent panicked: %v", r)
+				t.Errorf("ParseEvent panicked on input %q: %v", data, r)
 			}
 		}()
 
@@ -882,9 +776,26 @@ func FuzzParseEvent(f *testing.F) {
 
 		result := parser.ParseEvent("", data, apiType)
 
-		if result.InputTokens < 0 || result.OutputTokens < 0 {
-			t.Error("Negative token count")
+		// Invariant 1: Must not return negative token counts
+		if result.InputTokens < 0 {
+			t.Errorf("InputTokens is negative: %d", result.InputTokens)
 		}
+		if result.OutputTokens < 0 {
+			t.Errorf("OutputTokens is negative: %d", result.OutputTokens)
+		}
+
+		// Invariant 2: Pointer fields must be safe to access
+		if result.ToolCallStart != nil {
+			_ = result.ToolCallStart.Index
+			_ = result.ToolCallStart.ID
+			_ = result.ToolCallStart.Name
+		}
+		if result.ToolCallDelta != nil {
+			_ = result.ToolCallDelta.Index
+			_ = result.ToolCallDelta.Text
+			_ = result.ToolCallDelta.PartialJSON
+		}
+		_ = result.TextContent
 	})
 }
 

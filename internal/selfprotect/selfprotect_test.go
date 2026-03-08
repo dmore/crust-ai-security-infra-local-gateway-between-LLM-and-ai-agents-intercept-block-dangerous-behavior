@@ -125,7 +125,10 @@ func TestCheck_SocketAllows(t *testing.T) {
 
 // FuzzSelfProtectAPIRegex tries to find loopback representations that bypass
 // the API regex while still containing "crust" and a loopback-like host.
-func FuzzSelfProtectAPIRegex(f *testing.F) {
+// FuzzSelfProtectBypass attempts to find inputs that bypass self-protection.
+// Merges API regex, socket regex, and bypass detection seeds.
+func FuzzSelfProtectBypass(f *testing.F) {
+	// API regex seeds
 	f.Add("localhost:9090/api/crust/rules")
 	f.Add("127.0.0.1:9090/api/crust/rules")
 	f.Add("[::1]:9090/crust")
@@ -133,30 +136,12 @@ func FuzzSelfProtectAPIRegex(f *testing.F) {
 	f.Add("2130706433:9090/crust")
 	f.Add("127.0.0.1.nip.io:9090/crust")
 	f.Add("http://0:9090/api/crust/rules")
-
-	f.Fuzz(func(t *testing.T, input string) {
-		// Must not panic on any input.
-		Check(input)
-	})
-}
-
-// FuzzSelfProtectSocketRegex tries to find socket access patterns that bypass
-// the socket regex.
-func FuzzSelfProtectSocketRegex(f *testing.F) {
+	// Socket regex seeds
 	f.Add("curl --unix-socket /tmp/crust.sock http://localhost/api")
 	f.Add("socat UNIX-CONNECT:/tmp/crust.sock -")
 	f.Add(`\\.\pipe\crust-api`)
 	f.Add("nc -U /tmp/crust-api-9090.sock")
-
-	f.Fuzz(func(t *testing.T, input string) {
-		// Must not panic on any input.
-		Check(input)
-	})
-}
-
-// FuzzSelfProtectBypass attempts to find inputs that contain a loopback address
-// and "crust" but evade detection.
-func FuzzSelfProtectBypass(f *testing.F) {
+	// Bypass seeds
 	f.Add("http://127.0.0.1:9090/api/crust/rules")
 	f.Add("http://localhost:9090/api/crust/stop")
 	f.Add("http://[::1]:9090/crust")
