@@ -62,34 +62,11 @@ Both tools import and call these. ~200 lines removed, ~100 lines added = net -10
 
 **Effort:** M (2-3 days)
 
-### P1-2: Deduplicate APIType switch statements
+### ~~P1-2: Deduplicate APIType switch statements~~
 
-**Problem:** 6 switch statements on `apiType` across 4 files, all with identical cases (Anthropic, OpenAICompletion, OpenAIResponses) and `default: panic(...)`.
-
-| # | File | Line |
-|---|------|------|
-| 1 | `internal/httpproxy/proxy.go` | 1024 |
-| 2 | `internal/httpproxy/proxy.go` | 1049 |
-| 3 | `internal/httpproxy/sse_parser.go` | 286 |
-| 4 | `internal/httpproxy/sse_buffer.go` | 338 |
-| 5 | `internal/httpproxy/sse_buffer.go` | 491 |
-| 6 | `internal/security/interceptor.go` | 238 |
-
-**Fix:** Create typed dispatch helper on `APIType`:
-```go
-func (t APIType) Dispatch(anthropic, openaiComp, openaiResp func() error) error {
-    switch t {
-    case APITypeAnthropic: return anthropic()
-    case APITypeOpenAICompletion: return openaiComp()
-    case APITypeOpenAIResponses: return openaiResp()
-    default: return fmt.Errorf("unhandled API type: %s", t)
-    }
-}
-```
-
-Subsumes P0-1 panics #1-4 — error return replaces panic.
-
-**Effort:** M (1-2 days, touches 4 files)
+**Status:** CLOSED — panics replaced in P0-1. Remaining switches have different return
+types across packages; a generic helper adds complexity without value. The `exhaustive`
+linter already catches missing cases at compile time.
 
 ### P1-3: Add `RuleEvaluator` interface
 
