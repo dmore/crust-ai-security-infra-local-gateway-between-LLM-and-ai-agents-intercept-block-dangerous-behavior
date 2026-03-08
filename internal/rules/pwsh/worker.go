@@ -149,7 +149,8 @@ func NewWorker(pwshPath string) (*Worker, error) {
 }
 
 func (w *Worker) start() error {
-	proc := exec.CommandContext(context.Background(), w.pwshPath, //nolint:gosec //nosemgrep: dangerous-exec-command -- pwshPath from exec.LookPath
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command -- pwshPath from exec.LookPath
+	proc := exec.CommandContext(context.Background(), w.pwshPath, //nolint:gosec
 		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", w.scriptPath)
 	stdin, err := proc.StdinPipe()
 	if err != nil {

@@ -453,7 +453,7 @@ func TestWireProtocol_EvaluateWithRules(t *testing.T) {
 // =============================================================================
 
 func TestPool_BasicExecution(t *testing.T) {
-	pool := NewPool(4, time.Second)
+	pool := NewPool(4, 5*time.Second)
 	ctx := t.Context()
 
 	result, err := pool.Run(ctx, func(context.Context) *Result {
@@ -468,7 +468,7 @@ func TestPool_BasicExecution(t *testing.T) {
 }
 
 func TestPool_PanicRecovery(t *testing.T) {
-	pool := NewPool(4, time.Second)
+	pool := NewPool(4, 5*time.Second)
 	ctx := t.Context()
 
 	result, err := pool.Run(ctx, func(context.Context) *Result {
@@ -525,7 +525,7 @@ func TestPool_SlotExhaustion(t *testing.T) {
 }
 
 func TestPool_ConcurrentExecution(t *testing.T) {
-	pool := NewPool(4, time.Second)
+	pool := NewPool(4, 5*time.Second)
 	ctx := t.Context()
 	var running atomic.Int64
 	var maxRunning atomic.Int64
@@ -574,12 +574,32 @@ func TestPool_CooperativeTimeout_NoGoroutineLeak(t *testing.T) {
 	})
 }
 
+func TestPool_ParentCancelReturnsContextCanceled(t *testing.T) {
+	pool := NewPool(4, 5*time.Second)
+	ctx, cancel := context.WithCancel(t.Context())
+
+	// Start a long-running function, then cancel the parent context.
+	// Pool.Run should return context.Canceled, not errTimeout.
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+	}()
+
+	_, err := pool.Run(ctx, func(ctx context.Context) *Result {
+		<-ctx.Done() // blocks until parent cancel
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}
+
 // =============================================================================
 // Registry tests
 // =============================================================================
 
 func TestRegistry_Register(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	err := reg.Register(&allowPlugin{name: "test"}, nil)
@@ -592,7 +612,7 @@ func TestRegistry_Register(t *testing.T) {
 }
 
 func TestRegistry_RegisterDuplicateName(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	reg.Register(&allowPlugin{name: "dup"}, nil)
@@ -603,7 +623,7 @@ func TestRegistry_RegisterDuplicateName(t *testing.T) {
 }
 
 func TestRegistry_RegisterEmptyName(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	err := reg.Register(&allowPlugin{name: ""}, nil)
@@ -613,7 +633,7 @@ func TestRegistry_RegisterEmptyName(t *testing.T) {
 }
 
 func TestRegistry_RegisterInitFail(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	err := reg.Register(&initFailPlugin{name: "bad"}, nil)
@@ -626,7 +646,7 @@ func TestRegistry_RegisterInitFail(t *testing.T) {
 }
 
 func TestRegistry_EvaluateAllow(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	reg.Register(&allowPlugin{name: "p1"}, nil)
@@ -638,7 +658,7 @@ func TestRegistry_EvaluateAllow(t *testing.T) {
 }
 
 func TestRegistry_EvaluateBlock(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	reg.Register(&allowPlugin{name: "p1"}, nil)
@@ -656,7 +676,7 @@ func TestRegistry_EvaluateBlock(t *testing.T) {
 }
 
 func TestRegistry_FirstBlockWins(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	reg.Register(&blockPlugin{name: "first",
@@ -672,12 +692,40 @@ func TestRegistry_FirstBlockWins(t *testing.T) {
 	}
 }
 
+// TestRegistry_ShortCircuitDoesNotCountAsFailure verifies that when one plugin
+// blocks and cancels the eval context, the remaining plugins do not accumulate
+// failures (which could incorrectly trigger the circuit breaker).
+func TestRegistry_ShortCircuitDoesNotCountAsFailure(t *testing.T) {
+	reg := NewRegistry(NewPool(4, 5*time.Second))
+	defer reg.Close()
+
+	reg.Register(&blockPlugin{name: "fast-blocker",
+		result: Result{RuleName: "fast:block", Severity: rules.SeverityHigh, Message: "blocked"},
+	}, nil)
+	reg.Register(&hangPlugin{name: "slow-allow"}, nil)
+
+	// Evaluate multiple times — slow-allow gets canceled each time.
+	// Without the fix, each cancel would count as a timeout failure,
+	// eventually disabling slow-allow via the circuit breaker.
+	ctx := t.Context()
+	for range maxConsecutiveFailures + 2 {
+		reg.Evaluate(ctx, Request{ToolName: "Bash"})
+	}
+
+	stats := reg.Stats()
+	for _, s := range stats {
+		if s.Name == "slow-allow" && s.Disabled {
+			t.Error("slow-allow should NOT be disabled — cancellation is not a failure")
+		}
+	}
+}
+
 // =============================================================================
 // Rule-aware plugin tests
 // =============================================================================
 
 func TestRegistry_PluginReceivesRules(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	var store atomic.Value
@@ -711,7 +759,7 @@ func TestRegistry_PluginReceivesRules(t *testing.T) {
 }
 
 func TestRegistry_RuleAwarePlugin_BlocksWhenRuleMissing(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	reg.Register(&ruleAwarePlugin{name: "policy", requiredRule: "protect-env"}, nil)
@@ -726,7 +774,7 @@ func TestRegistry_RuleAwarePlugin_BlocksWhenRuleMissing(t *testing.T) {
 }
 
 func TestRegistry_RuleAwarePlugin_AllowsWhenRulePresent(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	reg.Register(&ruleAwarePlugin{name: "policy", requiredRule: "protect-env"}, nil)
@@ -740,7 +788,7 @@ func TestRegistry_RuleAwarePlugin_AllowsWhenRulePresent(t *testing.T) {
 }
 
 func TestRegistry_RuleSnapshotProperties(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	var store atomic.Value
@@ -790,7 +838,7 @@ func TestRegistry_RuleSnapshotProperties(t *testing.T) {
 // =============================================================================
 
 func TestRegistry_PanicRecovery(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	counter := &countPlugin{name: "counter"}
@@ -963,7 +1011,7 @@ func TestRegistry_CircuitBreaker_ConcurrentReEnable(t *testing.T) {
 // =============================================================================
 
 func TestRegistry_NameCachedAtRegistration(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	dp := &dynamicNamePlugin{}
@@ -986,7 +1034,7 @@ func TestRegistry_NameCachedAtRegistration(t *testing.T) {
 // =============================================================================
 
 func TestRegistry_RequestIsolationBetweenPlugins(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	var secondSaw atomic.Value
@@ -1017,7 +1065,7 @@ func TestRegistry_RequestIsolationBetweenPlugins(t *testing.T) {
 // =============================================================================
 
 func TestRegistry_InvalidSeverityDefaultsToHigh(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	reg.Register(&blockPlugin{name: "bad-severity",
@@ -1038,7 +1086,7 @@ func TestRegistry_InvalidSeverityDefaultsToHigh(t *testing.T) {
 // =============================================================================
 
 func TestRegistry_CloseRejectsNewEvaluate(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 
 	counter := &countPlugin{name: "counter"}
 	reg.Register(counter, nil)
@@ -1060,7 +1108,7 @@ func TestRegistry_CloseRejectsNewEvaluate(t *testing.T) {
 // =============================================================================
 
 func TestRegistry_ConcurrentEvaluate(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	reg.Register(&allowPlugin{name: "p1"}, nil)
@@ -1082,7 +1130,7 @@ func TestRegistry_ConcurrentEvaluate(t *testing.T) {
 }
 
 func TestRegistry_ConcurrentEvaluateWithPanics(t *testing.T) {
-	pool := NewPool(8, time.Second)
+	pool := NewPool(8, 5*time.Second)
 	reg := NewRegistry(pool)
 	defer reg.Close()
 
@@ -1285,7 +1333,7 @@ func TestPool_Size_DefaultsWhenZeroOrNegative(t *testing.T) {
 // =============================================================================
 
 func TestRegistry_Len(t *testing.T) {
-	reg := NewRegistry(NewPool(4, time.Second))
+	reg := NewRegistry(NewPool(4, 5*time.Second))
 	defer reg.Close()
 
 	if reg.Len() != 0 {
@@ -1359,7 +1407,7 @@ func TestCooldownFor_EdgeCases(t *testing.T) {
 // =============================================================================
 
 func BenchmarkRegistry_Evaluate_Allow(b *testing.B) {
-	reg := NewRegistry(NewPool(8, time.Second))
+	reg := NewRegistry(NewPool(8, 5*time.Second))
 	defer reg.Close()
 
 	reg.Register(&allowPlugin{name: "p1"}, nil)
@@ -1379,7 +1427,7 @@ func BenchmarkRegistry_Evaluate_Allow(b *testing.B) {
 }
 
 func BenchmarkRegistry_Evaluate_AllowWithRules(b *testing.B) {
-	reg := NewRegistry(NewPool(8, time.Second))
+	reg := NewRegistry(NewPool(8, 5*time.Second))
 	defer reg.Close()
 
 	reg.Register(&allowPlugin{name: "p1"}, nil)
@@ -1409,7 +1457,7 @@ func BenchmarkRegistry_Evaluate_AllowWithRules(b *testing.B) {
 }
 
 func BenchmarkRegistry_Evaluate_Block(b *testing.B) {
-	reg := NewRegistry(NewPool(8, time.Second))
+	reg := NewRegistry(NewPool(8, 5*time.Second))
 	defer reg.Close()
 
 	reg.Register(&blockPlugin{name: "blocker",
@@ -1430,7 +1478,7 @@ func BenchmarkRegistry_Evaluate_Block(b *testing.B) {
 }
 
 func BenchmarkPool_Run(b *testing.B) {
-	pool := NewPool(8, time.Second)
+	pool := NewPool(8, 5*time.Second)
 	ctx := context.Background()
 
 	b.ReportAllocs()
@@ -1441,7 +1489,7 @@ func BenchmarkPool_Run(b *testing.B) {
 }
 
 func BenchmarkRegistry_Evaluate_Parallel(b *testing.B) {
-	reg := NewRegistry(NewPool(8, time.Second))
+	reg := NewRegistry(NewPool(8, 5*time.Second))
 	defer reg.Close()
 
 	reg.Register(&allowPlugin{name: "p1"}, nil)

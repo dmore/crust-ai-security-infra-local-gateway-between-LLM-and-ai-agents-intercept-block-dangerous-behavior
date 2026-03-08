@@ -86,6 +86,13 @@ func (p *Pool) Run(ctx context.Context, fn func(ctx context.Context) *Result) (r
 		// Goroutine may still be running — it will exit when fn returns
 		// or when the plugin checks ctx.Done(). The buffered channel
 		// ensures the goroutine doesn't block on send.
+		//
+		// Distinguish parent-cancel (short-circuit from another plugin)
+		// from our own timeout expiring. Only report errTimeout for
+		// genuine timeouts — parent-cancel is not the plugin's fault.
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, errTimeout
 	}
 }

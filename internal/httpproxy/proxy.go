@@ -335,7 +335,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	copyHeaders(w.Header(), resp.Header)
 	w.Header().Set("Content-Length", strconv.Itoa(len(responseBody)))
 	w.WriteHeader(resp.StatusCode)
-	_, _ = w.Write(responseBody) //nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+	_, _ = w.Write(responseBody)
 }
 
 // readAndDecompressBody reads the request body with size limits, decompresses
@@ -794,7 +795,8 @@ func (p *Proxy) retryAsNonStreaming(ctx *RequestContext) (responseBody json.RawM
 	copyHeaders(ctx.Writer.Header(), resp.Header)
 	ctx.Writer.Header().Set("Content-Length", strconv.Itoa(len(rawBody)))
 	ctx.Writer.WriteHeader(statusCode)
-	_, _ = ctx.Writer.Write(rawBody) //nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+	_, _ = ctx.Writer.Write(rawBody)
 	return
 }
 

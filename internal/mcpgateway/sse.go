@@ -90,18 +90,21 @@ func ReadSSEEvents(ctx context.Context, r io.Reader) <-chan SSEEvent {
 // WriteSSEEvent writes an SSE event to an http.ResponseWriter and flushes.
 func WriteSSEEvent(w http.ResponseWriter, event SSEEvent) error {
 	if event.Type != "" {
-		if _, err := fmt.Fprintf(w, "event: %s\n", event.Type); err != nil { //nosemgrep: no-fprintf-to-responsewriter -- SSE protocol, not HTML
+		// nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
+		if _, err := fmt.Fprintf(w, "event: %s\n", event.Type); err != nil {
 			return err
 		}
 	}
 	if event.ID != "" {
-		if _, err := fmt.Fprintf(w, "id: %s\n", event.ID); err != nil { //nosemgrep: no-fprintf-to-responsewriter -- SSE protocol, not HTML
+		// nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
+		if _, err := fmt.Fprintf(w, "id: %s\n", event.ID); err != nil {
 			return err
 		}
 	}
 	// Write data lines (each line gets its own "data:" prefix)
 	for line := range strings.SplitSeq(event.Data, "\n") {
-		if _, err := fmt.Fprintf(w, "data: %s\n", line); err != nil { //nosemgrep: no-fprintf-to-responsewriter -- SSE protocol, not HTML
+		// nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
+		if _, err := fmt.Fprintf(w, "data: %s\n", line); err != nil {
 			return err
 		}
 	}

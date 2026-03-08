@@ -206,9 +206,9 @@ func (r *Registry) evaluateOne(ctx context.Context, s *pluginState, req Request)
 	})
 
 	if err != nil {
-		// Pool exhaustion is not the plugin's fault — don't count as failure.
-		if errors.Is(err, errPoolExhausted) {
-			log.Warn("plugin %q skipped: pool exhausted", s.name)
+		// Pool exhaustion and parent-context cancellation (e.g. short-circuit
+		// from another plugin blocking) are not the plugin's fault.
+		if errors.Is(err, errPoolExhausted) || errors.Is(err, context.Canceled) {
 			return nil
 		}
 

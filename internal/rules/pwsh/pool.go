@@ -21,7 +21,7 @@ func NewWorkerPool(pwshPath string, size int) (*WorkerPool, error) {
 	}
 	workers := make([]*Worker, size)
 	for i := range size {
-		w, err := NewWorker(pwshPath) //nosemgrep: invalid-usage-of-modified-variable -- w is not used on error; inner w is a new loop variable
+		w, err := NewWorker(pwshPath) //nosemgrep: trailofbits.go.invalid-usage-of-modified-variable.invalid-usage-of-modified-variable -- w is not used on error; inner w is a new loop variable
 		if err != nil {
 			for _, w := range workers[:i] {
 				w.Stop()
