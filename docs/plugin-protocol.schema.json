@@ -136,9 +136,9 @@
           "examples": ["Bash", "Read", "Write", "Edit"]
         },
         "arguments": {
-          "type": "object",
-          "description": "Raw JSON arguments from the tool call.",
-          "examples": [{ "command": "rm -rf /etc" }]
+          "type": ["object", "null"],
+          "description": "Raw JSON arguments from the tool call. May be null for tools with no arguments.",
+          "examples": [{ "command": "rm -rf /etc" }, null]
         },
         "operation": {
           "$ref": "#/$defs/operation",

@@ -21,6 +21,7 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
+// extractBashCommand parses a bash command and extracts paths/operation.
 func (e *Extractor) extractBashCommand(info *ExtractedInfo) {
 	// minPrinter reconstructs shell commands in canonical minified form.
 	// Created per-call so concurrent goroutines don't share printer state.

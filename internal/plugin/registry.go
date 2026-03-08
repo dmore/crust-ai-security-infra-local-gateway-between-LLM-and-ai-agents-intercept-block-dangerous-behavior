@@ -16,9 +16,9 @@ var log = logger.New("plugin")
 
 // Circuit breaker configuration.
 const (
-	MaxConsecutiveFailures = 3
-	CircuitResetInterval   = 5 * time.Minute
-	MaxDisableCycles       = 5 // permanently disable after this many disable→retry cycles
+	maxConsecutiveFailures = 3
+	circuitResetInterval   = 5 * time.Minute
+	maxDisableCycles       = 5 // permanently disable after this many disable→retry cycles
 )
 
 // pluginState tracks health for one registered plugin.
@@ -95,12 +95,12 @@ func (r *Registry) Register(p Plugin, cfg json.RawMessage) error {
 }
 
 // cooldownFor returns the cooldown duration with exponential backoff.
-// Base: CircuitResetInterval, doubles each cycle, capped at 1 hour.
+// Base: circuitResetInterval, doubles each cycle, capped at 1 hour.
 func cooldownFor(cycles int64) time.Duration {
 	if cycles <= 0 {
-		return CircuitResetInterval
+		return circuitResetInterval
 	}
-	d := CircuitResetInterval
+	d := circuitResetInterval
 	for range cycles - 1 {
 		d *= 2
 		if d > time.Hour {
@@ -179,7 +179,7 @@ func (r *Registry) evaluateOne(ctx context.Context, s *pluginState, req Request)
 	s.mu.Lock()
 	if s.disabled.Load() {
 		cycles := s.disableCycles.Load()
-		if cycles >= MaxDisableCycles {
+		if cycles >= maxDisableCycles {
 			s.mu.Unlock()
 			return nil // permanently disabled
 		}
@@ -207,21 +207,21 @@ func (r *Registry) evaluateOne(ctx context.Context, s *pluginState, req Request)
 
 	if err != nil {
 		// Pool exhaustion is not the plugin's fault — don't count as failure.
-		if errors.Is(err, ErrPoolExhausted) {
+		if errors.Is(err, errPoolExhausted) {
 			log.Warn("plugin %q skipped: pool exhausted", s.name)
 			return nil
 		}
 
 		s.mu.Lock()
 		count := s.failures.Add(1)
-		if errors.Is(err, ErrTimeout) {
+		if errors.Is(err, errTimeout) {
 			s.totalTimeouts.Add(1)
 			log.Warn("plugin %q timed out", s.name)
 		} else {
 			s.totalPanics.Add(1)
 			log.Warn("plugin %q panicked: %v", s.name, err)
 		}
-		if count >= int64(MaxConsecutiveFailures) {
+		if count >= int64(maxConsecutiveFailures) {
 			s.disabled.Store(true)
 			s.disabledAt.Store(time.Now().UnixNano())
 			s.disableCycles.Add(1)
@@ -232,13 +232,17 @@ func (r *Registry) evaluateOne(ctx context.Context, s *pluginState, req Request)
 		return nil // fail-open
 	}
 
-	// Success — reset failure counter.
+	// Success — reset failure counter under lock for consistency
+	// with the failure path (prevents TOCTOU with circuit breaker check).
+	s.mu.Lock()
 	s.failures.Store(0)
+	s.mu.Unlock()
 
 	if result != nil {
 		result.Plugin = s.name // use cached name (Bug 6.2 fix)
-		// Validate severity — default to "high" if invalid (Bug 5.2 fix).
+		// Validate severity/action — default to "high"/"block" if invalid.
 		result.Severity = result.EffectiveSeverity()
+		result.Action = result.EffectiveAction()
 		return result
 	}
 	return nil
@@ -287,7 +291,7 @@ func (r *Registry) Stats() []Stats {
 			TotalPanics:   s.totalPanics.Load(),
 			TotalTimeouts: s.totalTimeouts.Load(),
 			DisableCycles: s.disableCycles.Load(),
-			Permanent:     s.disableCycles.Load() >= MaxDisableCycles,
+			Permanent:     s.disableCycles.Load() >= maxDisableCycles,
 		}
 	}
 	return stats

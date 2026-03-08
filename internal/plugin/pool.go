@@ -43,21 +43,21 @@ type runResult struct {
 	err    error
 }
 
-// ErrPoolExhausted is returned when the pool cannot acquire a slot within the timeout.
-var ErrPoolExhausted = errors.New("plugin pool: all slots busy")
+// errPoolExhausted is returned when the pool cannot acquire a slot within the timeout.
+var errPoolExhausted = errors.New("plugin pool: all slots busy")
 
-// ErrTimeout is returned when plugin evaluation exceeds the timeout.
-var ErrTimeout = errors.New("plugin evaluation timed out")
+// errTimeout is returned when plugin evaluation exceeds the timeout.
+var errTimeout = errors.New("plugin evaluation timed out")
 
 // Run executes fn in a goroutine with panic recovery and timeout.
-// Returns ErrPoolExhausted if no slot is available within the timeout.
-// Returns ErrTimeout if the plugin does not complete in time.
+// Returns errPoolExhausted if no slot is available within the timeout.
+// Returns errTimeout if the plugin does not complete in time.
 func (p *Pool) Run(ctx context.Context, fn func(ctx context.Context) *Result) (result *Result, err error) {
 	// Acquire slot with context timeout — never blocks indefinitely.
 	select {
 	case p.sem <- struct{}{}:
 	case <-ctx.Done():
-		return nil, ErrPoolExhausted
+		return nil, errPoolExhausted
 	}
 	defer func() { <-p.sem }()
 
@@ -86,7 +86,7 @@ func (p *Pool) Run(ctx context.Context, fn func(ctx context.Context) *Result) (r
 		// Goroutine may still be running — it will exit when fn returns
 		// or when the plugin checks ctx.Done(). The buffered channel
 		// ensures the goroutine doesn't block on send.
-		return nil, ErrTimeout
+		return nil, errTimeout
 	}
 }
 

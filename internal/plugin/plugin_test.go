@@ -492,8 +492,8 @@ func TestPool_Timeout(t *testing.T) {
 			<-ctx.Done()
 			return nil
 		})
-		if !errors.Is(err, ErrTimeout) {
-			t.Fatalf("expected ErrTimeout, got %v", err)
+		if !errors.Is(err, errTimeout) {
+			t.Fatalf("expected errTimeout, got %v", err)
 		}
 		if result != nil {
 			t.Errorf("expected nil result on timeout, got %v", result)
@@ -516,8 +516,8 @@ func TestPool_SlotExhaustion(t *testing.T) {
 		defer cancel()
 
 		_, err := pool.Run(ctx, func(context.Context) *Result { return nil })
-		if !errors.Is(err, ErrPoolExhausted) {
-			t.Fatalf("expected ErrPoolExhausted, got %v", err)
+		if !errors.Is(err, errPoolExhausted) {
+			t.Fatalf("expected errPoolExhausted, got %v", err)
 		}
 
 		close(blocker)
@@ -564,8 +564,8 @@ func TestPool_CooperativeTimeout_NoGoroutineLeak(t *testing.T) {
 			completed.Store(true)
 			return nil
 		})
-		if !errors.Is(err, ErrTimeout) {
-			t.Fatalf("expected ErrTimeout, got %v", err)
+		if !errors.Is(err, errTimeout) {
+			t.Fatalf("expected errTimeout, got %v", err)
 		}
 		synctest.Wait() // deterministic: goroutine has finished
 		if !completed.Load() {
@@ -835,7 +835,7 @@ func TestRegistry_CircuitBreaker_DisableAfterFailures(t *testing.T) {
 	reg.Register(&panicPlugin{name: "crasher"}, nil)
 	reg.Register(counter, nil)
 	ctx := t.Context()
-	for range MaxConsecutiveFailures {
+	for range maxConsecutiveFailures {
 		reg.Evaluate(ctx, Request{ToolName: "Bash"})
 	}
 
@@ -843,8 +843,8 @@ func TestRegistry_CircuitBreaker_DisableAfterFailures(t *testing.T) {
 	if !stats[0].Disabled {
 		t.Error("plugin should be disabled after max failures")
 	}
-	if stats[0].TotalPanics != int64(MaxConsecutiveFailures) {
-		t.Errorf("total panics = %d, want %d", stats[0].TotalPanics, MaxConsecutiveFailures)
+	if stats[0].TotalPanics != int64(maxConsecutiveFailures) {
+		t.Errorf("total panics = %d, want %d", stats[0].TotalPanics, maxConsecutiveFailures)
 	}
 
 	counterBefore := counter.calls.Load()
@@ -863,11 +863,11 @@ func TestRegistry_CircuitBreaker_SuccessResetsCounter(t *testing.T) {
 	plugin := &conditionalPlugin{
 		name:      "flaky",
 		failCount: failCount,
-		threshold: int64(MaxConsecutiveFailures - 1),
+		threshold: int64(maxConsecutiveFailures - 1),
 	}
 	reg.Register(plugin, nil)
 	ctx := t.Context()
-	for range MaxConsecutiveFailures - 1 {
+	for range maxConsecutiveFailures - 1 {
 		reg.Evaluate(ctx, Request{ToolName: "Bash"})
 	}
 
@@ -885,14 +885,14 @@ func TestRegistry_CircuitBreaker_SuccessResetsCounter(t *testing.T) {
 }
 
 func TestRegistry_CircuitBreaker_ExponentialBackoff(t *testing.T) {
-	if d := cooldownFor(1); d != CircuitResetInterval {
-		t.Errorf("cycle 1 cooldown = %v, want %v", d, CircuitResetInterval)
+	if d := cooldownFor(1); d != circuitResetInterval {
+		t.Errorf("cycle 1 cooldown = %v, want %v", d, circuitResetInterval)
 	}
-	if d := cooldownFor(2); d != CircuitResetInterval*2 {
-		t.Errorf("cycle 2 cooldown = %v, want %v", d, CircuitResetInterval*2)
+	if d := cooldownFor(2); d != circuitResetInterval*2 {
+		t.Errorf("cycle 2 cooldown = %v, want %v", d, circuitResetInterval*2)
 	}
-	if d := cooldownFor(3); d != CircuitResetInterval*4 {
-		t.Errorf("cycle 3 cooldown = %v, want %v", d, CircuitResetInterval*4)
+	if d := cooldownFor(3); d != circuitResetInterval*4 {
+		t.Errorf("cycle 3 cooldown = %v, want %v", d, circuitResetInterval*4)
 	}
 	if d := cooldownFor(100); d != time.Hour {
 		t.Errorf("cycle 100 cooldown = %v, want %v", d, time.Hour)
@@ -911,7 +911,7 @@ func TestRegistry_CircuitBreaker_PermanentDisable(t *testing.T) {
 	s := reg.states[0]
 	reg.mu.RUnlock()
 
-	s.disableCycles.Store(int64(MaxDisableCycles))
+	s.disableCycles.Store(int64(maxDisableCycles))
 	s.disabled.Store(true)
 	s.disabledAt.Store(0)
 
@@ -935,14 +935,14 @@ func TestRegistry_CircuitBreaker_ConcurrentReEnable(t *testing.T) {
 	reg.Register(&panicPlugin{name: "crasher"}, nil)
 	reg.Register(counter, nil)
 	ctx := t.Context()
-	for range MaxConsecutiveFailures {
+	for range maxConsecutiveFailures {
 		reg.Evaluate(ctx, Request{ToolName: "Bash"})
 	}
 
 	reg.mu.RLock()
 	s := reg.states[0]
 	reg.mu.RUnlock()
-	s.disabledAt.Store(time.Now().Add(-CircuitResetInterval * 2).UnixNano())
+	s.disabledAt.Store(time.Now().Add(-circuitResetInterval * 2).UnixNano())
 
 	var wg sync.WaitGroup
 	for range 20 {
@@ -1127,8 +1127,8 @@ func TestRegistry_Stats(t *testing.T) {
 	if crasher.Name != "crasher" {
 		t.Errorf("name = %q, want %q", crasher.Name, "crasher")
 	}
-	if crasher.TotalPanics < int64(MaxConsecutiveFailures) {
-		t.Errorf("total panics = %d, want >= %d", crasher.TotalPanics, MaxConsecutiveFailures)
+	if crasher.TotalPanics < int64(maxConsecutiveFailures) {
+		t.Errorf("total panics = %d, want >= %d", crasher.TotalPanics, maxConsecutiveFailures)
 	}
 	if !crasher.Disabled {
 		t.Error("crasher should be disabled")
@@ -1228,13 +1228,13 @@ func TestResult_ActionValidation(t *testing.T) {
 		{rules.ActionAlert, rules.ActionAlert},
 		{"", rules.ActionBlock}, // empty defaults to "block"
 
-		// Invalid actions — EffectiveAction returns them as-is (no normalization).
-		{"allow", "allow"},
-		{"banana", "banana"},
-		{"BLOCK", "BLOCK"},
-		{"Block", "Block"},
-		{"LOG", "LOG"},
-		{"deny", "deny"},
+		// Invalid actions — EffectiveAction defaults to "block".
+		{"allow", rules.ActionBlock},
+		{"banana", rules.ActionBlock},
+		{"BLOCK", rules.ActionBlock},
+		{"Block", rules.ActionBlock},
+		{"LOG", rules.ActionBlock},
+		{"deny", rules.ActionBlock},
 	}
 	for _, tt := range tests {
 		r := &Result{Action: tt.input}
@@ -1326,13 +1326,13 @@ func TestCooldownFor_EdgeCases(t *testing.T) {
 		cycles int64
 		want   time.Duration
 	}{
-		{"zero cycles", 0, CircuitResetInterval},
-		{"negative cycles", -1, CircuitResetInterval},
-		{"cycle 1", 1, CircuitResetInterval},
-		{"cycle 2", 2, CircuitResetInterval * 2},
-		{"cycle 3", 3, CircuitResetInterval * 4},
-		{"cycle 4", 4, CircuitResetInterval * 8},
-		{"MaxDisableCycles", int64(MaxDisableCycles), cooldownFor(int64(MaxDisableCycles))},
+		{"zero cycles", 0, circuitResetInterval},
+		{"negative cycles", -1, circuitResetInterval},
+		{"cycle 1", 1, circuitResetInterval},
+		{"cycle 2", 2, circuitResetInterval * 2},
+		{"cycle 3", 3, circuitResetInterval * 4},
+		{"cycle 4", 4, circuitResetInterval * 8},
+		{"maxDisableCycles", int64(maxDisableCycles), cooldownFor(int64(maxDisableCycles))},
 		{"very large (50)", 50, time.Hour},   // capped at 1 hour
 		{"very large (100)", 100, time.Hour}, // capped at 1 hour
 	}

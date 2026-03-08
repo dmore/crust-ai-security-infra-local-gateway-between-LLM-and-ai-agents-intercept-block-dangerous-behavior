@@ -112,7 +112,7 @@ Sent with `method="evaluate"`. Contains everything the engine extracted during s
 | Field | Type | Description |
 |-------|------|-------------|
 | `tool_name` | string | Sanitized tool name (e.g. "Bash", "Read", "Write") |
-| `arguments` | object | Raw JSON arguments from the tool call |
+| `arguments` | object or null | Raw JSON arguments from the tool call |
 | `operation` | `rules.Operation` | Primary operation: `read`, `write`, `delete`, `copy`, `move`, `execute`, `network` |
 | `operations` | `[]rules.Operation` | All operations (a command may both read and write) |
 | `command` | string | Raw shell command (Bash tool only) |
@@ -168,7 +168,7 @@ Returned to block a tool call. Return `null` to allow.
 |-------|------|-------------|
 | `rule_name` | string | Plugin-namespaced rule (e.g. "sandbox:fs-deny") |
 | `severity` | `rules.Severity` | `"critical"`, `"high"`, `"warning"`, `"info"` (invalid defaults to `"high"`) |
-| `action` | `rules.Action` | `"block"` (default), `"log"`, or `"alert"` |
+| `action` | `rules.Action` | `"block"` (default), `"log"`, or `"alert"` (invalid defaults to `"block"`) |
 | `message` | string | Human-readable reason |
 
 The `plugin` field is auto-filled by the registry — plugins don't need to set it.
@@ -493,7 +493,7 @@ func (r *RateLimiter) Close() error { return nil }
 
 7. **Unified type system** — `Request` and `Result` share typed enums (`rules.Operation`, `rules.Severity`, `rules.Action`, `rules.Source`) with the YAML rules engine. These serialize to plain strings over the wire protocol, keeping external plugins language-agnostic while ensuring type safety in Go.
 
-8. **Validated results** — Invalid severity values default to `"high"`. Empty action defaults to `"block"`. Plugin names are cached at registration to prevent spoofing. Request data is deep-copied per plugin to prevent mutation.
+8. **Validated results** — Invalid severity values default to `"high"`. Invalid or empty action defaults to `"block"`. Plugin names are cached at registration to prevent spoofing. Request data is deep-copied per plugin to prevent mutation.
 
 9. **Clean lifecycle** — `init` is called once at startup. `close` is called in reverse order during shutdown. The registry rejects new evaluations after close begins.
 
@@ -509,7 +509,7 @@ The wire protocol has a formal [JSON Schema](plugin-protocol.schema.json) that s
 |-------|-------------|
 | **Field match** | Every Go struct field (Request, Result, RuleSnapshot, InitParams) has a corresponding schema property, and vice versa |
 | **Severity enum** | `rules.ValidSeverities` map matches the schema `severity` enum exactly |
-| **Action enum** | `rules.ValidActions` map matches the schema `action` enum exactly |
+| **Action enum** | `rules.ValidResponseActions` map matches the schema `action` enum exactly |
 | **Method constants** | `MethodInit`, `MethodEvaluate`, `MethodClose` match the schema `wireRequest` method constants |
 | **Round-trip** | Go structs marshal to JSON containing all schema-required fields |
 | **Valid JSON** | The schema file itself is valid JSON |

@@ -233,9 +233,19 @@ func FuzzResultValidation(f *testing.F) {
 			t.Errorf("EffectiveAction(\"\") = %q, want \"block\"", ea)
 		}
 
-		// When action is non-empty, EffectiveAction must return it as-is.
-		if action != "" && ea != rules.Action(action) {
+		// EffectiveAction must return a valid action.
+		if !rules.ValidResponseActions[ea] {
+			t.Errorf("EffectiveAction(%q) = %q, which is not a valid action", action, ea)
+		}
+
+		// When action is valid, EffectiveAction must return it as-is.
+		if rules.ValidResponseActions[rules.Action(action)] && ea != rules.Action(action) {
 			t.Errorf("EffectiveAction(%q) = %q, want %q", action, ea, action)
+		}
+
+		// When action is invalid or empty, EffectiveAction must return "block".
+		if !rules.ValidResponseActions[rules.Action(action)] && ea != rules.ActionBlock {
+			t.Errorf("EffectiveAction(%q) = %q, want \"block\"", action, ea)
 		}
 	})
 }

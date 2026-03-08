@@ -132,12 +132,12 @@ type Result struct {
 	Message  string         `json:"message"`
 }
 
-// EffectiveAction returns the action, defaulting to "block" if empty.
+// EffectiveAction returns the action, defaulting to "block" if empty or invalid.
 func (r *Result) EffectiveAction() rules.Action {
-	if r.Action == "" {
-		return rules.ActionBlock
+	if rules.ValidResponseActions[r.Action] {
+		return r.Action
 	}
-	return r.Action
+	return rules.ActionBlock
 }
 
 // EffectiveSeverity returns the severity, defaulting to "high" if invalid.

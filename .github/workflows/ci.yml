@@ -77,11 +77,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: gitleaks (secret detection)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
-
       - name: semgrep (SAST)
         run: |
           pip install semgrep

@@ -53,11 +53,13 @@ func NewProcessPlugin(name, cmdPath string, args ...string) *ProcessPlugin {
 func (p *ProcessPlugin) Name() string { return p.name }
 
 func (p *ProcessPlugin) Init(cfg json.RawMessage) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.initCfg = cfg // save for auto-restart
 	return p.initLocked(cfg)
 }
 
-// initLocked starts the process and sends the init message. Caller may or may not hold p.mu.
+// initLocked starts the process and sends the init message. Caller must hold p.mu.
 func (p *ProcessPlugin) initLocked(cfg json.RawMessage) error {
 	if err := p.startLocked(); err != nil {
 		return fmt.Errorf("start process: %w", err)
