@@ -159,7 +159,6 @@ func (p *ProcessPlugin) Close() error {
 
 // startLocked launches the external process. Caller must hold p.mu.
 func (p *ProcessPlugin) startLocked() error {
-	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	proc := exec.CommandContext(context.Background(), p.cmdPath, p.args...) //nolint:gosec // plugin cmdPath is user-configured
 	stdin, err := proc.StdinPipe()
 	if err != nil {

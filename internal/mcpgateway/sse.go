@@ -3,7 +3,6 @@ package mcpgateway
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -90,26 +89,23 @@ func ReadSSEEvents(ctx context.Context, r io.Reader) <-chan SSEEvent {
 // WriteSSEEvent writes an SSE event to an http.ResponseWriter and flushes.
 func WriteSSEEvent(w http.ResponseWriter, event SSEEvent) error {
 	if event.Type != "" {
-		// nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
-		if _, err := fmt.Fprintf(w, "event: %s\n", event.Type); err != nil {
+		if _, err := io.WriteString(w, "event: "+event.Type+"\n"); err != nil {
 			return err
 		}
 	}
 	if event.ID != "" {
-		// nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
-		if _, err := fmt.Fprintf(w, "id: %s\n", event.ID); err != nil {
+		if _, err := io.WriteString(w, "id: "+event.ID+"\n"); err != nil {
 			return err
 		}
 	}
 	// Write data lines (each line gets its own "data:" prefix)
 	for line := range strings.SplitSeq(event.Data, "\n") {
-		// nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
-		if _, err := fmt.Fprintf(w, "data: %s\n", line); err != nil {
+		if _, err := io.WriteString(w, "data: "+line+"\n"); err != nil {
 			return err
 		}
 	}
 	// Trailing blank line to dispatch the event
-	if _, err := fmt.Fprint(w, "\n"); err != nil {
+	if _, err := io.WriteString(w, "\n"); err != nil {
 		return err
 	}
 	if f, ok := w.(http.Flusher); ok {

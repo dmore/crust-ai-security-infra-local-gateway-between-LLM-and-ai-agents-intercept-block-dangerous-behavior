@@ -335,7 +335,6 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	copyHeaders(w.Header(), resp.Header)
 	w.Header().Set("Content-Length", strconv.Itoa(len(responseBody)))
 	w.WriteHeader(resp.StatusCode)
-	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 	_, _ = w.Write(responseBody)
 }
 
@@ -795,7 +794,6 @@ func (p *Proxy) retryAsNonStreaming(ctx *RequestContext) (responseBody json.RawM
 	copyHeaders(ctx.Writer.Header(), resp.Header)
 	ctx.Writer.Header().Set("Content-Length", strconv.Itoa(len(rawBody)))
 	ctx.Writer.WriteHeader(statusCode)
-	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 	_, _ = ctx.Writer.Write(rawBody)
 	return
 }

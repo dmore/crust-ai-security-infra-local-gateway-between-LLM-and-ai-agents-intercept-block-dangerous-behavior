@@ -159,7 +159,7 @@ func Daemonize(args []string, extraEnvKeys []string) (int, error) {
 		return 0, fmt.Errorf("executable path must be absolute: %s", executable)
 	}
 
-	cmd := exec.CommandContext(context.Background(), executable, daemonArgs...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command -- validated absolute path above
+	cmd := exec.CommandContext(context.Background(), executable, daemonArgs...) //nolint:gosec // validated absolute path above
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Stdin = nil
