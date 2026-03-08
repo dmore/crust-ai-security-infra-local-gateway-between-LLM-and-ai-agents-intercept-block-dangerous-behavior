@@ -3,3 +3,6 @@
 *.yaml text eol=lf
 *.yml  text eol=lf
 *.sh   text eol=lf
+
+# BIP39 wordlists must keep LF — SHA-512 integrity checks fail with CRLF.
+internal/rules/bip39/*.txt text eol=lf
