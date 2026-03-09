@@ -172,6 +172,11 @@ linters:
         linters:
           - revive
         text: "var-naming: avoid package names that conflict"
+      # "plugin" conflicts with stdlib plugin but is the clearest name for this package
+      - path: internal/plugin/
+        linters:
+          - revive
+        text: "var-naming: avoid package names that conflict"
 
       # gosec taint-analysis false positives — rules are kept enabled to catch real issues;
       # these specific patterns are architecturally safe by design:

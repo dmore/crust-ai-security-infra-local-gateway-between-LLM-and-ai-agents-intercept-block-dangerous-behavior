@@ -54,8 +54,7 @@ func (w *Watcher) Start() error {
 		return nil
 	}
 
-	w.wg.Add(1)
-	go w.run()
+	w.wg.Go(w.run)
 
 	log.Info("Watching rules directory: %s", rulesDir)
 	return nil
@@ -76,8 +75,6 @@ func (w *Watcher) Stop() error {
 }
 
 func (w *Watcher) run() {
-	defer w.wg.Done()
-
 	// Periodic integrity verification (defense-in-depth against tampering
 	// that bypasses inotify, e.g. direct memory writes or disabled watcher)
 	integrityTicker := time.NewTicker(5 * time.Minute)

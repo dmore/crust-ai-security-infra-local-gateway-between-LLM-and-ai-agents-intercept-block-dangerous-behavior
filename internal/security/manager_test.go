@@ -1,7 +1,6 @@
 package security
 
 import (
-	"context"
 	"sync"
 	"testing"
 
@@ -60,7 +59,7 @@ func TestManager_ShutdownTwiceNoPanic(t *testing.T) {
 	m := &Manager{
 		stopChan: make(chan struct{}),
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	// First shutdown should succeed
 	if err := m.Shutdown(ctx); err != nil {
 		t.Fatalf("first Shutdown: %v", err)

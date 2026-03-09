@@ -11,6 +11,8 @@ import (
 	"github.com/BakeLens/crust/internal/rules"
 )
 
+//go:generate go run selfprotect_verify.go
+
 // selfProtectAPIRegex is a hardcoded, tamper-proof check for management API access.
 // Compiled once at init — cannot be altered by YAML rule changes or hot-reload.
 // Covers: localhost, entire 127.0.0.0/8 range, IPv6 loopback (::1),
@@ -34,7 +36,18 @@ var selfProtectAPIRegex = regexp.MustCompile(
 		`(?:localtest|lvh|vcap)\.me|` + // known rebinding domains → 127.0.0.1
 		`lacolhost\.com` + // known rebinding domain → 127.0.0.1
 		`)[:/].*crust` +
-		`|://0[:/].*crust`) // bare 0 as URL host (= 0.0.0.0)
+		`|://0[:/].*crust` + // bare 0 as URL host (= 0.0.0.0)
+		`|crust://(?:` + // reverse: "crust" as URL scheme, loopback as host
+		`localhost|` +
+		`127\.\d{1,3}\.\d{1,3}\.\d{1,3}|` +
+		`\[?::(?:ffff:)?127\.\d{1,3}\.\d{1,3}\.\d{1,3}\]?|` +
+		`\[?::1\]?|` +
+		`0\.0\.0\.0|` +
+		`0x7f[0-9a-f]{6}|` +
+		`0177\.\d{1,3}\.\d{1,3}\.\d{1,3}|` +
+		`2130706433|` +
+		`0\b` +
+		`)`)
 
 // selfProtectSocketRegex blocks agents from accessing the management API
 // via Unix domain sockets or Windows named pipes. Compiled once at init.

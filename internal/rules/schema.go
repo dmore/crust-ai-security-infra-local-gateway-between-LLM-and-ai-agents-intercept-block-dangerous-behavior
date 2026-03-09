@@ -1,9 +1,12 @@
+//go:generate go run ./cmd/schema-check
+
 package rules
 
 import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // Rule types for path-based security rules
@@ -67,10 +70,11 @@ const (
 	OpMove    Operation = "move"
 	OpExecute Operation = "execute"
 	OpNetwork Operation = "network"
+	OpAll     Operation = "all" // expands to AllOperations at parse time
 )
 
-// ValidActions is the set of all valid actions
-var ValidActions = map[Operation]bool{
+// ValidOperations is the set of all valid operation types.
+var ValidOperations = map[Operation]bool{
 	OpRead:    true,
 	OpWrite:   true,
 	OpDelete:  true,
@@ -133,7 +137,7 @@ func (r *Rule) Validate() error {
 	}
 
 	for _, op := range r.Actions {
-		if !ValidActions[op] {
+		if !ValidOperations[Operation(strings.ToLower(string(op)))] {
 			return fmt.Errorf("invalid action: %s", op)
 		}
 	}

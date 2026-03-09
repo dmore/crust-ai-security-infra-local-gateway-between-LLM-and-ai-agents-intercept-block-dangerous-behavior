@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/BakeLens/crust/internal/pathutil"
@@ -29,6 +30,22 @@ func TestIsYAMLFile(t *testing.T) {
 				t.Errorf("isYAMLFile(%q) = %v, want %v", tt.file, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoader_RejectsUnknownYAMLFields(t *testing.T) {
+	content := `rules:
+  - block: "**/.env"
+    bloock: "typo"
+`
+	loader := NewLoader(t.TempDir())
+	// Test parseRuleSet directly — LoadUser logs+skips bad files by design.
+	_, err := loader.parseRuleSet([]byte(content), "test.yaml", SourceUser)
+	if err == nil {
+		t.Fatal("expected error for unknown YAML field 'bloock', got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown fields") {
+		t.Errorf("expected 'unknown fields' error, got: %v", err)
 	}
 }
 

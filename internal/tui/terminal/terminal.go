@@ -49,19 +49,11 @@ type Info struct {
 // EnvFunc is the signature for environment variable lookup (matches os.Getenv).
 type EnvFunc func(string) string
 
-var (
-	cachedInfo Info
-	detectOnce sync.Once
-)
+var detect = sync.OnceValue(func() Info { return DetectWith(os.Getenv) })
 
 // Detect identifies terminal capabilities from os.Getenv.
 // Result is cached after first call.
-func Detect() Info {
-	detectOnce.Do(func() {
-		cachedInfo = DetectWith(os.Getenv)
-	})
-	return cachedInfo
-}
+func Detect() Info { return detect() }
 
 // Capability profiles for terminals with reduced feature sets.
 // Terminals not listed here get CapAll.

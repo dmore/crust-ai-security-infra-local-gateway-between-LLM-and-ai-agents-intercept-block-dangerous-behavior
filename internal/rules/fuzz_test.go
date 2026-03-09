@@ -2089,7 +2089,9 @@ func FuzzPipeBypass(f *testing.F) {
 	f.Fuzz(func(t *testing.T, cmd string) {
 		// Skip oversized inputs — the full rule engine is heavyweight and
 		// pathologically large commands cause OOM on CI runners.
-		if len(cmd) > 1024 {
+		// 512 bytes is sufficient for meaningful pipe-bypass testing while
+		// keeping memory usage safe on 7GB GitHub Actions runners.
+		if len(cmd) > 512 {
 			return
 		}
 

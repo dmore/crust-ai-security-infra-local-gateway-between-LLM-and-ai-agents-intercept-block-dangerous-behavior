@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/BakeLens/crust/internal/logger"
 	"github.com/BakeLens/crust/internal/pathutil"
-	"github.com/gobwas/glob"
 )
 
 // expandRuleHomes replaces $HOME in rule path patterns with the actual home
@@ -60,13 +58,13 @@ type Engine struct {
 	mu sync.RWMutex
 
 	// Immutable after init; --disable-builtin filters to locked-only
-	builtin []CompiledRule
+	builtin []compiledRule
 
 	// Can be hot-reloaded
-	user []CompiledRule
+	user []compiledRule
 
 	// Merged and sorted by priority (rebuilt on reload)
-	merged []CompiledRule
+	merged []compiledRule
 
 	// Core components
 	extractor  *Extractor
@@ -89,31 +87,6 @@ type Engine struct {
 
 	// Callbacks for reload notifications
 	onReloadCallbacks []ReloadCallback
-}
-
-// CompiledMatch holds pre-compiled patterns from a Match condition.
-// All regex/glob patterns are validated and compiled at rule insert time,
-// so evaluation never needs to re-compile or handle invalid patterns.
-type CompiledMatch struct {
-	Match        Match          // original for error messages/display
-	PathRegex    *regexp.Regexp // non-nil if Match.Path starts with "re:"
-	PathGlob     glob.Glob      // non-nil if Match.Path is a glob pattern
-	CommandRegex *regexp.Regexp // non-nil if Match.Command starts with "re:"
-	HostRegex    *regexp.Regexp // non-nil if Match.Host starts with "re:"
-	HostGlob     glob.Glob      // non-nil if Match.Host is a glob pattern
-	ContentRegex *regexp.Regexp // non-nil if Match.Content starts with "re:"
-}
-
-// CompiledRule is a rule with pre-compiled matchers
-type CompiledRule struct {
-	Rule        Rule
-	PathMatcher *Matcher // pre-compiled Block.Paths/Except
-	HostMatcher *Matcher // pre-compiled Block.Hosts
-
-	// Pre-compiled Match patterns (Level 4+ rules)
-	MatchCompiled      *CompiledMatch
-	AllCompiledMatches []CompiledMatch
-	AnyCompiledMatches []CompiledMatch
 }
 
 // EngineConfig holds engine configuration
@@ -479,7 +452,7 @@ func (e *Engine) resolvePaths(paths []string) ([]string, *MatchResult) {
 }
 
 // getMergedRules returns the current merged rule set under read lock.
-func (e *Engine) getMergedRules() []CompiledRule {
+func (e *Engine) getMergedRules() []compiledRule {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.merged
@@ -535,7 +508,7 @@ func (e *Engine) matchRules(info *ExtractedInfo, allPaths []string, toolName str
 }
 
 // evaluateOperationRules evaluates operation-based rules (path, command, host matching)
-func (e *Engine) evaluateOperationRules(rules []CompiledRule, info ExtractedInfo, normalizedPaths []string, toolName string) MatchResult {
+func (e *Engine) evaluateOperationRules(rules []compiledRule, info ExtractedInfo, normalizedPaths []string, toolName string) MatchResult {
 	// Evaluate against rules (sorted by priority)
 	for _, compiled := range rules {
 		// Skip disabled rules
@@ -607,9 +580,9 @@ func (e *Engine) evaluateOperationRules(rules []CompiledRule, info ExtractedInfo
 }
 
 // evaluateMatchCompiled evaluates a single pre-compiled Match condition against the extracted info.
-// Uses pre-compiled regex/glob patterns from CompiledMatch instead of re-compiling at runtime.
+// Uses pre-compiled regex/glob patterns from compiledMatch instead of re-compiling at runtime.
 // Returns true only if ALL non-empty conditions in the Match are satisfied (AND within a single Match).
-func (e *Engine) evaluateMatchCompiled(cm *CompiledMatch, info ExtractedInfo, normalizedPaths []string, toolName string) bool {
+func (e *Engine) evaluateMatchCompiled(cm *compiledMatch, info ExtractedInfo, normalizedPaths []string, toolName string) bool {
 	if cm == nil {
 		return true
 	}
@@ -672,74 +645,6 @@ func (e *Engine) evaluateMatchCompiled(cm *CompiledMatch, info ExtractedInfo, no
 	return true
 }
 
-// evaluateMatch evaluates a single Match condition against the extracted info.
-// Returns true only if ALL non-empty conditions in the Match are satisfied (AND within a single Match).
-// maxRegexLen limits user-defined regex pattern length to bound compilation cost.
-const maxRegexLen = 4096
-
-// compileRegex compiles a regex with a length limit.
-func compileRegex(pattern string) (*regexp.Regexp, error) {
-	if len(pattern) > maxRegexLen {
-		return nil, fmt.Errorf("regex pattern too long (%d > %d chars)", len(pattern), maxRegexLen)
-	}
-	return regexp.Compile(pattern)
-}
-
-// patternKind returns "regex" or "glob" based on the pattern prefix.
-func patternKind(pattern string) string {
-	if strings.HasPrefix(pattern, "re:") {
-		return "regex"
-	}
-	return "glob"
-}
-
-// Glob separators used by compilePattern.
-const (
-	pathGlobSeparator rune = '/'
-	hostGlobSeparator rune = '.'
-)
-
-// compilePattern compiles a pattern as either a regex (if "re:" prefixed) or a glob.
-// The separator is used for glob compilation (pathGlobSeparator for paths, hostGlobSeparator for hosts).
-func compilePattern(pattern string, separator rune) (*regexp.Regexp, glob.Glob, error) {
-	if strings.HasPrefix(pattern, "re:") {
-		re, err := compileRegex(pattern[3:])
-		return re, nil, err
-	}
-	g, err := glob.Compile(pattern, separator)
-	return nil, g, err
-}
-
-// matchAnyRegexGlob returns true if any item matches the regex, glob, or literal.
-// Pass nil for unused matchers. Literal is only checked if both re and g are nil.
-func matchAnyRegexGlob(items []string, re *regexp.Regexp, g glob.Glob, literal string) bool {
-	for _, item := range items {
-		if re != nil {
-			if re.MatchString(item) {
-				return true
-			}
-		} else if g != nil {
-			if g.Match(item) {
-				return true
-			}
-		} else if item == literal {
-			return true
-		}
-	}
-	return false
-}
-
-// matchTools checks if toolName (lowercase) is in the list of allowed tools
-func matchTools(tools []string, toolName string) bool {
-	toolLower := strings.ToLower(toolName)
-	return slices.Contains(tools, toolLower)
-}
-
-// containsIgnoreCase checks if s contains substr (case-insensitive)
-func containsIgnoreCase(s, substr string) bool {
-	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
-}
-
 // EvaluateJSON is a convenience method that accepts JSON arguments
 func (e *Engine) EvaluateJSON(toolName string, argsJSON string) MatchResult {
 	return e.Evaluate(ToolCall{
@@ -790,8 +695,8 @@ func (e *Engine) GetUserRules() []Rule {
 	return extractRules(e.user)
 }
 
-// extractRules converts a slice of CompiledRule to a slice of Rule.
-func extractRules(compiled []CompiledRule) []Rule {
+// extractRules converts a slice of compiledRule to a slice of Rule.
+func extractRules(compiled []compiledRule) []Rule {
 	rules := make([]Rule, len(compiled))
 	for i, cr := range compiled {
 		rules[i] = cr.Rule
@@ -927,11 +832,11 @@ func (e *Engine) GetAllRules() []Rule {
 	return rules
 }
 
-// GetCompiledRules returns all compiled rules (for inspection/debugging)
-func (e *Engine) GetCompiledRules() []CompiledRule {
+// getCompiledRules returns all compiled rules (for inspection/debugging)
+func (e *Engine) getCompiledRules() []compiledRule {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	out := make([]CompiledRule, len(e.merged))
+	out := make([]compiledRule, len(e.merged))
 	copy(out, e.merged)
 	return out
 }
@@ -956,207 +861,19 @@ func (e *Engine) notifyReload() {
 	}
 }
 
-// sanitizePattern rejects patterns containing null bytes or control characters.
-// Returns an error so the user gets a clear message about what's wrong.
-func sanitizePattern(pattern string) error {
-	for i := range len(pattern) {
-		if pattern[i] == 0 {
-			return fmt.Errorf("pattern contains null byte at position %d", i)
-		}
-		if pattern[i] < 0x20 && pattern[i] != '\t' {
-			return fmt.Errorf("pattern contains control character 0x%02x at position %d", pattern[i], i)
-		}
-	}
-	return nil
-}
-
-// sanitizePatterns validates a slice of patterns, returning a contextual error.
-func sanitizePatterns(patterns []string, ruleName, fieldName string) error {
-	for i, p := range patterns {
-		if err := sanitizePattern(p); err != nil {
-			return fmt.Errorf("rule %q %s[%d]: %w", ruleName, fieldName, i, err)
-		}
-	}
-	return nil
-}
-
-// compileMatchConditions compiles a slice of Match conditions into CompiledMatch values.
-func compileMatchConditions(conditions []Match, ruleName, condType string) ([]CompiledMatch, error) {
-	var compiled []CompiledMatch
-	for i, cond := range conditions {
-		cm, err := compileMatchPattern(&cond)
-		if err != nil {
-			return nil, fmt.Errorf("rule %q %s[%d]: %w", ruleName, condType, i, err)
-		}
-		if cm != nil {
-			compiled = append(compiled, *cm)
-		}
-	}
-	return compiled, nil
-}
-
-// compileMatchPattern pre-compiles a single Match condition's patterns.
-// Returns clear errors for invalid patterns so rules are rejected at insert time.
-func compileMatchPattern(m *Match) (*CompiledMatch, error) {
-	if m == nil {
-		return nil, nil
-	}
-	cm := &CompiledMatch{Match: *m}
-
-	// Sanitize all pattern fields
-	for _, check := range []struct{ name, pattern string }{
-		{"path", m.Path}, {"command", m.Command},
-		{"host", m.Host}, {"content", m.Content},
-	} {
-		if check.pattern == "" {
-			continue
-		}
-		if err := sanitizePattern(check.pattern); err != nil {
-			return nil, fmt.Errorf("match.%s: %w", check.name, err)
-		}
-	}
-
-	// Compile Path (regex or glob)
-	if m.Path != "" {
-		re, g, err := compilePattern(m.Path, pathGlobSeparator)
-		if err != nil {
-			return nil, fmt.Errorf("match.path %s %q: %w", patternKind(m.Path), m.Path, err)
-		}
-		cm.PathRegex, cm.PathGlob = re, g
-	}
-
-	// Compile Command (regex only; literals use substring match at runtime)
-	if m.Command != "" && strings.HasPrefix(m.Command, "re:") {
-		re, err := compileRegex(m.Command[3:])
-		if err != nil {
-			return nil, fmt.Errorf("match.command regex %q: %w", m.Command, err)
-		}
-		cm.CommandRegex = re
-	}
-
-	// Compile Host (regex or glob)
-	if m.Host != "" {
-		re, g, err := compilePattern(m.Host, hostGlobSeparator)
-		if err != nil {
-			return nil, fmt.Errorf("match.host %s %q: %w", patternKind(m.Host), m.Host, err)
-		}
-		cm.HostRegex, cm.HostGlob = re, g
-	}
-
-	// Compile Content (regex only; literals use substring match at runtime)
-	if m.Content != "" && strings.HasPrefix(m.Content, "re:") {
-		re, err := compileRegex(m.Content[3:])
-		if err != nil {
-			return nil, fmt.Errorf("match.content regex %q: %w", m.Content, err)
-		}
-		cm.ContentRegex = re
-	}
-
-	return cm, nil
-}
-
-// compileRules compiles path/host patterns in rules.
-// When strict is true (builtin rules), any compilation error aborts the entire batch.
-// When strict is false (user rules), bad rules are skipped with a warning.
-func (e *Engine) compileRules(rules []Rule, strict bool) ([]CompiledRule, error) {
-	compiled := make([]CompiledRule, 0, len(rules))
-
-	for _, rule := range rules {
-		if !rule.IsEnabled() {
-			continue
-		}
-
-		cr, err := compileOneRule(rule)
-		if err != nil {
-			if strict {
-				return nil, err
-			}
-			log.Warn("Skipping rule %q from %s: %v", rule.Name, rule.FilePath, err)
-			continue
-		}
-		compiled = append(compiled, cr)
-	}
-
-	return compiled, nil
-}
-
-// compileOneRule validates and compiles a single rule's patterns.
-// Returns a clear error if any pattern is invalid.
-func compileOneRule(rule Rule) (CompiledRule, error) {
-	// Sanitize Block patterns before compilation
-	for _, check := range []struct {
-		patterns []string
-		field    string
-	}{
-		{rule.Block.Paths, "block.paths"},
-		{rule.Block.Except, "block.except"},
-		{rule.Block.Hosts, "block.hosts"},
-	} {
-		if err := sanitizePatterns(check.patterns, rule.Name, check.field); err != nil {
-			return CompiledRule{}, err
-		}
-	}
-
-	// Compile path matcher (Block.Paths/Except)
-	var pathMatcher *Matcher
-	if len(rule.Block.Paths) > 0 {
-		var err error
-		pathMatcher, err = NewMatcher(rule.Block.Paths, rule.Block.Except)
-		if err != nil {
-			return CompiledRule{}, fmt.Errorf("rule %q: %w", rule.Name, err)
-		}
-	}
-
-	// Compile host matcher (Block.Hosts)
-	var hostMatcher *Matcher
-	if len(rule.Block.Hosts) > 0 {
-		var err error
-		hostMatcher, err = NewMatcher(rule.Block.Hosts, nil)
-		if err != nil {
-			return CompiledRule{}, fmt.Errorf("rule %q: %w", rule.Name, err)
-		}
-	}
-
-	// Compile Match patterns (Level 4+ rules)
-	var matchCompiled *CompiledMatch
-	if rule.Match != nil {
-		var err error
-		matchCompiled, err = compileMatchPattern(rule.Match)
-		if err != nil {
-			return CompiledRule{}, fmt.Errorf("rule %q: %w", rule.Name, err)
-		}
-	}
-
-	// Compile AllConditions (AND logic) and AnyConditions (OR logic)
-	allCompiled, err := compileMatchConditions(rule.AllConditions, rule.Name, "all")
-	if err != nil {
-		return CompiledRule{}, err
-	}
-	anyCompiled, err := compileMatchConditions(rule.AnyConditions, rule.Name, "any")
-	if err != nil {
-		return CompiledRule{}, err
-	}
-
-	return CompiledRule{
-		Rule:               rule,
-		PathMatcher:        pathMatcher,
-		HostMatcher:        hostMatcher,
-		MatchCompiled:      matchCompiled,
-		AllCompiledMatches: allCompiled,
-		AnyCompiledMatches: anyCompiled,
-	}, nil
-}
-
 // rebuildMergedLocked rebuilds the merged rule list (must hold write lock)
 func (e *Engine) rebuildMergedLocked() {
 	// Combine builtin and user rules
-	all := make([]CompiledRule, 0, len(e.builtin)+len(e.user))
+	all := make([]compiledRule, 0, len(e.builtin)+len(e.user))
 	all = append(all, e.builtin...)
 	all = append(all, e.user...)
 
-	// Sort by priority (lower = higher priority)
-	slices.SortFunc(all, func(a, b CompiledRule) int {
-		return cmp.Compare(a.Rule.GetPriority(), b.Rule.GetPriority())
+	// Sort by priority (lower = higher priority), then by name for determinism.
+	slices.SortStableFunc(all, func(a, b compiledRule) int {
+		if c := cmp.Compare(a.Rule.GetPriority(), b.Rule.GetPriority()); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Rule.Name, b.Rule.Name)
 	})
 
 	e.merged = all

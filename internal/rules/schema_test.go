@@ -285,17 +285,30 @@ func TestValidateRuleSet(t *testing.T) {
 	})
 }
 
+func TestRule_Validate_CaseInsensitiveActions(t *testing.T) {
+	// Rule.Validate should accept uppercase operations (matching YAML path behavior).
+	r := Rule{
+		Name:    "test",
+		Message: "test",
+		Actions: []Operation{"READ"},
+		Block:   Block{Paths: []string{"*"}},
+	}
+	if err := r.Validate(); err != nil {
+		t.Errorf("Rule.Validate rejected uppercase operation: %v", err)
+	}
+}
+
 func TestOperation_Constants(t *testing.T) {
-	// Verify all operations are in ValidActions
+	// Verify all operations are in ValidOperations
 	ops := []Operation{OpRead, OpWrite, OpDelete, OpCopy, OpMove, OpExecute, OpNetwork}
 	for _, op := range ops {
-		if !ValidActions[op] {
-			t.Errorf("operation %s not in ValidActions", op)
+		if !ValidOperations[op] {
+			t.Errorf("operation %s not in ValidOperations", op)
 		}
 	}
 
 	// Verify count matches
-	if len(ValidActions) != len(ops) {
-		t.Errorf("ValidActions has %d entries, expected %d", len(ValidActions), len(ops))
+	if len(ValidOperations) != len(ops) {
+		t.Errorf("ValidOperations has %d entries, expected %d", len(ValidOperations), len(ops))
 	}
 }

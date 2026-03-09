@@ -56,11 +56,11 @@ type RuleConfig struct {
 	Any []MatchConfig `yaml:"any,omitempty"`
 
 	// Common fields
-	Name     string   `yaml:"name,omitempty"`
-	Locked   *bool    `yaml:"locked,omitempty"`
-	Actions  []string `yaml:"actions,omitempty"`
-	Message  string   `yaml:"message,omitempty"`
-	Severity Severity `yaml:"severity,omitempty"`
+	Name     string      `yaml:"name,omitempty"`
+	Locked   *bool       `yaml:"locked,omitempty"`
+	Actions  []Operation `yaml:"actions,omitempty"`
+	Message  string      `yaml:"message,omitempty"`
+	Severity Severity    `yaml:"severity,omitempty"`
 }
 
 // MatchConfig is a single match condition
@@ -95,6 +95,11 @@ func (r *RuleConfig) Validate() error {
 		return errors.New("rule cannot mix block/match/all/any")
 	}
 
+	// except is only valid with block format
+	if len(r.Except) > 0 && len(r.Block) == 0 {
+		return errors.New("except is only valid with block format")
+	}
+
 	// Composite/match rules require name
 	if (r.Match != nil || len(r.All) > 0 || len(r.Any) > 0) && r.Name == "" {
 		return errors.New("match/composite rules require a name")
@@ -117,11 +122,11 @@ func (r *RuleConfig) Validate() error {
 		}
 	}
 
-	// Validate actions
-	for _, action := range r.Actions {
-		lower := strings.ToLower(action)
-		if lower != "all" && !ValidActions[Operation(lower)] {
-			return fmt.Errorf("unknown action: %q", action)
+	// Validate actions (operations this rule applies to)
+	for _, op := range r.Actions {
+		lower := Operation(strings.ToLower(string(op)))
+		if lower != OpAll && !ValidOperations[lower] {
+			return fmt.Errorf("unknown operation: %q", op)
 		}
 	}
 
@@ -226,17 +231,17 @@ func generateName(pattern string) string {
 // AllOperations is the default set of operations when no actions are specified.
 var AllOperations = []Operation{OpRead, OpWrite, OpDelete, OpCopy, OpMove, OpExecute, OpNetwork}
 
-func parseActions(ops []string) []Operation {
+func parseActions(ops []Operation) []Operation {
 	if len(ops) == 0 {
 		return AllOperations
 	}
 	result := make([]Operation, 0, len(ops))
 	for _, op := range ops {
-		lower := Operation(strings.ToLower(op))
-		if lower == "all" {
+		lower := Operation(strings.ToLower(string(op)))
+		if lower == OpAll {
 			return AllOperations
 		}
-		if ValidActions[lower] {
+		if ValidOperations[lower] {
 			result = append(result, lower)
 		}
 	}
@@ -256,7 +261,7 @@ func (rs *RuleSetConfig) Validate() error {
 			return fmt.Errorf("rule[%d] %q: %w", i, rule.Name, err)
 		}
 		name := rule.Name
-		if name == "" {
+		if name == "" && len(rule.Block) > 0 {
 			name = generateName(rule.Block[0])
 		}
 		if names[name] {

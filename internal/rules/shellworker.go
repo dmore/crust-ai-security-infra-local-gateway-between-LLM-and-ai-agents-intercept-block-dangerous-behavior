@@ -48,7 +48,7 @@ func newShellWorker(exePath string) (*shellWorker, error) {
 }
 
 func (w *shellWorker) start() error {
-	proc := exec.CommandContext(context.Background(), w.exePath) //nolint:gosec // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command -- exePath is from os.Executable(), not user input
+	proc := exec.CommandContext(context.Background(), w.exePath) //nolint:gosec // exePath is from os.Executable(), not user input
 	proc.Env = append(os.Environ(), "_CRUST_SHELL_WORKER=1")
 
 	stdin, err := proc.StdinPipe()

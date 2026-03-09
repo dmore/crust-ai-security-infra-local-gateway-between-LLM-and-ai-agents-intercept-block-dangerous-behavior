@@ -43,7 +43,7 @@ func RunProxy(engine *rules.Engine, cmd []string, stdin io.ReadCloser, stdout io
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	child := exec.CommandContext(ctx, cmd[0], cmd[1:]...) //nolint:gosec // user-specified by design
+	child := exec.CommandContext(ctx, cmd[0], cmd[1:]...) //nolint:gosec // user-specified MCP server command
 	childStdin, err := child.StdinPipe()
 	if err != nil {
 		log.Error("Failed to create %s stdin pipe: %v", cfg.ProcessLabel, err)

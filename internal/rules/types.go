@@ -62,6 +62,13 @@ const (
 	ActionAlert Action = "alert"
 )
 
+// ValidResponseActions is the set of valid response action types.
+var ValidResponseActions = map[Action]bool{
+	ActionBlock: true,
+	ActionLog:   true,
+	ActionAlert: true,
+}
+
 // Source represents the origin of a rule.
 type Source string
 
@@ -71,3 +78,10 @@ const (
 	SourceUser    Source = "user"
 	SourceCLI     Source = "cli"
 )
+
+// ValidSources is the set of all valid rule source types.
+var ValidSources = map[Source]bool{
+	SourceBuiltin: true,
+	SourceUser:    true,
+	SourceCLI:     true,
+}

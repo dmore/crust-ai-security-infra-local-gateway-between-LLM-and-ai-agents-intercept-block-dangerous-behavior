@@ -345,7 +345,7 @@ func (b *BufferedSSEWriter) flushFilteredEvents(blockedIndices, replacedIndices 
 	case types.APITypeUnknown:
 		return b.flushEventsUnlocked()
 	default:
-		panic("unhandled types.APIType: " + b.apiType.String())
+		return fmt.Errorf("unhandled API type: %s", b.apiType)
 	}
 }
 
@@ -498,7 +498,7 @@ func (b *BufferedSSEWriter) injectWarning(blockedCalls []security.BlockedToolCal
 	case types.APITypeUnknown:
 		return nil
 	default:
-		panic("unhandled types.APIType: " + b.apiType.String())
+		return fmt.Errorf("unhandled API type: %s", b.apiType)
 	}
 }
 

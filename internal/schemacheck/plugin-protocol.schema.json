@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/BakeLens/crust/docs/plugin-protocol.schema.json",
+  "title": "Crust Plugin Wire Protocol",
+  "description": "JSON Schema for the crust plugin wire protocol. Plugins are external processes that communicate with the crust engine over newline-delimited JSON on stdin/stdout.",
+
+  "$defs": {
+    "operation": {
+      "type": "string",
+      "enum": ["read", "write", "delete", "copy", "move", "execute", "network"],
+      "title": "Operation",
+      "description": "A filesystem or network operation type."
+    },
+
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "high", "warning", "info"],
+      "title": "Severity",
+      "description": "Severity level. Invalid values default to \"high\" at runtime."
+    },
+
+    "action": {
+      "type": "string",
+      "enum": ["block", "log", "alert"],
+      "title": "Action",
+      "description": "What to do when a rule matches. Empty or omitted defaults to \"block\" at runtime."
+    },
+
+    "ruleSource": {
+      "type": "string",
+      "enum": ["builtin", "user", "cli"],
+      "title": "Rule Source",
+      "description": "Where a rule was defined."
+    },
+
+    "ruleSnapshot": {
+      "type": "object",
+      "title": "RuleSnapshot",
+      "description": "A read-only, JSON-safe view of an engine rule. Plugins can use this for context-aware decisions (e.g., checking if a path is already protected by a builtin rule).",
+      "required": ["name", "description", "source", "severity", "priority", "actions", "block_paths", "block_except", "block_hosts", "message", "locked", "enabled", "hit_count"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Rule identifier (e.g. \"protect-ssh-keys\").",
+          "examples": ["protect-ssh-keys", "protect-etc"]
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the rule."
+        },
+        "source": {
+          "$ref": "#/$defs/ruleSource",
+          "description": "Where the rule was defined."
+        },
+        "severity": {
+          "$ref": "#/$defs/severity"
+        },
+        "priority": {
+          "type": "integer",
+          "description": "Rule priority. Lower values = higher priority. Default is 50.",
+          "examples": [10, 50]
+        },
+        "actions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Operations this rule applies to (e.g. [\"read\", \"write\", \"delete\"]).",
+          "examples": [["read", "write", "delete"]]
+        },
+        "block_paths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Glob patterns this rule blocks.",
+          "examples": [["/etc/**", "/var/log/**"]]
+        },
+        "block_except": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Exception glob patterns (allowed even if block_paths matches).",
+          "examples": [["/etc/hostname"]]
+        },
+        "block_hosts": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Host patterns for network rules."
+        },
+        "message": {
+          "type": "string",
+          "description": "Block message shown to the user."
+        },
+        "locked": {
+          "type": "boolean",
+          "description": "True if the rule survives --disable-builtin."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "True if the rule is currently active."
+        },
+        "hit_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of times this rule has matched."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "initParams": {
+      "type": "object",
+      "title": "InitParams",
+      "description": "Parameters sent with method=\"init\". Contains the plugin name and optional plugin-specific configuration.",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Plugin name, used for logging and identification.",
+          "examples": ["sandbox", "rate-limiter"]
+        },
+        "config": {
+          "type": ["object", "null"],
+          "description": "Plugin-specific configuration. Structure depends on the plugin. null means use defaults.",
+          "examples": [{ "allowed_dirs": ["/home/user/project"], "deny_net": true }, null]
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "evaluateRequest": {
+      "type": "object",
+      "title": "EvaluateRequest",
+      "description": "Parameters sent with method=\"evaluate\". Contains everything the engine extracted during steps 0-12, plus a snapshot of all active rules.",
+      "required": ["tool_name", "arguments", "operation", "operations", "command", "paths", "hosts", "content", "evasive", "rules"],
+      "properties": {
+        "tool_name": {
+          "type": "string",
+          "description": "Sanitized tool name (e.g. \"Bash\", \"Read\", \"Write\").",
+          "examples": ["Bash", "Read", "Write", "Edit"]
+        },
+        "arguments": {
+          "type": ["object", "null"],
+          "description": "Raw JSON arguments from the tool call. May be null for tools with no arguments.",
+          "examples": [{ "command": "rm -rf /etc" }, null]
+        },
+        "operation": {
+          "$ref": "#/$defs/operation",
+          "description": "Primary operation detected for this tool call."
+        },
+        "operations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/operation" },
+          "description": "All operations detected (a command may both read and write).",
+          "examples": [["execute", "delete"]]
+        },
+        "command": {
+          "type": "string",
+          "description": "Raw shell command (Bash tool only, empty for other tools).",
+          "examples": ["rm -rf /etc"]
+        },
+        "paths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Normalized and symlink-resolved filesystem paths.",
+          "examples": [["/etc", "/home/user/.ssh/id_rsa"]]
+        },
+        "hosts": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Extracted hostnames and IP addresses.",
+          "examples": [["evil.com", "192.168.1.1"]]
+        },
+        "content": {
+          "type": "string",
+          "description": "Write content or full raw JSON of all arguments."
+        },
+        "evasive": {
+          "type": "boolean",
+          "description": "True if the command uses shell tricks that prevent static analysis.",
+          "default": false
+        },
+        "rules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ruleSnapshot" },
+          "description": "Read-only snapshot of all active engine rules at evaluation time."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "evaluateResult": {
+      "title": "EvaluateResult",
+      "description": "Result of an evaluate call. null means allow; an object means block.",
+      "oneOf": [
+        {
+          "type": "null",
+          "title": "Allow",
+          "description": "null means the plugin allows the tool call."
+        },
+        {
+          "type": "object",
+          "title": "Block",
+          "description": "Non-null result means the plugin is blocking the tool call.",
+          "required": ["rule_name", "message"],
+          "properties": {
+            "plugin": {
+              "type": "string",
+              "description": "Auto-filled by the registry with the plugin's name. Plugins should not set this."
+            },
+            "rule_name": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Plugin-namespaced rule name (e.g. \"sandbox:fs-deny\").",
+              "examples": ["sandbox:fs-deny", "ratelimit:exceeded"]
+            },
+            "severity": {
+              "$ref": "#/$defs/severity",
+              "description": "Severity level. Invalid or missing values default to \"high\" at runtime.",
+              "default": "high"
+            },
+            "action": {
+              "$ref": "#/$defs/action",
+              "description": "What action to take. Empty or omitted defaults to \"block\" at runtime.",
+              "default": "block"
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Human-readable reason for blocking.",
+              "examples": ["path /etc is outside sandbox", "rate limit exceeded: 10 calls/min"]
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "wireRequest": {
+      "type": "object",
+      "title": "WireRequest",
+      "description": "A JSON-RPC-like request sent from crust to the plugin process. One JSON object per line on stdin.",
+      "required": ["method"],
+      "oneOf": [
+        {
+          "title": "Init Request",
+          "description": "One-time initialization with plugin name and config.",
+          "properties": {
+            "method": { "const": "init" },
+            "params": { "$ref": "#/$defs/initParams" }
+          },
+          "required": ["method", "params"]
+        },
+        {
+          "title": "Evaluate Request",
+          "description": "Evaluate a tool call that passed all built-in checks.",
+          "properties": {
+            "method": { "const": "evaluate" },
+            "params": { "$ref": "#/$defs/evaluateRequest" }
+          },
+          "required": ["method", "params"]
+        },
+        {
+          "title": "Close Request",
+          "description": "Graceful shutdown. Plugin should respond with {\"result\":\"ok\"} and exit.",
+          "properties": {
+            "method": { "const": "close" }
+          },
+          "required": ["method"]
+        }
+      ],
+      "additionalProperties": false
+    },
+
+    "wireResponse": {
+      "type": "object",
+      "title": "WireResponse",
+      "description": "A JSON-RPC-like response sent from the plugin process to crust. One JSON object per line on stdout. Exactly one of \"result\" or \"error\" must be present.",
+      "oneOf": [
+        {
+          "title": "Success Response",
+          "description": "Successful response. The result value depends on the method: \"ok\" for init/close, null or EvaluateResult for evaluate.",
+          "required": ["result"],
+          "properties": {
+            "result": {
+              "description": "For init/close: the string \"ok\". For evaluate: null (allow) or an EvaluateResult object (block)."
+            }
+          },
+          "not": { "required": ["error"] },
+          "additionalProperties": false
+        },
+        {
+          "title": "Error Response",
+          "description": "Error response. The plugin encountered an error processing the request.",
+          "required": ["error"],
+          "properties": {
+            "error": {
+              "type": "string",
+              "description": "Human-readable error message.",
+              "examples": ["unknown method: foo", "config validation failed"]
+            }
+          },
+          "not": { "required": ["result"] },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+
+  "title": "Wire Protocol Message",
+  "description": "A single message in the crust plugin wire protocol. This schema covers both directions: WireRequest (crust to plugin) and WireResponse (plugin to crust).",
+  "oneOf": [
+    { "$ref": "#/$defs/wireRequest" },
+    { "$ref": "#/$defs/wireResponse" }
+  ]
+}

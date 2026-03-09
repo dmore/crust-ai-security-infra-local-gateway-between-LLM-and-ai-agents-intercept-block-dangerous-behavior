@@ -1,5 +1,7 @@
 package rules
 
+//go:generate go run dlp_verify.go
+
 import "regexp"
 
 // Hardcoded DLP (Data Loss Prevention) token detection patterns.

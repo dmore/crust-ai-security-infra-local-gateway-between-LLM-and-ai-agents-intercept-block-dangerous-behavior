@@ -3,6 +3,7 @@ package security
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"sync/atomic"
 
 	"github.com/BakeLens/crust/internal/message"
@@ -243,7 +244,7 @@ func (i *Interceptor) InterceptToolCalls(responseBody []byte, ctx InterceptionCo
 	case types.APITypeOpenAICompletion, types.APITypeUnknown:
 		return i.InterceptOpenAIResponse(responseBody, ctx)
 	default:
-		panic("unhandled types.APIType: " + ctx.APIType.String())
+		return nil, fmt.Errorf("unhandled API type: %s", ctx.APIType)
 	}
 }
 

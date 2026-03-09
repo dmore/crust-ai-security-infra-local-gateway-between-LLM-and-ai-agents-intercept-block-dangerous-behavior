@@ -300,8 +300,8 @@ func TestEngine_DisabledRules(t *testing.T) {
 	}
 
 	// Verify only enabled rule is loaded
-	if len(engine.GetCompiledRules()) != 1 {
-		t.Fatalf("Expected 1 rule (disabled rule should be skipped), got %d", len(engine.GetCompiledRules()))
+	if len(engine.getCompiledRules()) != 1 {
+		t.Fatalf("Expected 1 rule (disabled rule should be skipped), got %d", len(engine.getCompiledRules()))
 	}
 
 	// Test: enabled.txt should be blocked
@@ -610,7 +610,7 @@ func TestCompilePattern(t *testing.T) {
 }
 
 func TestExtractRules(t *testing.T) {
-	compiled := []CompiledRule{
+	compiled := []compiledRule{
 		{Rule: Rule{Name: "rule1"}},
 		{Rule: Rule{Name: "rule2"}},
 	}
@@ -668,16 +668,16 @@ func TestGetCompiledRules_DefensiveCopy(t *testing.T) {
 	}
 
 	// Get a copy and modify it
-	rules1 := engine.GetCompiledRules()
+	rules1 := engine.getCompiledRules()
 	if len(rules1) != 1 {
 		t.Fatalf("expected 1 rule, got %d", len(rules1))
 	}
 	rules1[0].Rule.Name = "MUTATED"
 
 	// Second call should still return the original
-	rules2 := engine.GetCompiledRules()
+	rules2 := engine.getCompiledRules()
 	if rules2[0].Rule.Name != "test-rule" {
-		t.Errorf("GetCompiledRules returned mutated data: got %q, want %q", rules2[0].Rule.Name, "test-rule")
+		t.Errorf("getCompiledRules returned mutated data: got %q, want %q", rules2[0].Rule.Name, "test-rule")
 	}
 }
 
@@ -907,5 +907,52 @@ func TestMatchRules_NoMatch(t *testing.T) {
 	result := e.matchRules(&info, []string{"/tmp/safe.txt"}, "Bash")
 	if result.Matched {
 		t.Errorf("expected no match, got rule=%s", result.RuleName)
+	}
+}
+
+// TestEngine_DeterministicRuleOrder verifies that when multiple rules share
+// the same priority, the engine always picks the same winner (sorted by name).
+func TestEngine_DeterministicRuleOrder(t *testing.T) {
+	// All rules have the same default priority (50) but different names.
+	// The engine sorts by priority then by name, so "aaa-block" should always win.
+	rules := []Rule{
+		{
+			Name:    "ccc-block",
+			Actions: []Operation{OpRead},
+			Block:   Block{Paths: []string{"**/.secret"}},
+			Message: "blocked by ccc",
+		},
+		{
+			Name:    "aaa-block",
+			Actions: []Operation{OpRead},
+			Block:   Block{Paths: []string{"**/.secret"}},
+			Message: "blocked by aaa",
+		},
+		{
+			Name:    "bbb-block",
+			Actions: []Operation{OpRead},
+			Block:   Block{Paths: []string{"**/.secret"}},
+			Message: "blocked by bbb",
+		},
+	}
+
+	engine, err := NewTestEngine(rules)
+	if err != nil {
+		t.Fatalf("Failed to create engine: %v", err)
+	}
+
+	call := makeToolCall("Bash", map[string]any{
+		"command": "cat .secret",
+	})
+
+	// Run Evaluate multiple times and verify the same rule always wins.
+	for i := range 20 {
+		result := engine.Evaluate(call)
+		if !result.Matched {
+			t.Fatalf("iteration %d: expected match, got none", i)
+		}
+		if result.RuleName != "aaa-block" {
+			t.Fatalf("iteration %d: expected rule 'aaa-block', got '%s'", i, result.RuleName)
+		}
 	}
 }

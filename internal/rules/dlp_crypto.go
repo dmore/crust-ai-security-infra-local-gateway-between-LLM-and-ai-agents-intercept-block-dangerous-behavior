@@ -3,6 +3,7 @@ package rules
 import (
 	"bufio"
 	"embed"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -65,7 +66,8 @@ func init() {
 	entries, err := bip39WordlistFS.ReadDir("bip39")
 	if err != nil {
 		// Embedded FS is baked in at compile time; this cannot fail.
-		panic("bip39: cannot read embedded wordlist directory: " + err.Error())
+		fmt.Fprintf(os.Stderr, "FATAL: bip39: cannot read embedded wordlist directory: %v\n", err)
+		os.Exit(1)
 	}
 	for _, entry := range entries {
 		if entry.IsDir() {

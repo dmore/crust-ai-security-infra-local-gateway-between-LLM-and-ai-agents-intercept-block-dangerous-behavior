@@ -10,7 +10,7 @@ import (
 
 func TestReadSSEEvents_Basic(t *testing.T) {
 	input := "event: message\ndata: hello\nid: 1\n\nevent: message\ndata: world\nid: 2\n\n"
-	events := ReadSSEEvents(context.Background(), strings.NewReader(input))
+	events := ReadSSEEvents(t.Context(), strings.NewReader(input))
 
 	var got []SSEEvent
 	for e := range events {
@@ -30,7 +30,7 @@ func TestReadSSEEvents_Basic(t *testing.T) {
 
 func TestReadSSEEvents_MultiLineData(t *testing.T) {
 	input := "data: line1\ndata: line2\ndata: line3\n\n"
-	events := ReadSSEEvents(context.Background(), strings.NewReader(input))
+	events := ReadSSEEvents(t.Context(), strings.NewReader(input))
 
 	var got []SSEEvent
 	for e := range events {
@@ -47,7 +47,7 @@ func TestReadSSEEvents_MultiLineData(t *testing.T) {
 
 func TestReadSSEEvents_CommentsIgnored(t *testing.T) {
 	input := ": this is a comment\ndata: hello\n\n"
-	events := ReadSSEEvents(context.Background(), strings.NewReader(input))
+	events := ReadSSEEvents(t.Context(), strings.NewReader(input))
 
 	var got []SSEEvent
 	for e := range events {
@@ -65,7 +65,7 @@ func TestReadSSEEvents_CommentsIgnored(t *testing.T) {
 func TestReadSSEEvents_NoTrailingBlankLine(t *testing.T) {
 	// Event without trailing blank line should still be flushed at EOF
 	input := "data: orphan"
-	events := ReadSSEEvents(context.Background(), strings.NewReader(input))
+	events := ReadSSEEvents(t.Context(), strings.NewReader(input))
 
 	var got []SSEEvent
 	for e := range events {
@@ -82,7 +82,7 @@ func TestReadSSEEvents_NoTrailingBlankLine(t *testing.T) {
 
 func TestReadSSEEvents_BlankLinesOnly(t *testing.T) {
 	input := "\n\n\n"
-	events := ReadSSEEvents(context.Background(), strings.NewReader(input))
+	events := ReadSSEEvents(t.Context(), strings.NewReader(input))
 
 	var got []SSEEvent
 	for e := range events {
@@ -96,7 +96,7 @@ func TestReadSSEEvents_BlankLinesOnly(t *testing.T) {
 
 func TestReadSSEEvents_DefaultEventType(t *testing.T) {
 	input := "data: no type\n\n"
-	events := ReadSSEEvents(context.Background(), strings.NewReader(input))
+	events := ReadSSEEvents(t.Context(), strings.NewReader(input))
 
 	var got []SSEEvent
 	for e := range events {
@@ -166,7 +166,7 @@ func TestProxySSEStream_InspectFilter(t *testing.T) {
 		return e, true
 	}
 
-	ProxySSEStream(context.Background(), strings.NewReader(input), w, inspect)
+	ProxySSEStream(t.Context(), strings.NewReader(input), w, inspect)
 
 	body := w.Body.String()
 	if strings.Contains(body, "block") {
@@ -182,7 +182,7 @@ func TestReadSSEEvents_ReaderError(t *testing.T) {
 	// The channel should still close and deliver events read before the error.
 	input := "data: before-error\n\n"
 	r := &failAfterReader{data: []byte(input), failAfter: len(input)}
-	events := ReadSSEEvents(context.Background(), r)
+	events := ReadSSEEvents(t.Context(), r)
 
 	var got []SSEEvent
 	for e := range events {
@@ -223,7 +223,7 @@ func TestProxySSEStream_ContextCancel(t *testing.T) {
 		sb.WriteString("data: test\n\n")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	w := httptest.NewRecorder()
 
 	count := 0

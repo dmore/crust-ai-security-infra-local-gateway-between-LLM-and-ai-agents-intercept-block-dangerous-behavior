@@ -1328,7 +1328,7 @@ func TestRetryAsNonStreaming_IndependentOfClientContext(t *testing.T) {
 		t.Fatalf("NewProxy: %v", err)
 	}
 
-	clientCtx, cancelClient := context.WithCancel(context.Background())
+	clientCtx, cancelClient := context.WithCancel(t.Context())
 	cancelClient() // cancel immediately — simulates client disconnect before retry
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"stream":true}`))
@@ -1568,7 +1568,7 @@ func TestBug_BufferedStreamingLosesNon200StatusCode(t *testing.T) {
 		Model:       "gpt-4",
 		TargetURL:   targetURL.String(),
 		APIType:     types.APITypeOpenAICompletion,
-		Tools:       []ToolDefinition{{Name: "Bash"}},
+		Tools:       []toolDefinition{{Name: "Bash"}},
 	}
 
 	secCfg := security.InterceptionConfig{
@@ -1734,7 +1734,7 @@ func TestAgent_ClaudeCode_BufferedStreaming_MultiDataLine(t *testing.T) {
 		Model:       "claude-sonnet-4-5-20250929",
 		TargetURL:   targetURL.String(),
 		APIType:     types.APITypeAnthropic,
-		Tools:       []ToolDefinition{{Name: "Bash"}},
+		Tools:       []toolDefinition{{Name: "Bash"}},
 	}
 
 	secCfg := security.InterceptionConfig{
@@ -1826,7 +1826,7 @@ func TestAgent_OpenAI_BufferOverflow_RetriesNonStreaming(t *testing.T) {
 		Model:       "gpt-4o",
 		TargetURL:   targetURL.String(),
 		APIType:     types.APITypeOpenAICompletion,
-		Tools:       []ToolDefinition{{Name: "Bash"}},
+		Tools:       []toolDefinition{{Name: "Bash"}},
 	}
 
 	secCfg := security.InterceptionConfig{
@@ -1994,7 +1994,7 @@ func TestBufferedStreaming_CRLFSeparators(t *testing.T) {
 		Model:       "gpt-4",
 		TargetURL:   targetURL.String(),
 		APIType:     types.APITypeOpenAICompletion,
-		Tools:       []ToolDefinition{{Name: "Bash"}},
+		Tools:       []toolDefinition{{Name: "Bash"}},
 	}
 
 	secCfg := security.InterceptionConfig{
@@ -2056,7 +2056,7 @@ func TestBufferedStreaming_TrailingEvent(t *testing.T) {
 		Model:       "gpt-4",
 		TargetURL:   targetURL.String(),
 		APIType:     types.APITypeOpenAICompletion,
-		Tools:       []ToolDefinition{{Name: "Bash"}},
+		Tools:       []toolDefinition{{Name: "Bash"}},
 	}
 
 	secCfg := security.InterceptionConfig{
@@ -2388,7 +2388,6 @@ rules:
   - name: block-bash
     match:
       tool: Bash
-    action: block
     message: "Bash blocked"
 `)
 	defer cleanup()

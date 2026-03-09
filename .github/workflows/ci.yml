@@ -44,6 +44,19 @@ jobs:
           go fix ./...
           git diff --exit-code || { echo "go fix found pending modernizations — run 'go fix ./...' locally and commit the changes"; exit 1; }
 
+      - name: go generate (schema drift check)
+        run: |
+          go generate ./...
+          git diff --exit-code || { echo "go generate produced changes — run 'go generate ./...' locally and commit"; exit 1; }
+
+      - name: rule-coverage (ensure rules have unit + fuzz tests)
+        run: bash scripts/check-rule-coverage.sh
+
+      - name: rule-lint (validate security.yaml syntax)
+        run: |
+          go build -o /tmp/crust-lint .
+          /tmp/crust-lint lint-rules
+
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -61,6 +74,15 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: semgrep (SAST)
+        run: |
+          pip install semgrep
+          semgrep scan --config auto --error \
+            --exclude-rule go.lang.security.audit.dangerous-exec-command.dangerous-exec-command \
+            .
 
       - uses: actions/setup-go@v6
         with:
@@ -90,7 +112,7 @@ jobs:
           /tmp/rules.fuzz -test.fuzz=FuzzNormalizeUnicode -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache
           /tmp/rules.fuzz -test.fuzz=FuzzLoopbackRegex -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache
           /tmp/rules.fuzz -test.fuzz=FuzzMCPToolBypass -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache
-          GOMEMLIMIT=4GiB /tmp/rules.fuzz -test.fuzz=FuzzPipeBypass -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache -test.parallel=1
+          GOMEMLIMIT=2GiB /tmp/rules.fuzz -test.fuzz=FuzzPipeBypass -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache -test.parallel=1
           /tmp/rules.fuzz -test.fuzz=FuzzConfusableBypass -test.fuzztime=30s -test.short -test.fuzzcachedir=/tmp/fuzz-cache
 
       - name: Fuzz tests (full suite, 10s each — parallelized)
@@ -288,8 +310,8 @@ jobs:
             ln -sf /usr/local/go/bin/go    /usr/local/bin/go
             ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
             rm /tmp/go.tar.gz
-            # install.sh requires bash (uses BASH_SOURCE, source, &>/dev/null)
-            pkg install -y bash
+            # install.sh requires bash and git
+            pkg install -y bash git
           run: |
             go version
             # Test install.sh on FreeBSD (builds from source)
@@ -533,6 +555,7 @@ jobs:
   docker-test:
     name: Docker
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -580,3 +603,23 @@ jobs:
       - name: Logs on failure
         if: failure()
         run: docker logs crust-ci 2>&1 || true
+
+  benchmark:
+    name: Benchmark (PR only)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run benchmarks (quick)
+        run: |
+          go test -bench="Extractor|Normalizer|Matcher|JSONParsing|ContainsRegex" \
+            -benchmem -count=3 -short \
+            ./internal/rules/... \
+            ./internal/httpproxy/... \
+            ./internal/security/...

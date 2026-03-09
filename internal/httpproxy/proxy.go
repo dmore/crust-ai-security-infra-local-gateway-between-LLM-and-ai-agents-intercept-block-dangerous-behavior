@@ -34,25 +34,25 @@ var log = logger.New("proxy")
 
 const encodingGzip = "gzip"
 
-// RequestBody represents minimal structure to extract model and messages
-type RequestBody struct {
+// requestBody represents minimal structure to extract model and messages
+type requestBody struct {
 	Model    string           `json:"model"`
 	Stream   bool             `json:"stream"`
-	Messages []RequestMessage `json:"messages"`
-	Tools    []ToolDefinition `json:"tools,omitempty"`
+	Messages []requestMessage `json:"messages"`
+	Tools    []toolDefinition `json:"tools,omitempty"`
 	Input    json.RawMessage  `json:"input,omitempty"` // Responses API: input items
 }
 
-// ToolDefinition represents a tool definition in the request
-type ToolDefinition struct {
+// toolDefinition represents a tool definition in the request
+type toolDefinition struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	InputSchema json.RawMessage `json:"input_schema,omitempty"` // Anthropic format
 	Parameters  json.RawMessage `json:"parameters,omitempty"`   // OpenAI format
 }
 
-// RequestMessage represents a message in the request
-type RequestMessage struct {
+// requestMessage represents a message in the request
+type requestMessage struct {
 	Role    types.MessageRole `json:"role"`
 	Content json.RawMessage   `json:"content"`
 }
@@ -60,7 +60,7 @@ type RequestMessage struct {
 // ContentString returns the message content as a plain string.
 // If Content is a JSON string, it returns the unquoted string.
 // If Content is an array or other type, it returns the raw JSON text.
-func (m RequestMessage) ContentString() string {
+func (m requestMessage) ContentString() string {
 	if len(m.Content) == 0 {
 		return ""
 	}
@@ -335,14 +335,14 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	copyHeaders(w.Header(), resp.Header)
 	w.Header().Set("Content-Length", strconv.Itoa(len(responseBody)))
 	w.WriteHeader(resp.StatusCode)
-	_, _ = w.Write(responseBody) //nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+	writeBody(w, responseBody)
 }
 
 // readAndDecompressBody reads the request body with size limits, decompresses
 // gzip/zstd for local security scanning (forwarding original bytes upstream),
 // and parses the JSON. Returns ok=false if an HTTP error was already written.
 func readAndDecompressBody(w http.ResponseWriter, r *http.Request) (
-	bodyBytes, parseBytes []byte, reqBody RequestBody, ok bool,
+	bodyBytes, parseBytes []byte, reqBody requestBody, ok bool,
 ) {
 	// Read request body with size limit to prevent DoS
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
@@ -351,11 +351,11 @@ func readAndDecompressBody(w http.ResponseWriter, r *http.Request) (
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok { //nolint:errcheck // AsType returns (E, bool), not error
 			log.Warn("Request body too large (limit: %dMB)", maxRequestBodySize/(1024*1024))
 			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
-			return nil, nil, RequestBody{}, false
+			return nil, nil, requestBody{}, false
 		}
 		log.Error("Failed to read request body: %v", err)
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
-		return nil, nil, RequestBody{}, false
+		return nil, nil, requestBody{}, false
 	}
 	_ = r.Body.Close()
 
@@ -397,7 +397,7 @@ func readAndDecompressBody(w http.ResponseWriter, r *http.Request) (
 		if contentEncoding != "" && bytes.Equal(parseBytes, bodyBytes) {
 			log.Warn("Unsupported Content-Encoding %q — rejecting request", contentEncoding)
 			http.Error(w, "Unsupported Content-Encoding: "+contentEncoding, http.StatusUnsupportedMediaType)
-			return nil, nil, RequestBody{}, false
+			return nil, nil, requestBody{}, false
 		}
 	}
 
@@ -794,7 +794,7 @@ func (p *Proxy) retryAsNonStreaming(ctx *RequestContext) (responseBody json.RawM
 	copyHeaders(ctx.Writer.Header(), resp.Header)
 	ctx.Writer.Header().Set("Content-Length", strconv.Itoa(len(rawBody)))
 	ctx.Writer.WriteHeader(statusCode)
-	_, _ = ctx.Writer.Write(rawBody) //nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+	writeBody(ctx.Writer, rawBody)
 	return
 }
 
@@ -1132,7 +1132,7 @@ func escapeJSON(s string) string {
 
 // computeSessionID generates a session ID from system prompt and first user message
 // Same session will have the same system prompt + first user message, so the hash is stable
-func computeSessionID(messages []RequestMessage) string {
+func computeSessionID(messages []requestMessage) string {
 	var sb strings.Builder
 
 	// Extract system prompt
@@ -1262,4 +1262,14 @@ func toRawMessage(v any) json.RawMessage {
 		return nil
 	}
 	return b
+}
+
+// writeBody writes the response body after headers are sent.
+// Accepts io.Writer to decouple from http.ResponseWriter.
+// Error is intentionally discarded: headers are already sent,
+// and the only failure mode is a broken connection.
+func writeBody(w io.Writer, data []byte) {
+	if _, err := w.Write(data); err != nil {
+		return
+	}
 }

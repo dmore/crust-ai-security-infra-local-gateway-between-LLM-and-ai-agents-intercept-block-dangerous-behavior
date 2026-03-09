@@ -34,7 +34,7 @@ type RequestContext struct {
 	Model          string
 	TargetURL      string
 	APIType        types.APIType
-	Tools          []ToolDefinition
+	Tools          []toolDefinition
 	ProviderAPIKey string // per-provider API key (from config)
 
 	// Telemetry (optional)

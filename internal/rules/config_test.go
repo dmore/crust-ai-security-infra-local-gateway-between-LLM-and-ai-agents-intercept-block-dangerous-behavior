@@ -214,7 +214,7 @@ rules:
 rules:
   - block: "**/.env"
     actions: [reed]`,
-			wantErr: "unknown action",
+			wantErr: "unknown operation",
 		},
 		{
 			name: "duplicate name",
@@ -263,13 +263,28 @@ rules:
 	if !isUnknownFieldError(err) {
 		t.Errorf("expected unknown field error, got: %v", err)
 	}
+}
 
-	// Verify the valid fields still parsed correctly (fallback re-parse works).
-	var rs2 RuleSetConfig
-	if err2 := yaml.Unmarshal([]byte(input), &rs2); err2 != nil {
-		t.Fatalf("fallback unmarshal failed: %v", err2)
+func TestRuleConfig_CaseInsensitiveActions(t *testing.T) {
+	// YAML actions with mixed case should be accepted and normalized to lowercase
+	yamlStr := `
+rules:
+  - block: "**/.env"
+    actions: [Read, WRITE]
+`
+	var rs RuleSetConfig
+	if err := yaml.Unmarshal([]byte(yamlStr), &rs); err != nil {
+		t.Fatal(err)
 	}
-	if len(rs2.Rules) != 1 || rs2.Rules[0].Name != "test" {
-		t.Errorf("fallback parse: expected 1 rule named 'test', got %+v", rs2.Rules)
+	if err := rs.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	rules := rs.ToRules()
+	if rules[0].Actions[0] != OpRead {
+		t.Errorf("expected lowercase 'read', got %q", rules[0].Actions[0])
+	}
+	if rules[0].Actions[1] != OpWrite {
+		t.Errorf("expected lowercase 'write', got %q", rules[0].Actions[1])
 	}
 }

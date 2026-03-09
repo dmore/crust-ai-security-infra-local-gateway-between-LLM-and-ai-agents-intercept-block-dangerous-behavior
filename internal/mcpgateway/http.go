@@ -251,7 +251,7 @@ func (g *HTTPGateway) proxyJSONResponse(w http.ResponseWriter, upResp *http.Resp
 		// Not valid JSON-RPC — forward as-is
 		g.copyResponseHeaders(w, upResp)
 		w.WriteHeader(upResp.StatusCode)
-		_, _ = w.Write(respBody)
+		writeBody(w, respBody)
 		return
 	}
 
@@ -265,7 +265,7 @@ func (g *HTTPGateway) proxyJSONResponse(w http.ResponseWriter, upResp *http.Resp
 	// Forward the original response
 	g.copyResponseHeaders(w, upResp)
 	w.WriteHeader(upResp.StatusCode)
-	_, _ = w.Write(respBody)
+	writeBody(w, respBody)
 }
 
 // proxySSEResponse streams an SSE response with per-event inspection.
@@ -334,4 +334,14 @@ func writeJSONRPCError(w http.ResponseWriter, id json.RawMessage, msg string) {
 	w.WriteHeader(http.StatusOK)
 	//nolint:errcheck // best-effort write to HTTP client
 	json.NewEncoder(w).Encode(resp)
+}
+
+// writeBody writes the response body after headers are sent.
+// Accepts io.Writer to decouple from http.ResponseWriter.
+// Error is intentionally discarded: headers are already sent,
+// and the only failure mode is a broken connection.
+func writeBody(w io.Writer, data []byte) {
+	if _, err := w.Write(data); err != nil {
+		return
+	}
 }

@@ -140,7 +140,7 @@ func (l *Linter) lintRule(rule Rule) []LintIssue {
 
 	// Check for valid actions
 	for i, op := range rule.Actions {
-		if !ValidActions[op] {
+		if !ValidOperations[op] {
 			issues = append(issues, LintIssue{
 				RuleName: rule.Name,
 				Field:    fmt.Sprintf("actions[%d]", i),

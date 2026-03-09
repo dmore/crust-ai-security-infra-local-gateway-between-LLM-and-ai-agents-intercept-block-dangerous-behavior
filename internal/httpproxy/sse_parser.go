@@ -293,7 +293,7 @@ func (p *SSEParser) ParseEvent(eventType string, data []byte, apiType types.APIT
 	case types.APITypeUnknown:
 		return ParseResult{}
 	default:
-		panic("unhandled types.APIType: " + apiType.String())
+		return ParseResult{} // unknown API type — treat as no-op
 	}
 }
 

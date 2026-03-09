@@ -126,7 +126,7 @@ func startRealMCPHTTP(t *testing.T) (upstreamURL string, cleanup func()) {
 	port := freePort(t)
 	upstreamURL = fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cmd := exec.CommandContext(ctx, "npx", "-y", "@modelcontextprotocol/server-everything", "streamableHttp")
 	cmd.Env = append(os.Environ(), fmt.Sprintf("PORT=%d", port))
 	// Don't set cmd.Stderr — nil sends to /dev/null, avoiding the
@@ -175,7 +175,7 @@ func sseResponse(t *testing.T, gw *HTTPGateway, sessionID string, body string) (
 
 	ct := resp.Header.Get("Content-Type")
 	if strings.HasPrefix(ct, "text/event-stream") {
-		events := ReadSSEEvents(context.Background(), strings.NewReader(string(respBody)))
+		events := ReadSSEEvents(t.Context(), strings.NewReader(string(respBody)))
 		for event := range events {
 			if event.Type == sseMessageType || event.Type == "" {
 				var tr testResponse

@@ -18,6 +18,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+//go:generate go run builtin_verify.go
+
 //go:embed builtin/*.yaml
 var builtinFS embed.FS
 
@@ -409,16 +411,10 @@ func (l *Loader) parseRuleSet(data []byte, path string, source Source) ([]Rule, 
 	dec.KnownFields(true)
 	if err := dec.Decode(&ruleSetConfig); err != nil {
 		if isUnknownFieldError(err) {
-			log.Warn("Rule file %s has unknown fields (ignored): %v", path, err)
-			// Re-parse without strict mode for forward compatibility.
-			ruleSetConfig = RuleSetConfig{}
-			if err2 := yaml.Unmarshal(data, &ruleSetConfig); err2 != nil {
-				return nil, fmt.Errorf("invalid YAML: %w", err2)
-			}
-		} else {
-			log.Trace("      YAML parse error: %v", err)
-			return nil, fmt.Errorf("invalid YAML: %w", err)
+			return nil, fmt.Errorf("unknown fields in %s: %w", path, err)
 		}
+		log.Trace("      YAML parse error: %v", err)
+		return nil, fmt.Errorf("invalid YAML: %w", err)
 	}
 
 	if err := ruleSetConfig.Validate(); err != nil {

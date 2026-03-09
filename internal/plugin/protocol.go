@@ -1,0 +1,51 @@
+package plugin
+
+import "encoding/json"
+
+// Wire protocol for external plugin processes.
+//
+// Communication is JSON-newline over stdin/stdout:
+//   crust → plugin: one JSON line per request
+//   plugin → crust: one JSON line per response
+//
+// Lifecycle:
+//   1. crust spawns plugin process
+//   2. crust sends {"method":"init","params":{...}} with plugin config
+//   3. plugin responds {"result":"ok"} or {"error":"..."}
+//   4. crust sends {"method":"evaluate","params":{...}} for each tool call
+//   5. plugin responds {"result":null} (allow) or {"result":{...}} (block)
+//   6. crust sends {"method":"close"} on shutdown
+//   7. plugin responds {"result":"ok"} and exits
+
+// Method names for the wire protocol.
+const (
+	MethodInit     = "init"
+	MethodEvaluate = "evaluate"
+	MethodClose    = "close"
+)
+
+// WireRequest is a JSON-RPC-like request sent from crust to the plugin process.
+type WireRequest struct {
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params,omitempty"`
+}
+
+// WireResponse is a JSON-RPC-like response sent from the plugin process to crust.
+type WireResponse struct {
+	Result json.RawMessage `json:"result,omitempty"`
+	Error  string          `json:"error,omitempty"`
+}
+
+// InitParams is sent with method="init".
+type InitParams struct {
+	Name   string          `json:"name"`   // plugin name (for logging)
+	Config json.RawMessage `json:"config"` // plugin-specific config
+}
+
+// EvaluateParams is sent with method="evaluate".
+// Same as Request — the full tool call context including rule snapshot.
+type EvaluateParams = Request
+
+// EvaluateResult is the response from method="evaluate".
+// null means allow, non-null means block.
+type EvaluateResult = Result

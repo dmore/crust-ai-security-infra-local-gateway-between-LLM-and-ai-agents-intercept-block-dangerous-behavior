@@ -96,9 +96,7 @@ func RunDoctor(opts DoctorOptions) []DoctorResult {
 	results := make([]DoctorResult, len(providers))
 	var wg sync.WaitGroup
 	for i, entry := range providers {
-		wg.Add(1)
-		go func(i int, entry providerEntry) {
-			defer wg.Done()
+		wg.Go(func() {
 			r := checkProvider(client, entry)
 			for attempt := range retries {
 				if r.Status != StatusConnError {
@@ -108,7 +106,7 @@ func RunDoctor(opts DoctorOptions) []DoctorResult {
 				r = checkProvider(client, entry)
 			}
 			results[i] = r
-		}(i, entry)
+		})
 	}
 	wg.Wait()
 	return results

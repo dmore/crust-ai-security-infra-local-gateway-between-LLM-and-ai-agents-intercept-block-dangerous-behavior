@@ -23,8 +23,8 @@ func NewWorkerPool(pwshPath string, size int) (*WorkerPool, error) {
 	for i := range size {
 		w, err := NewWorker(pwshPath)
 		if err != nil {
-			for _, w := range workers[:i] {
-				w.Stop()
+			for _, wk := range workers[:i] {
+				wk.Stop()
 			}
 			return nil, err
 		}

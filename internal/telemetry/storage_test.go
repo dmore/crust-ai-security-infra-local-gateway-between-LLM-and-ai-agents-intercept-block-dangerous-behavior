@@ -239,7 +239,7 @@ func TestCleanupOldData_CascadesSpans(t *testing.T) {
 
 	// Insert a trace with old start_time
 	oldTime := time.Now().Add(-48 * time.Hour)
-	_, err := s.queries.CreateTrace(context.Background(), db.CreateTraceParams{
+	_, err := s.queries.CreateTrace(t.Context(), db.CreateTraceParams{
 		TraceID:   "old-trace",
 		SessionID: strPtr("s1"),
 		StartTime: &oldTime,
@@ -292,7 +292,7 @@ func TestCleanupOldData_CascadesSpans(t *testing.T) {
 func TestConcurrentWriteAndRead(t *testing.T) {
 	s := newTestStorage(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	var wg sync.WaitGroup
@@ -781,21 +781,19 @@ func TestLogToolCall_Concurrent(t *testing.T) {
 	const n = 3
 
 	for i := range n {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 10 {
 				err := s.LogToolCall(ToolCallLog{
-					TraceID:  types.TraceID(fmt.Sprintf("trace-%d", idx)),
+					TraceID:  types.TraceID(fmt.Sprintf("trace-%d", i)),
 					ToolName: "Bash",
 					Layer:    "L1",
 				})
 				if err != nil {
-					t.Errorf("LogToolCall(%d): %v", idx, err)
+					t.Errorf("LogToolCall(%d): %v", i, err)
 					return
 				}
 			}
-		}(i)
+		})
 	}
 	wg.Wait()
 

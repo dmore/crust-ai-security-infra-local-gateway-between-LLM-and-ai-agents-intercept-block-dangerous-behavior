@@ -85,6 +85,7 @@ The HTTP gateway validates `Origin` and `Sec-Fetch-Site` headers on all requests
 
 ### WebSocket Proxy
 
+<!-- nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket -->
 The HTTP gateway transparently proxies WebSocket upgrade requests to the upstream server. Origin validation is applied before the upgrade handshake, blocking cross-origin browser connections while allowing legitimate local clients. Supports both `ws://` and `wss://` (TLS) upstream servers.
 
 ### Session Management
