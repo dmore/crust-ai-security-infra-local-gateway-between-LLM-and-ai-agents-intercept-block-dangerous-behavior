@@ -335,7 +335,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	copyHeaders(w.Header(), resp.Header)
 	w.Header().Set("Content-Length", strconv.Itoa(len(responseBody)))
 	w.WriteHeader(resp.StatusCode)
-	_, _ = w.Write(responseBody)
+	writeBody(w, responseBody)
 }
 
 // readAndDecompressBody reads the request body with size limits, decompresses
@@ -794,7 +794,7 @@ func (p *Proxy) retryAsNonStreaming(ctx *RequestContext) (responseBody json.RawM
 	copyHeaders(ctx.Writer.Header(), resp.Header)
 	ctx.Writer.Header().Set("Content-Length", strconv.Itoa(len(rawBody)))
 	ctx.Writer.WriteHeader(statusCode)
-	_, _ = ctx.Writer.Write(rawBody)
+	writeBody(ctx.Writer, rawBody)
 	return
 }
 
@@ -1262,4 +1262,14 @@ func toRawMessage(v any) json.RawMessage {
 		return nil
 	}
 	return b
+}
+
+// writeBody writes the response body after headers are sent.
+// Accepts io.Writer to decouple from http.ResponseWriter.
+// Error is intentionally discarded: headers are already sent,
+// and the only failure mode is a broken connection.
+func writeBody(w io.Writer, data []byte) {
+	if _, err := w.Write(data); err != nil {
+		return
+	}
 }

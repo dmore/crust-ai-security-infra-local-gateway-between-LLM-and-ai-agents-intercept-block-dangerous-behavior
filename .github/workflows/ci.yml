@@ -82,7 +82,6 @@ jobs:
           pip install semgrep
           semgrep scan --config auto --error \
             --exclude-rule go.lang.security.audit.dangerous-exec-command.dangerous-exec-command \
-            --exclude-rule go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter \
             .
 
       - uses: actions/setup-go@v6

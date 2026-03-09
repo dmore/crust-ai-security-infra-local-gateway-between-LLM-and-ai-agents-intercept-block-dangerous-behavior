@@ -86,8 +86,8 @@ func ReadSSEEvents(ctx context.Context, r io.Reader) <-chan SSEEvent {
 	return ch
 }
 
-// WriteSSEEvent writes an SSE event to an http.ResponseWriter and flushes.
-func WriteSSEEvent(w http.ResponseWriter, event SSEEvent) error {
+// WriteSSEEvent writes an SSE event to w and flushes if w supports it.
+func WriteSSEEvent(w io.Writer, event SSEEvent) error {
 	if event.Type != "" {
 		if _, err := io.WriteString(w, "event: "+event.Type+"\n"); err != nil {
 			return err
