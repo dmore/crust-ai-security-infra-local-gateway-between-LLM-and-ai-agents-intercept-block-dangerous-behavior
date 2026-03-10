@@ -84,6 +84,12 @@ func (s *APIServer) registerRoutes() {
 			telemetryGroup.GET("/stats", s.telemetryAPI.HandleStats)
 			telemetryGroup.GET("/sessions", s.telemetryAPI.HandleSessions)
 			telemetryGroup.GET("/sessions/:session_id/events", s.telemetryAPI.HandleSessionEvents)
+
+			// Stats aggregation endpoints — plain net/http handlers via StatsService
+			statsHandlers := s.telemetryAPI.StatsAggHandlers()
+			telemetryGroup.GET("/stats/trend", gin.WrapF(statsHandlers.HandleBlockTrend))
+			telemetryGroup.GET("/stats/distribution", gin.WrapF(statsHandlers.HandleDistribution))
+			telemetryGroup.GET("/stats/coverage", gin.WrapF(statsHandlers.HandleCoverage))
 		}
 
 		// Rules routes (if rule engine is available)

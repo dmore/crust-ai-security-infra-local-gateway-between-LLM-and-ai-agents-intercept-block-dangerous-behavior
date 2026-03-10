@@ -79,11 +79,15 @@ func (h *APIHandler) HandleSessionEvents(c *gin.Context) {
 // APIHandler handles HTTP API requests for telemetry
 type APIHandler struct {
 	storage *Storage
+	stats   *StatsService
 }
 
 // NewAPIHandler creates a new telemetry API handler
 func NewAPIHandler(storage *Storage) *APIHandler {
-	return &APIHandler{storage: storage}
+	return &APIHandler{
+		storage: storage,
+		stats:   NewStatsService(storage),
+	}
 }
 
 // TracesQuery represents query parameters for traces endpoint
@@ -217,4 +221,9 @@ func (h *APIHandler) HandleStats(c *gin.Context) {
 	}
 
 	api.Success(c, stats)
+}
+
+// StatsAggHandlers returns the StatsService for registering its net/http handlers.
+func (h *APIHandler) StatsAggHandlers() *StatsService {
+	return h.stats
 }
