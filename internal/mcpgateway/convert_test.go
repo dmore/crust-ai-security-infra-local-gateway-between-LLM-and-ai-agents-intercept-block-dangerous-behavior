@@ -79,6 +79,7 @@ func TestMcpMethodToToolCall(t *testing.T) {
 			}
 			if tc == nil {
 				t.Fatal("expected non-nil ToolCall")
+				return
 			}
 			if tc.Name != tt.wantName {
 				t.Errorf("name = %s, want %s", tc.Name, tt.wantName)
@@ -101,6 +102,7 @@ func TestMcpMethodToToolCall_EmptyArguments(t *testing.T) {
 	}
 	if tc == nil {
 		t.Fatal("expected non-nil ToolCall")
+		return
 	}
 	if tc.Name != "ping" {
 		t.Errorf("name = %s, want ping", tc.Name)
@@ -130,6 +132,7 @@ func TestMcpMethodToToolCall_SamplingCreateMessage(t *testing.T) {
 	}
 	if tc == nil {
 		t.Fatal("expected non-nil ToolCall")
+		return
 	}
 	if tc.Name != "mcp_sampling" {
 		t.Errorf("name = %s, want mcp_sampling", tc.Name)
@@ -148,6 +151,7 @@ func TestMcpMethodToToolCall_ElicitationCreate(t *testing.T) {
 	}
 	if tc == nil {
 		t.Fatal("expected non-nil ToolCall")
+		return
 	}
 	if tc.Name != "mcp_elicitation" {
 		t.Errorf("name = %s, want mcp_elicitation", tc.Name)

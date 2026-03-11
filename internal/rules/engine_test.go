@@ -703,6 +703,7 @@ func TestValidateContent_NullBytesBlocked(t *testing.T) {
 	m := e.validateContent(&info)
 	if m == nil {
 		t.Fatal("expected block for null byte in write content, got nil")
+		return
 	}
 	if m.RuleName != "builtin:block-null-byte-write" {
 		t.Errorf("expected rule builtin:block-null-byte-write, got %s", m.RuleName)
@@ -731,6 +732,7 @@ func TestValidateContent_ObfuscationBlocked(t *testing.T) {
 	m := e.validateContent(&info)
 	if m == nil {
 		t.Fatal("expected block for obfuscation, got nil")
+		return
 	}
 	if m.RuleName != "builtin:block-obfuscation" {
 		t.Errorf("expected rule builtin:block-obfuscation, got %s", m.RuleName)
@@ -747,6 +749,7 @@ func TestValidateContent_EvasiveBlocked(t *testing.T) {
 	m := e.validateContent(&info)
 	if m == nil {
 		t.Fatal("expected block for evasive command, got nil")
+		return
 	}
 	if m.RuleName != "builtin:block-shell-evasion" {
 		t.Errorf("expected rule builtin:block-shell-evasion, got %s", m.RuleName)
@@ -763,6 +766,7 @@ func TestValidateContent_DLPBlocked(t *testing.T) {
 	m := e.validateContent(&info)
 	if m == nil {
 		t.Fatal("expected block for AWS key, got nil")
+		return
 	}
 	if !strings.Contains(m.RuleName, "aws") {
 		t.Errorf("expected AWS DLP rule, got %s", m.RuleName)
@@ -800,6 +804,7 @@ func TestResolvePaths_ProcBlocked(t *testing.T) {
 	_, m := e.resolvePaths([]string{"/proc/1/environ"})
 	if m == nil {
 		t.Fatal("expected block for /proc access, got nil")
+		return
 	}
 	if m.RuleName != "builtin:protect-proc" {
 		t.Errorf("expected rule builtin:protect-proc, got %s", m.RuleName)

@@ -172,7 +172,7 @@ func (p *Provider) EndLLMSpan(spanCtx *SpanContext, data LLMSpanData) {
 	attrs := map[string]any{
 		AttrSpanKind:        data.SpanKind,
 		AttrLLMModel:        data.Model,
-		AttrTargetURL:       data.TargetURL,
+		AttrTargetURL:       SanitizeTargetURL(data.TargetURL),
 		AttrLLMIsStreaming:  data.IsStreaming,
 		AttrLLMTokensInput:  data.InputTokens,
 		AttrLLMTokensOutput: data.OutputTokens,
@@ -255,6 +255,12 @@ func (p *Provider) buildToolSpan(parentSpanID types.SpanID, traceID types.TraceI
 }
 
 func truncateString(s string, maxLen int) string {
+	if maxLen <= 0 {
+		if s == "" {
+			return ""
+		}
+		return "...[truncated]"
+	}
 	if len(s) <= maxLen {
 		return s
 	}
