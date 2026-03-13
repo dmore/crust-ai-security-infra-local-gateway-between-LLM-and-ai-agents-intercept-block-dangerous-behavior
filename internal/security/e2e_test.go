@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/BakeLens/crust/internal/eventlog"
@@ -326,5 +327,325 @@ func TestE2E_FullPipeline_EvasionDetection(t *testing.T) {
 				t.Errorf("evasion attempt %s should be blocked", tt.name)
 			}
 		})
+	}
+}
+
+// TestE2E_HotReloadRules verifies that adding rules to a live engine
+// takes effect immediately for subsequent evaluations.
+func TestE2E_HotReloadRules(t *testing.T) {
+	eventlog.GetMetrics().Reset()
+	interceptor := newE2EInterceptor(t)
+
+	// This tool call should be allowed by default (no rule blocks /tmp/secret)
+	response := createAnthropicResponse([]anthropicContentBlock{
+		{Type: "tool_use", ID: "t1", Name: "Read", Input: json.RawMessage(`{"file_path":"/tmp/secret/data.txt"}`)},
+	})
+
+	result, err := interceptor.InterceptToolCalls(response, e2eCtx("reload-before"))
+	if err != nil {
+		t.Fatalf("InterceptToolCalls (before reload): %v", err)
+	}
+	if len(result.BlockedToolCalls) != 0 {
+		t.Fatalf("expected 0 blocked before reload, got %d", len(result.BlockedToolCalls))
+	}
+
+	// Hot-reload: add a rule that blocks /tmp/secret/**
+	err = interceptor.GetEngine().AddRulesFromYAML([]byte(`
+rules:
+  - name: block-tmp-secret
+    message: Secret access blocked
+    actions: [read, write]
+    block: "/tmp/secret/**"
+`))
+	if err != nil {
+		t.Fatalf("AddRulesFromYAML: %v", err)
+	}
+
+	// Same tool call should now be blocked
+	result, err = interceptor.InterceptToolCalls(response, e2eCtx("reload-after"))
+	if err != nil {
+		t.Fatalf("InterceptToolCalls (after reload): %v", err)
+	}
+	if len(result.BlockedToolCalls) != 1 {
+		t.Fatalf("expected 1 blocked after reload, got %d", len(result.BlockedToolCalls))
+	}
+	if result.BlockedToolCalls[0].MatchResult.RuleName != "block-tmp-secret" {
+		t.Errorf("expected rule block-tmp-secret, got %q", result.BlockedToolCalls[0].MatchResult.RuleName)
+	}
+}
+
+// TestE2E_CrossAPITypeConversion verifies that the same dangerous tool call
+// is blocked regardless of API format (Anthropic, OpenAI, OpenAI Responses).
+func TestE2E_CrossAPITypeConversion(t *testing.T) {
+	interceptor := newE2EInterceptor(t)
+
+	// Anthropic format
+	t.Run("anthropic", func(t *testing.T) {
+		eventlog.GetMetrics().Reset()
+		resp := createAnthropicResponse([]anthropicContentBlock{
+			{Type: "tool_use", ID: "t1", Name: "Read", Input: json.RawMessage(`{"file_path":"/app/.env"}`)},
+		})
+		result, err := interceptor.InterceptToolCalls(resp, InterceptionContext{
+			TraceID: "trace-cross-1", SessionID: "sess-1",
+			Model: "claude-3-opus", APIType: types.APITypeAnthropic, BlockMode: types.BlockModeRemove,
+		})
+		if err != nil {
+			t.Fatalf("InterceptToolCalls: %v", err)
+		}
+		if len(result.BlockedToolCalls) != 1 {
+			t.Errorf("Anthropic: expected 1 blocked, got %d", len(result.BlockedToolCalls))
+		}
+	})
+
+	// OpenAI Completion format
+	t.Run("openai", func(t *testing.T) {
+		eventlog.GetMetrics().Reset()
+		resp := createOpenAIResponse([]openAIToolCall{
+			makeOAIToolCall("call_1", "Read", `{"file_path":"/app/.env"}`),
+		}, "")
+		result, err := interceptor.InterceptToolCalls(resp, InterceptionContext{
+			TraceID: "trace-cross-2", SessionID: "sess-1",
+			Model: "gpt-4", APIType: types.APITypeOpenAICompletion, BlockMode: types.BlockModeRemove,
+		})
+		if err != nil {
+			t.Fatalf("InterceptToolCalls: %v", err)
+		}
+		if len(result.BlockedToolCalls) != 1 {
+			t.Errorf("OpenAI: expected 1 blocked, got %d", len(result.BlockedToolCalls))
+		}
+	})
+
+	// OpenAI Responses format
+	t.Run("openai_responses", func(t *testing.T) {
+		eventlog.GetMetrics().Reset()
+		resp := createOpenAIResponsesResponse([]openAIResponsesOutputItem{
+			{Type: "function_call", ID: "fc_1", CallID: "call_1", Name: "Read", Arguments: `{"file_path":"/app/.env"}`},
+		})
+		result, err := interceptor.InterceptToolCalls(resp, InterceptionContext{
+			TraceID: "trace-cross-3", SessionID: "sess-1",
+			Model: "gpt-4.1", APIType: types.APITypeOpenAIResponses, BlockMode: types.BlockModeRemove,
+		})
+		if err != nil {
+			t.Fatalf("InterceptToolCalls: %v", err)
+		}
+		if len(result.BlockedToolCalls) != 1 {
+			t.Errorf("OpenAI Responses: expected 1 blocked, got %d", len(result.BlockedToolCalls))
+		}
+	})
+}
+
+// TestE2E_ConcurrentEvaluationConsistency verifies that concurrent tool call
+// evaluations produce consistent results under load.
+func TestE2E_ConcurrentEvaluationConsistency(t *testing.T) {
+	interceptor := newE2EInterceptor(t)
+	eventlog.GetMetrics().Reset()
+
+	dangerousResp := createAnthropicResponse([]anthropicContentBlock{
+		{Type: "tool_use", ID: "t1", Name: "Read", Input: json.RawMessage(`{"file_path":"/app/.env"}`)},
+	})
+	safeResp := createAnthropicResponse([]anthropicContentBlock{
+		{Type: "tool_use", ID: "t1", Name: "Read", Input: json.RawMessage(`{"file_path":"/tmp/safe.txt"}`)},
+	})
+
+	var wg sync.WaitGroup
+	var blockedCount, allowedCount int64
+	var mu sync.Mutex
+
+	for i := range 20 {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			resp := safeResp
+			if idx%2 == 0 {
+				resp = dangerousResp
+			}
+			result, err := interceptor.InterceptToolCalls(resp, e2eCtx("concurrent"))
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			blockedCount += int64(len(result.BlockedToolCalls))
+			allowedCount += int64(len(result.AllowedToolCalls))
+			mu.Unlock()
+		}(i)
+	}
+	wg.Wait()
+
+	// 10 dangerous (even indices) should be blocked, 10 safe should be allowed
+	if blockedCount != 10 {
+		t.Errorf("expected 10 blocked, got %d", blockedCount)
+	}
+	if allowedCount != 10 {
+		t.Errorf("expected 10 allowed, got %d", allowedCount)
+	}
+}
+
+// TestE2E_MetricsReconcileAfterMixedTraffic verifies that metrics
+// maintain the invariant: total = blocked + allowed after mixed traffic.
+func TestE2E_MetricsReconcileAfterMixedTraffic(t *testing.T) {
+	eventlog.GetMetrics().Reset()
+	interceptor := newE2EInterceptor(t)
+
+	// Send a mix of blocked and allowed tool calls
+	responses := []struct {
+		resp []byte
+		ctx  InterceptionContext
+	}{
+		{createAnthropicResponse([]anthropicContentBlock{
+			{Type: "tool_use", ID: "t1", Name: "Read", Input: json.RawMessage(`{"file_path":"/app/.env"}`)},
+			{Type: "tool_use", ID: "t2", Name: "Read", Input: json.RawMessage(`{"file_path":"/tmp/ok.txt"}`)},
+		}), e2eCtx("metrics-1")},
+		{createOpenAIResponse([]openAIToolCall{
+			makeOAIToolCall("c1", "Bash", `{"command":"cat /etc/shadow"}`),
+			makeOAIToolCall("c2", "Bash", `{"command":"ls /tmp"}`),
+		}, ""), InterceptionContext{
+			TraceID: "trace-metrics-2", SessionID: "sess-1",
+			Model: "gpt-4", APIType: types.APITypeOpenAICompletion, BlockMode: types.BlockModeRemove,
+		}},
+	}
+
+	for _, r := range responses {
+		if _, err := interceptor.InterceptToolCalls(r.resp, r.ctx); err != nil {
+			t.Fatalf("InterceptToolCalls: %v", err)
+		}
+	}
+
+	m := eventlog.GetMetrics()
+	total := m.TotalToolCalls.Load()
+	blocked := m.ProxyRequestBlocks.Load() + m.ProxyResponseBlocks.Load()
+	allowed := m.ProxyResponseAllowed.Load()
+
+	if total != blocked+allowed {
+		t.Errorf("invariant broken: total(%d) != blocked(%d) + allowed(%d)", total, blocked, allowed)
+	}
+	if total == 0 {
+		t.Error("expected non-zero total tool calls")
+	}
+}
+
+// ── Mobile virtual path E2E tests ───────────────────────────────────────────
+
+// TestE2E_MobilePIIBlocked verifies that mobile PII access (contacts, photos, etc.)
+// is blocked by the protect-mobile-pii builtin rule via virtual paths.
+func TestE2E_MobilePIIBlocked(t *testing.T) {
+	tools := []struct {
+		name string
+		args string
+	}{
+		{"read_contacts", `{}`},
+		{"access_photos", `{}`},
+		{"read_calendar", `{}`},
+		{"get_location", `{}`},
+		{"read_health_data", `{}`},
+	}
+
+	for _, tt := range tools {
+		t.Run(tt.name, func(t *testing.T) {
+			response := createAnthropicResponse([]anthropicContentBlock{
+				{Type: "tool_use", ID: "m1", Name: tt.name, Input: json.RawMessage(tt.args)},
+			})
+			result := e2eIntercept(t, response, e2eCtx("mobile-pii"))
+			if len(result.BlockedToolCalls) != 1 {
+				t.Fatalf("expected %s to be blocked, got %d blocked", tt.name, len(result.BlockedToolCalls))
+			}
+			if !strings.Contains(result.BlockedToolCalls[0].MatchResult.Message, "privacy") {
+				t.Errorf("expected privacy-related message, got: %s", result.BlockedToolCalls[0].MatchResult.Message)
+			}
+		})
+	}
+}
+
+// TestE2E_MobileKeychainBlocked verifies that keychain access is blocked by
+// the unified protect-os-keychains rule (which now includes mobile://keychain/**).
+func TestE2E_MobileKeychainBlocked(t *testing.T) {
+	response := createAnthropicResponse([]anthropicContentBlock{
+		{Type: "tool_use", ID: "k1", Name: "keychain_get", Input: json.RawMessage(`{"key":"api_token"}`)},
+	})
+	result := e2eIntercept(t, response, e2eCtx("mobile-keychain"))
+	if len(result.BlockedToolCalls) != 1 {
+		t.Fatalf("expected keychain_get to be blocked, got %d blocked", len(result.BlockedToolCalls))
+	}
+	if !strings.Contains(result.BlockedToolCalls[0].MatchResult.Message, "keychain") {
+		t.Errorf("expected keychain-related message, got: %s", result.BlockedToolCalls[0].MatchResult.Message)
+	}
+}
+
+// TestE2E_MobileURLSchemeBlocked verifies that sensitive URL schemes (tel:, sms:)
+// are blocked while safe ones (https:) are allowed.
+func TestE2E_MobileURLSchemeBlocked(t *testing.T) {
+	// tel: should be blocked
+	response := createAnthropicResponse([]anthropicContentBlock{
+		{Type: "tool_use", ID: "u1", Name: "open_url", Input: json.RawMessage(`{"url":"tel:+1234567890"}`)},
+	})
+	result := e2eIntercept(t, response, e2eCtx("mobile-url-blocked"))
+	if len(result.BlockedToolCalls) != 1 {
+		t.Fatalf("expected tel: URL to be blocked, got %d blocked", len(result.BlockedToolCalls))
+	}
+
+	// https: should be allowed
+	response = createAnthropicResponse([]anthropicContentBlock{
+		{Type: "tool_use", ID: "u2", Name: "open_url", Input: json.RawMessage(`{"url":"https://example.com"}`)},
+	})
+	result = e2eIntercept(t, response, e2eCtx("mobile-url-allowed"))
+	if len(result.BlockedToolCalls) != 0 {
+		t.Fatalf("expected https: URL to be allowed, got %d blocked", len(result.BlockedToolCalls))
+	}
+}
+
+// TestE2E_MobileClipboardReadBlocked verifies that clipboard reads are blocked
+// while clipboard writes are allowed.
+func TestE2E_MobileClipboardReadBlocked(t *testing.T) {
+	// read_clipboard should be blocked
+	response := createAnthropicResponse([]anthropicContentBlock{
+		{Type: "tool_use", ID: "c1", Name: "read_clipboard", Input: json.RawMessage(`{}`)},
+	})
+	result := e2eIntercept(t, response, e2eCtx("mobile-clipboard-read"))
+	if len(result.BlockedToolCalls) != 1 {
+		t.Fatalf("expected read_clipboard to be blocked, got %d blocked", len(result.BlockedToolCalls))
+	}
+
+	// write_clipboard should be allowed (rule only blocks reads)
+	response = createAnthropicResponse([]anthropicContentBlock{
+		{Type: "tool_use", ID: "c2", Name: "write_clipboard", Input: json.RawMessage(`{}`)},
+	})
+	result = e2eIntercept(t, response, e2eCtx("mobile-clipboard-write"))
+	if len(result.BlockedToolCalls) != 0 {
+		t.Fatalf("expected write_clipboard to be allowed, got %d blocked", len(result.BlockedToolCalls))
+	}
+}
+
+// TestE2E_MobilePersistenceBlocked verifies that mobile background task registration
+// is blocked by the unified protect-persistence rule.
+func TestE2E_MobilePersistenceBlocked(t *testing.T) {
+	response := createAnthropicResponse([]anthropicContentBlock{
+		{Type: "tool_use", ID: "p1", Name: "schedule_task", Input: json.RawMessage(`{"task_id":"sync_data"}`)},
+	})
+	result := e2eIntercept(t, response, e2eCtx("mobile-persistence"))
+	if len(result.BlockedToolCalls) != 1 {
+		t.Fatalf("expected schedule_task to be blocked, got %d blocked", len(result.BlockedToolCalls))
+	}
+	if !strings.Contains(result.BlockedToolCalls[0].MatchResult.Message, "persistence") {
+		t.Errorf("expected persistence-related message, got: %s", result.BlockedToolCalls[0].MatchResult.Message)
+	}
+}
+
+// TestE2E_DesktopRulesStillWork verifies mobile changes don't break desktop rules.
+func TestE2E_DesktopRulesStillWork(t *testing.T) {
+	// Desktop .env read should still be blocked
+	response := createAnthropicResponse([]anthropicContentBlock{
+		{Type: "tool_use", ID: "d1", Name: "Read", Input: json.RawMessage(`{"file_path":"/app/.env"}`)},
+	})
+	result := e2eIntercept(t, response, e2eCtx("desktop-regression"))
+	if len(result.BlockedToolCalls) != 1 {
+		t.Fatalf("expected desktop .env read to still be blocked, got %d blocked", len(result.BlockedToolCalls))
+	}
+
+	// Desktop /etc/crontab write should still be blocked
+	response = createAnthropicResponse([]anthropicContentBlock{
+		{Type: "tool_use", ID: "d2", Name: "Write", Input: json.RawMessage(`{"file_path":"/etc/crontab","content":"* * * * * evil"}`)},
+	})
+	result = e2eIntercept(t, response, e2eCtx("desktop-persistence"))
+	if len(result.BlockedToolCalls) != 1 {
+		t.Fatalf("expected desktop crontab write to still be blocked, got %d blocked", len(result.BlockedToolCalls))
 	}
 }
