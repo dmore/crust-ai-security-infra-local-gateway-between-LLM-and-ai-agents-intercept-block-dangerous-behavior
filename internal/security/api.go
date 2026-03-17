@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/BakeLens/crust/internal/agentdetect"
 	"github.com/BakeLens/crust/internal/api"
 	"github.com/BakeLens/crust/internal/eventlog"
 	"github.com/BakeLens/crust/internal/mcpgateway"
@@ -80,6 +81,7 @@ func (s *APIServer) registerRoutes() {
 			security.GET("/status", s.handleStatus)
 			security.GET("/events/stream", s.handleEventsStream)
 			security.GET("/plugins", s.handlePlugins)
+			security.GET("/agents", s.handleAgents)
 		}
 
 		// Telemetry routes
@@ -282,6 +284,13 @@ func (s *APIServer) handlePlugins(c *gin.Context) {
 	}
 	stats := registry.Stats()
 	api.Success(c, stats)
+}
+
+// handleAgents handles GET /api/security/agents.
+// Returns detected AI agent processes and their protection status.
+func (s *APIServer) handleAgents(c *gin.Context) {
+	agents := agentdetect.Detect()
+	c.JSON(http.StatusOK, agents)
 }
 
 // handleHealth handles GET /health
