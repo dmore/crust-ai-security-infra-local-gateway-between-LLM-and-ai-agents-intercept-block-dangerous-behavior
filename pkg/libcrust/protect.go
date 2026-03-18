@@ -3,11 +3,10 @@
 package libcrust
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -21,9 +20,11 @@ import (
 
 // protectState tracks the auto-protect lifecycle.
 var protect struct {
-	mu      sync.Mutex
-	running bool
-	port    int
+	mu       sync.Mutex
+	running  bool
+	port     int
+	evalLn   net.Listener
+	evalPort int
 }
 
 // StartProtect starts the full protection stack:
@@ -72,11 +73,19 @@ func StartProtect() (int, error) {
 		}
 	}
 
+	// Start internal evaluate API on a separate port (not exposed to agents).
+	evalPort, err := startEvalServer()
+	if err != nil {
+		// Non-fatal: hooks will fall back to cold-start evaluation.
+		fmt.Fprintf(os.Stderr, "crust: start eval server: %v\n", err)
+	}
+
 	protect.running = true
 	protect.port = port
+	protect.evalPort = evalPort
 
-	// Write port file so evaluate-hook can find the running instance.
-	writePortFile(port)
+	// Write eval port so hook processes can find the running instance.
+	writePortFile(evalPort)
 
 	return port, nil
 }
@@ -99,9 +108,11 @@ func StopProtect() {
 
 	daemon.RestoreAgentConfigs()
 	StopProxy()
+	stopEvalServer()
 	removePortFile()
 	protect.running = false
 	protect.port = 0
+	protect.evalPort = 0
 }
 
 // ProtectPort returns the proxy port, or 0 if not running.
@@ -183,6 +194,70 @@ func DisableAgent(name string) error {
 	return fmt.Errorf("agent %q not found", name)
 }
 
+// startEvalServer starts a localhost-only TCP server for hook evaluation.
+// Protocol: connect → write JSON line → read JSON line → close.
+// Separate from the proxy to prevent agents from probing rules.
+func startEvalServer() (int, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, fmt.Errorf("listen eval server: %w", err)
+	}
+	protect.evalLn = ln
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return // listener closed
+			}
+			go handleEvalConn(conn)
+		}
+	}()
+
+	_, portStr, _ := net.SplitHostPort(ln.Addr().String())
+	port, _ := strconv.Atoi(portStr)
+	return port, nil
+}
+
+// handleEvalConn handles a single evaluation request on a raw TCP connection.
+// Protocol: read one JSON line, evaluate, write one JSON line, close.
+func handleEvalConn(conn net.Conn) {
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 1<<20), 1<<20) // 1 MB max
+	if !scanner.Scan() {
+		return
+	}
+	line := scanner.Bytes()
+
+	var req struct {
+		ToolName  string          `json:"tool_name"`
+		ToolInput json.RawMessage `json:"tool_input"`
+	}
+	if json.Unmarshal(line, &req) != nil || req.ToolName == "" {
+		conn.Write([]byte(`{"matched":false}` + "\n"))
+		return
+	}
+
+	argsJSON := "{}"
+	if len(req.ToolInput) > 0 {
+		argsJSON = string(req.ToolInput)
+	}
+
+	result := Evaluate(req.ToolName, argsJSON)
+	conn.Write(append([]byte(result), '\n'))
+}
+
+// stopEvalServer shuts down the internal evaluate server.
+func stopEvalServer() {
+	if protect.evalLn != nil {
+		protect.evalLn.Close()
+		protect.evalLn = nil
+	}
+}
+
 // portFilePath returns ~/.crust/protect.port
 func portFilePath() string {
 	home, err := os.UserHomeDir()
@@ -230,7 +305,7 @@ func ReadPortFile() int {
 }
 
 // EvaluateViaRunningInstance evaluates a tool call by connecting to a running
-// crust instance's HTTP endpoint. This avoids cold-starting the rule engine
+// crust instance's TCP eval server. This avoids cold-starting the rule engine
 // (~4s) by reusing the already-loaded engine in the running GUI/CLI process.
 //
 // hookInput is the raw JSON from Claude Code's PreToolUse hook (contains
@@ -244,22 +319,24 @@ func EvaluateViaRunningInstance(hookInput string) string {
 		return ""
 	}
 
-	// Quick HTTP POST to the running instance's /crust/evaluate endpoint.
-	client := &http.Client{Timeout: 3 * time.Second}
-	url := fmt.Sprintf("http://127.0.0.1:%d/crust/evaluate", port)
-	resp, err := client.Post(url, "application/json", strings.NewReader(hookInput))
+	// Raw TCP: connect → write JSON line → read JSON line → close.
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 2*time.Second)
 	if err != nil {
 		return "" // instance not reachable, fall back
 	}
-	defer resp.Body.Close()
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(3 * time.Second))
 
-	if resp.StatusCode != http.StatusOK {
-		return "" // unexpected status, fall back
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
+	// Send hook input as a single line (strip any newlines).
+	line := strings.ReplaceAll(strings.ReplaceAll(hookInput, "\n", " "), "\r", "")
+	if _, err := fmt.Fprintf(conn, "%s\n", line); err != nil {
 		return ""
 	}
-	return string(body)
+
+	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 1<<20), 1<<20)
+	if !scanner.Scan() {
+		return ""
+	}
+	return scanner.Text()
 }
