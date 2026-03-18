@@ -5,10 +5,15 @@ package libcrust
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/BakeLens/crust/internal/daemon"
 	"github.com/BakeLens/crust/internal/daemon/registry"
@@ -69,6 +74,10 @@ func StartProtect() (int, error) {
 
 	protect.running = true
 	protect.port = port
+
+	// Write port file so evaluate-hook can find the running instance.
+	writePortFile(port)
+
 	return port, nil
 }
 
@@ -90,6 +99,7 @@ func StopProtect() {
 
 	daemon.RestoreAgentConfigs()
 	StopProxy()
+	removePortFile()
 	protect.running = false
 	protect.port = 0
 }
@@ -171,4 +181,85 @@ func DisableAgent(name string) error {
 		}
 	}
 	return fmt.Errorf("agent %q not found", name)
+}
+
+// portFilePath returns ~/.crust/protect.port
+func portFilePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".crust", "protect.port")
+}
+
+// writePortFile writes the proxy port to ~/.crust/protect.port.
+// Hook processes read this to find the running evaluation endpoint.
+func writePortFile(port int) {
+	p := portFilePath()
+	if p == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(p), 0o700)
+	_ = os.WriteFile(p, []byte(strconv.Itoa(port)), 0o600)
+}
+
+// removePortFile removes ~/.crust/protect.port.
+func removePortFile() {
+	p := portFilePath()
+	if p != "" {
+		_ = os.Remove(p)
+	}
+}
+
+// ReadPortFile reads the proxy port from ~/.crust/protect.port.
+// Returns 0 if the file doesn't exist or is invalid.
+func ReadPortFile() int {
+	p := portFilePath()
+	if p == "" {
+		return 0
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return 0
+	}
+	port, err := strconv.Atoi(string(data))
+	if err != nil {
+		return 0
+	}
+	return port
+}
+
+// EvaluateViaRunningInstance evaluates a tool call by connecting to a running
+// crust instance's HTTP endpoint. This avoids cold-starting the rule engine
+// (~4s) by reusing the already-loaded engine in the running GUI/CLI process.
+//
+// hookInput is the raw JSON from Claude Code's PreToolUse hook (contains
+// tool_name and tool_input fields among others).
+//
+// Returns the evaluation result JSON, or empty string if no running instance
+// is available (caller should fall back to cold-start Evaluate).
+func EvaluateViaRunningInstance(hookInput string) string {
+	port := ReadPortFile()
+	if port == 0 {
+		return ""
+	}
+
+	// Quick HTTP POST to the running instance's /crust/evaluate endpoint.
+	client := &http.Client{Timeout: 3 * time.Second}
+	url := fmt.Sprintf("http://127.0.0.1:%d/crust/evaluate", port)
+	resp, err := client.Post(url, "application/json", strings.NewReader(hookInput))
+	if err != nil {
+		return "" // instance not reachable, fall back
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "" // unexpected status, fall back
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return ""
+	}
+	return string(body)
 }

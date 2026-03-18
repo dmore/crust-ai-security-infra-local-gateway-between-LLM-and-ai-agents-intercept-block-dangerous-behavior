@@ -456,6 +456,35 @@ func LibcrustDisableAgent(name *C.char) (result *C.char) {
 	return nil
 }
 
+// LibcrustReadPortFile reads the proxy port from ~/.crust/protect.port.
+// Returns 0 if not available.
+//
+//export LibcrustReadPortFile
+func LibcrustReadPortFile() (port C.int) {
+	defer func() {
+		if r := recover(); r != nil {
+			port = 0
+		}
+	}()
+	return C.int(libcrust.ReadPortFile())
+}
+
+// LibcrustEvaluateViaRunningInstance evaluates a tool call by connecting to a
+// running crust instance's HTTP endpoint, avoiding cold-start overhead (~4s).
+// hookInput is the raw JSON from Claude Code's PreToolUse hook.
+// Returns the evaluation result JSON, or NULL if no running instance is available.
+// The caller must free the result with LibcrustFree if non-NULL.
+//
+//export LibcrustEvaluateViaRunningInstance
+func LibcrustEvaluateViaRunningInstance(hookInput *C.char) (result *C.char) {
+	defer recoverErr(&result)
+	r := libcrust.EvaluateViaRunningInstance(C.GoString(hookInput))
+	if r == "" {
+		return nil // no running instance
+	}
+	return C.CString(r)
+}
+
 // LibcrustInstallClaudeHook installs the PreToolUse hook in ~/.claude/hooks.json.
 // crustBin is the path to the crust/GUI binary that handles "evaluate-hook".
 //

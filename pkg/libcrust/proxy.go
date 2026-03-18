@@ -94,6 +94,7 @@ func StartProxy(port int, upstreamURL string, apiKey string, apiType string) err
 	proxy.listener = ln
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/crust/evaluate", evaluateHandler)
 	mux.HandleFunc("/", proxyHandler)
 
 	srv := &http.Server{
@@ -291,6 +292,51 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter -- reverse proxy forwarding JSON API responses, not rendering HTML
 	_, _ = w.Write(respBody)
+}
+
+// evaluateHandler handles POST /crust/evaluate requests.
+// This allows hook processes to evaluate tool calls against the already-loaded
+// rule engine without cold-starting it, reducing latency from ~4s to ~10ms.
+//
+// Request:  {"tool_name":"Bash","tool_input":{"command":"cat /etc/passwd"}}
+// Response: {"matched":true,"rule_name":"...","action":"block","message":"..."}
+//
+//	or {"matched":false}
+func evaluateHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MB limit
+	_ = r.Body.Close()
+	if err != nil {
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		ToolName  string          `json:"tool_name"`
+		ToolInput json.RawMessage `json:"tool_input"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.ToolName == "" {
+		http.Error(w, "tool_name is required", http.StatusBadRequest)
+		return
+	}
+
+	argsJSON := "{}"
+	if len(req.ToolInput) > 0 {
+		argsJSON = string(req.ToolInput)
+	}
+
+	result := Evaluate(req.ToolName, argsJSON)
+
+	w.Header().Set("Content-Type", "application/json")
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter -- JSON API endpoint
+	_, _ = w.Write([]byte(result))
 }
 
 // detectAPITypeFromPath guesses API type from the request path.
