@@ -36,7 +36,7 @@ Rule Evaluation:
   14. Fallback rules (content-only) → raw JSON matching for ANY tool
 ```
 
-**Layer 0 (Request History):** Scans tool_calls in conversation history. Catches "bad agent" patterns where malicious actions already occurred in past turns.
+**Layer 0 (Request History + Outbound DLP):** Scans tool_calls in conversation history and runs DLP secret detection on all message content (plain text, tool results, and other text blocks) before the request reaches the LLM provider. Catches both "bad agent" patterns from past turns and secrets that have leaked into the conversation context.
 
 **Layer 2 (Privacy Sanitization):** All management API responses pass through `telemetry/sanitize.go` before leaving the process. Strips LLM message bodies (`input.value`, `output.value`), tool call arguments (`tool.parameters`), and URL query parameters (which may contain API keys). Raw data remains in the local SQLite database for forensic inspection via `sqlite3`. This layer protects against shoulder-surfing the TUI, API responses accidentally included in bug reports, and local processes scraping the management API.
 
@@ -92,9 +92,9 @@ Path patterns support `$HOME` as a variable, expanded to the current user's home
 
 ```yaml
 - name: protect-ssh-keys
-  block: "$HOME/.ssh/id_*"
-  except: "$HOME/.ssh/id_*.pub"
-  message: "Cannot access SSH private keys"
+  block: "$HOME/.ssh/*"
+  except: ["$HOME/.ssh/*.pub", "$HOME/.ssh/known_hosts"]
+  message: "Cannot access SSH directory"
 ```
 
 At init time, `$HOME` expands to the actual home directory:
@@ -121,6 +121,8 @@ Cross-OS app paths can all be listed under `$HOME` — wrong-OS patterns compile
 |--------|---------|---------|---------|-------------|----------|
 | Bad agent with secrets in history | ✅ Blocked | - | - | - | - |
 | Poisoned conversation replay | ✅ Blocked | - | - | - | - |
+| Secret in tool_result sent to LLM | ✅ Blocked (outbound DLP) | - | - | - | - |
+| AWS/PEM key in message content | ✅ Blocked (outbound DLP) | - | - | - | - |
 | LLM generates `cat .env` | - | ✅ Blocked | - | - | - |
 | LLM generates `rm -rf /etc` | - | ✅ Blocked | - | - | - |
 | `$(cat .env)` obfuscation | - | ✅ Blocked | - | - | - |

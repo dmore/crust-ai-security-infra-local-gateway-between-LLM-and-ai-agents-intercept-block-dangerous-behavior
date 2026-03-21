@@ -25,6 +25,59 @@ import (
 	"github.com/BakeLens/crust/internal/types"
 )
 
+func TestExtractMessageTextsFromJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		json     string
+		wantText []string
+	}{
+		{
+			name:     "Anthropic string content",
+			json:     `{"messages":[{"role":"user","content":"hello world"}]}`,
+			wantText: []string{"hello world"},
+		},
+		{
+			name:     "Anthropic text block",
+			json:     `{"messages":[{"role":"assistant","content":[{"type":"text","text":"some response"}]}]}`,
+			wantText: []string{"some response"},
+		},
+		{
+			name:     "Anthropic tool_result with secret",
+			json:     `{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"SECRET_KEY=abc123"}]}]}`,
+			wantText: []string{"SECRET_KEY=abc123"},
+		},
+		{
+			name:     "OpenAI Responses input with output",
+			json:     `{"input":[{"type":"function_call_output","call_id":"c1","output":"secret data here"}]}`,
+			wantText: []string{"secret data here"},
+		},
+		{
+			name:     "empty messages",
+			json:     `{"messages":[]}`,
+			wantText: nil,
+		},
+		{
+			name:     "invalid JSON",
+			json:     `not json`,
+			wantText: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractMessageTextsFromJSON([]byte(tt.json))
+			if len(got) != len(tt.wantText) {
+				t.Fatalf("got %d texts %v, want %d %v", len(got), got, len(tt.wantText), tt.wantText)
+			}
+			for i, want := range tt.wantText {
+				if got[i] != want {
+					t.Errorf("text[%d] = %q, want %q", i, got[i], want)
+				}
+			}
+		})
+	}
+}
+
 func TestExtractToolCallsFromJSON(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -2396,5 +2449,277 @@ rules:
 	// With security active, blocked tool calls should be filtered out
 	if len(toolCalls) != 0 {
 		t.Errorf("toolCalls = %d, want 0 (Bash should be blocked)", len(toolCalls))
+	}
+}
+
+// SECURITY: Layer0-DLP must block secrets in plain message content sent to the LLM API.
+// This catches the case where a tool result contains a leaked secret (e.g., from reading .env)
+// and the agent sends it to the LLM provider in the conversation history.
+func TestLayer0DLP_SecretInMessageContent_Blocked(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("SECURITY: request with secret reached upstream — DLP should have blocked it")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}]}`))
+	}))
+	defer upstream.Close()
+
+	// Use builtin rules (which include DLP patterns)
+	engine, err := rules.NewEngine(context.Background(), rules.EngineConfig{
+		DisableBuiltin: false,
+	})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	storage, err := telemetry.NewStorage(":memory:", "")
+	if err != nil {
+		t.Fatalf("NewStorage: %v", err)
+	}
+	defer storage.Close()
+	interceptor := security.NewInterceptor(engine, storage)
+
+	proxy := setupTestProxyWithInterceptor(t, upstream, interceptor)
+
+	tests := []struct {
+		name string
+		body map[string]any
+		path string
+	}{
+		{
+			name: "PEM private key in Anthropic tool_result",
+			path: "/v1/messages",
+			body: map[string]any{
+				"model":      "claude-3-opus-20240229",
+				"max_tokens": 1024,
+				"messages": []map[string]any{
+					{
+						"role": "user",
+						"content": []map[string]any{
+							{
+								"type":        "tool_result",
+								"tool_use_id": "toolu_01",
+								"content":     "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF0PbnGcY\n-----END RSA PRIVATE KEY-----",
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "AWS credentials in plain user message",
+			path: "/v1/messages",
+			body: map[string]any{
+				"model":      "claude-3-opus-20240229",
+				"max_tokens": 1024,
+				"messages": []map[string]any{
+					{
+						"role":    "user",
+						"content": "Here are my credentials: AKIAIOSFODNN7EXAMPLE and secret wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+					},
+				},
+			},
+		},
+		{
+			name: "AWS credentials in OpenAI Chat format",
+			path: "/v1/chat/completions",
+			body: map[string]any{
+				"model": "gpt-4",
+				"messages": []map[string]any{
+					{
+						"role":    "user",
+						"content": "My AWS key is AKIAIOSFODNN7EXAMPLE",
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bodyBytes, _ := json.Marshal(tt.body)
+			req := httptest.NewRequest(http.MethodPost, tt.path, bytes.NewReader(bodyBytes))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+
+			proxy.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusForbidden {
+				t.Errorf("SECURITY: secret in message content was NOT blocked (status %d, body: %s)", rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+// DLP must not block normal messages without secrets (false positive check).
+func TestLayer0DLP_NormalContent_NotBlocked(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}]}`))
+	}))
+	defer upstream.Close()
+
+	engine, err := rules.NewEngine(context.Background(), rules.EngineConfig{
+		DisableBuiltin: false,
+	})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	storage, err := telemetry.NewStorage(":memory:", "")
+	if err != nil {
+		t.Fatalf("NewStorage: %v", err)
+	}
+	defer storage.Close()
+	interceptor := security.NewInterceptor(engine, storage)
+
+	proxy := setupTestProxyWithInterceptor(t, upstream, interceptor)
+
+	body := map[string]any{
+		"model":      "claude-3-opus-20240229",
+		"max_tokens": 1024,
+		"messages": []map[string]any{
+			{"role": "user", "content": "Write a function to sort a list in Python."},
+			{"role": "assistant", "content": "Here's a simple sort function."},
+		},
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	proxy.ServeHTTP(rr, req)
+
+	if rr.Code == http.StatusForbidden {
+		t.Errorf("Normal message was incorrectly blocked: %s", rr.Body.String())
+	}
+}
+
+// SECURITY: SSH key rules must match any file in .ssh directory, not just id_* prefix.
+func TestLayer0_SSHKeyAnyFilename_Blocked(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("SECURITY: request reached upstream — SSH key access should have been blocked")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}]}`))
+	}))
+	defer upstream.Close()
+
+	// Use builtin rules (with broadened SSH globs)
+	engine, err := rules.NewEngine(context.Background(), rules.EngineConfig{
+		DisableBuiltin: false,
+	})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	storage, err := telemetry.NewStorage(":memory:", "")
+	if err != nil {
+		t.Fatalf("NewStorage: %v", err)
+	}
+	defer storage.Close()
+	interceptor := security.NewInterceptor(engine, storage)
+
+	proxy := setupTestProxyWithInterceptor(t, upstream, interceptor)
+
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{"standard id_rsa", "cat ~/.ssh/id_rsa"},
+		{"non-standard key name", "cat ~/.ssh/key"},
+		{"custom key name", "cat ~/.ssh/mykey.pem"},
+		{"ssh config", "cat ~/.ssh/config"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := map[string]any{
+				"model":      "claude-3-opus-20240229",
+				"max_tokens": 1024,
+				"messages": []map[string]any{
+					{
+						"role": "assistant",
+						"content": []map[string]any{
+							{
+								"type":  "tool_use",
+								"id":    "toolu_01",
+								"name":  "Bash",
+								"input": map[string]string{"command": tt.command},
+							},
+						},
+					},
+				},
+			}
+			bodyBytes, _ := json.Marshal(body)
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(bodyBytes))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+
+			proxy.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusForbidden {
+				t.Errorf("SECURITY: %q was NOT blocked (status %d)", tt.command, rr.Code)
+			}
+		})
+	}
+}
+
+// SSH .pub files and known_hosts must NOT be blocked (false positive check).
+func TestLayer0_SSHPublicKey_NotBlocked(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}]}`))
+	}))
+	defer upstream.Close()
+
+	engine, err := rules.NewEngine(context.Background(), rules.EngineConfig{
+		DisableBuiltin: false,
+	})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	storage, err := telemetry.NewStorage(":memory:", "")
+	if err != nil {
+		t.Fatalf("NewStorage: %v", err)
+	}
+	defer storage.Close()
+	interceptor := security.NewInterceptor(engine, storage)
+
+	proxy := setupTestProxyWithInterceptor(t, upstream, interceptor)
+
+	safeCommands := []struct {
+		name    string
+		command string
+	}{
+		{"public key", "cat ~/.ssh/id_rsa.pub"},
+		{"known_hosts", "cat ~/.ssh/known_hosts"},
+	}
+
+	for _, tt := range safeCommands {
+		t.Run(tt.name, func(t *testing.T) {
+			body := map[string]any{
+				"model":      "claude-3-opus-20240229",
+				"max_tokens": 1024,
+				"messages": []map[string]any{
+					{
+						"role": "assistant",
+						"content": []map[string]any{
+							{
+								"type":  "tool_use",
+								"id":    "toolu_01",
+								"name":  "Bash",
+								"input": map[string]string{"command": tt.command},
+							},
+						},
+					},
+				},
+			}
+			bodyBytes, _ := json.Marshal(body)
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(bodyBytes))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+
+			proxy.ServeHTTP(rr, req)
+
+			if rr.Code == http.StatusForbidden {
+				t.Errorf("Safe file %q was incorrectly blocked", tt.command)
+			}
+		})
 	}
 }

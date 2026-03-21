@@ -13,15 +13,17 @@ rules:
   - name: protect-ssh-keys
     locked: true
     block:
-      - "$HOME/.ssh/id_*"
-      - "$HOME/.ssh/config"
-      - "**/.ssh/id_*"
-      - "**/.ssh/config"
+      - "$HOME/.ssh/*"
+      - "**/.ssh/*"
     except:
-      - "$HOME/.ssh/id_*.pub"
-      - "**/.ssh/id_*.pub"
+      - "$HOME/.ssh/*.pub"
+      - "**/.ssh/*.pub"
+      - "$HOME/.ssh/known_hosts"
+      - "**/.ssh/known_hosts"
+      - "$HOME/.ssh/known_hosts.*"
+      - "**/.ssh/known_hosts.*"
     actions: [read, execute, write, delete, copy, move, network]
-    message: "Blocked: SSH private keys are authentication credentials."
+    message: "Blocked: SSH directory contains private keys and sensitive config."
     severity: critical
 
   # ===========================================================================
@@ -460,6 +462,36 @@ rules:
       - "mobile://autostart/**"
     actions: [write, delete]
     message: "Blocked: cron/launchd/systemd/mobile-background entries are persistence vectors — malware uses these to survive reboot."
+    severity: critical
+
+  # ===========================================================================
+  # 18b. CRONTAB COMMAND DETECTION
+  # The crontab binary bypasses file-based cron rules because it writes to
+  # /var/spool/cron internally. Block the command itself when used to install
+  # new entries (pipe or heredoc into `crontab -` or `crontab` with no file
+  # arg is read-only and harmless, but `crontab -` accepts stdin writes).
+  # ===========================================================================
+  - name: detect-crontab-write
+    locked: true
+    match:
+      command: "re:(?m)\\bcrontab\\b.*-$|\\|\\s*crontab\\s+-|\\bat\\b\\s+-f\\b"
+    actions: [execute]
+    message: "Blocked: crontab/at command installs scheduled tasks — a persistence vector."
+    severity: critical
+
+  # ===========================================================================
+  # 18c. EXFILTRATION VIA BASH REDIRECT
+  # Catches bash commands that write scripts via heredocs/redirects where the
+  # shell dry-run interpreter cannot expand nested subshells inside heredoc
+  # bodies. The Write tool case is handled by analyzeWrittenContent in the
+  # extractor, which parses written shell scripts through the bash AST.
+  # ===========================================================================
+  - name: detect-exfil-redirect
+    locked: true
+    match:
+      command: "re:(?s)>.*\\.sh.*\\$\\(cat\\b|(?s)>.*\\.sh.*curl\\b|(?s)>.*\\.sh.*wget\\b"
+    actions: [execute, write]
+    message: "Blocked: redirecting shell script with network exfiltration commands."
     severity: critical
 
   # ===========================================================================

@@ -223,7 +223,7 @@ Mobile and desktop rules are unified using virtual paths (`mobile://`) — the s
 
 ### Built-in Rules
 
-Crust ships with **33 security rules** (30 locked, 3 user-disablable) and **46 DLP token-detection patterns** out of the box:
+Crust ships with **35 security rules** (32 locked, 3 user-disablable) and **46 DLP token-detection patterns** out of the box:
 
 | Category | What's Protected |
 |----------|-----------------|
@@ -256,10 +256,10 @@ rules:
   - block: "**/.env"
 
   # With exceptions and specific actions
-  - block: "**/.ssh/id_*"
-    except: "**/*.pub"
+  - block: "**/.ssh/*"
+    except: ["**/*.pub", "**/known_hosts"]
     actions: [read, copy]
-    message: "Cannot access SSH private keys"
+    message: "Cannot access SSH directory"
 
   # Advanced: regex matching on commands
   - name: block-rm-rf

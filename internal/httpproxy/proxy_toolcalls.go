@@ -141,6 +141,81 @@ func computeSessionID(messages []requestMessage) string {
 	return hex.EncodeToString(h[:8])
 }
 
+// extractMessageTextsFromJSON walks raw JSON to extract all text content from
+// messages in the request body. This catches secrets embedded in conversation
+// history (tool results, user messages, assistant messages) that are not inside
+// tool call argument objects — those are handled by extractToolCallsFromJSON.
+//
+// Supports all three API formats:
+//   - Anthropic Messages: messages[].content (string or content block array)
+//   - OpenAI Chat: messages[].content (string)
+//   - OpenAI Responses: input[].content / input[].output
+func extractMessageTextsFromJSON(data []byte) []string {
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	var texts []string
+	// Handle "messages" array (Anthropic + OpenAI Chat)
+	if messages, ok := raw["messages"].([]any); ok {
+		for _, msg := range messages {
+			msgObj, ok := msg.(map[string]any)
+			if !ok {
+				continue
+			}
+			collectTextsFromContent(msgObj["content"], &texts)
+		}
+	}
+	// Handle "input" array (OpenAI Responses)
+	if input, ok := raw["input"].([]any); ok {
+		for _, item := range input {
+			itemObj, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			collectTextsFromContent(itemObj["content"], &texts)
+			// function_call_output items store result in "output"
+			if output, ok := itemObj["output"].(string); ok {
+				texts = append(texts, output)
+			}
+		}
+	}
+	return texts
+}
+
+// collectTextsFromContent extracts text strings from a message content field.
+// Handles both plain string content and Anthropic-style content block arrays
+// (text blocks, tool_result blocks with nested content).
+func collectTextsFromContent(content any, texts *[]string) {
+	if content == nil {
+		return
+	}
+	// Plain string content
+	if s, ok := content.(string); ok {
+		*texts = append(*texts, s)
+		return
+	}
+	// Array content (Anthropic content blocks)
+	arr, ok := content.([]any)
+	if !ok {
+		return
+	}
+	for _, block := range arr {
+		blockObj, ok := block.(map[string]any)
+		if !ok {
+			continue
+		}
+		// text blocks: {"type": "text", "text": "..."}
+		if text, ok := blockObj["text"].(string); ok {
+			*texts = append(*texts, text)
+		}
+		// tool_result blocks: {"type": "tool_result", "content": "..."}
+		if blockObj["type"] == "tool_result" {
+			collectTextsFromContent(blockObj["content"], texts)
+		}
+	}
+}
+
 // maxJSONWalkDepth limits recursion depth in walkJSONForToolCalls to prevent
 // stack overflow from adversarially nested JSON. Tool calls in real API
 // requests are at most ~5 levels deep; 64 is generous.

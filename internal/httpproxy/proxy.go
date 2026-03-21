@@ -238,6 +238,28 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+
+		// [Layer0-DLP] Scan message content for leaked secrets.
+		// Tool calls are checked above; this catches secrets in plain messages,
+		// tool results, and other text content being sent to the LLM provider.
+		engine := interceptor.GetEngine()
+		for _, text := range extractMessageTextsFromJSON(parseBytes) {
+			if dlpResult := engine.ScanDLP(text); dlpResult != nil {
+				log.Warn("[Layer0-DLP] Request blocked: secret in message content (rule: %s)", dlpResult.RuleName)
+				eventlog.Record(eventlog.Event{
+					Layer:      eventlog.LayerProxyRequest,
+					TraceID:    traceID,
+					SessionID:  sessionID,
+					ToolName:   "message_content",
+					APIType:    apiType,
+					Model:      reqBody.Model,
+					WasBlocked: true,
+					RuleName:   dlpResult.RuleName,
+				})
+				http.Error(w, message.FormatHTTPBlock(*dlpResult), http.StatusForbidden)
+				return
+			}
+		}
 	}
 
 	// Start telemetry span

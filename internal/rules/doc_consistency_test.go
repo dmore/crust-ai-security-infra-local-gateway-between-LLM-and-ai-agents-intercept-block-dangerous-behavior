@@ -102,12 +102,12 @@ func TestDocConsistency_ProtectionRules(t *testing.T) {
 // wantUserDisablableCount = total - locked
 //
 // Docs that reference these numbers:
-//   - README.md: "30 security rules (30 locked, 3 user-disablable)"
-//   - docs/cli.md: "31 locked" rules note for --disable-builtin
+//   - README.md: update rule counts to match
+//   - docs/cli.md: update locked count to match
 
 const (
-	wantTotalRuleCount      = 33
-	wantLockedRuleCount     = 30
+	wantTotalRuleCount      = 35
+	wantLockedRuleCount     = 32
 	wantUserDisablableCount = 3
 )
 
@@ -151,8 +151,8 @@ func TestDocConsistency_BuiltinRuleCounts(t *testing.T) {
 	}
 
 	// Assert docs reflect the source counts (README uses markdown bold around numbers)
-	docContains(t, "README.md", "33 security rules")
-	docContains(t, "README.md", "30 locked")
+	docContains(t, "README.md", "35 security rules")
+	docContains(t, "README.md", "32 locked")
 	docContains(t, "README.md", "3 user-disablable")
 }
 

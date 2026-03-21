@@ -3,6 +3,7 @@ package rules
 import (
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/BakeLens/crust/internal/pathutil"
@@ -19,6 +20,7 @@ func (e *Extractor) extractWriteTool(info *ExtractedInfo) {
 	info.addOperation(OpWrite)
 	e.extractPathFields(info)
 	e.extractContentField(info)
+	e.analyzeWrittenContent(info)
 }
 
 // extractEditTool extracts info from Edit tool
@@ -26,6 +28,7 @@ func (e *Extractor) extractEditTool(info *ExtractedInfo) {
 	info.addOperation(OpWrite)
 	e.extractPathFields(info)
 	e.extractContentField(info)
+	e.analyzeWrittenContent(info)
 }
 
 // extractDeleteTool extracts info from delete_file tool (Cursor)
@@ -249,6 +252,59 @@ func (e *Extractor) extractContentField(info *ExtractedInfo) {
 			}
 		}
 	}
+}
+
+// ── Written content analysis ────────────────────────────────────────────────
+//
+// When a Write/Edit tool writes content that looks like a shell script,
+// parse it through the same bash AST pipeline used for Bash tool calls.
+// This lets existing rules (protect-ssh-keys, detect-reverse-shell, etc.)
+// automatically catch dangerous commands embedded in written scripts —
+// regardless of where the file is written or what extension it has.
+
+// looksLikeShellScript checks whether content is a shell script by requiring
+// an explicit shebang line. This avoids false positives from parsing Python,
+// JavaScript, JSON, or other non-shell content through the bash AST parser
+// (which would mark unparseable content as evasive and hard-block it).
+func looksLikeShellScript(content string) bool {
+	return strings.HasPrefix(content, "#!/bin/bash") ||
+		strings.HasPrefix(content, "#!/bin/sh") ||
+		strings.HasPrefix(content, "#!/usr/bin/env bash") ||
+		strings.HasPrefix(content, "#!/usr/bin/env sh")
+}
+
+// analyzeWrittenContent parses Write/Edit content through the shell AST
+// parser when it looks like a shell script, then merges discovered paths
+// and hosts back into the original ExtractedInfo.
+func (e *Extractor) analyzeWrittenContent(info *ExtractedInfo) {
+	if info.Content == "" || !looksLikeShellScript(info.Content) {
+		return
+	}
+
+	// Create a synthetic ExtractedInfo with the content as a "command"
+	synthetic := &ExtractedInfo{
+		RawArgs: map[string]any{"command": info.Content},
+	}
+	e.extractBashCommand(synthetic)
+
+	// Merge discovered paths into the original info so existing rules
+	// (protect-ssh-keys, protect-env-files, etc.) match automatically.
+	for _, p := range synthetic.Paths {
+		if !slices.Contains(info.Paths, p) {
+			info.Paths = append(info.Paths, p)
+		}
+	}
+
+	// Merge hosts so network-based rules match
+	for _, h := range synthetic.Hosts {
+		if !slices.Contains(info.Hosts, h) {
+			info.Hosts = append(info.Hosts, h)
+		}
+	}
+
+	// NOTE: Do NOT propagate Evasive flags from content parsing.
+	// A script being written is not "evasive" — only the paths/hosts
+	// it references matter. Evasion detection is for live commands.
 }
 
 // ── Mobile tool extraction ──────────────────────────────────────────────────
