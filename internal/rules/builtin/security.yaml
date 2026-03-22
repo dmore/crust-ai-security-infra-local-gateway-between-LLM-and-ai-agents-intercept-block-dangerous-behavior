@@ -481,10 +481,11 @@ rules:
 
   # ===========================================================================
   # 18c. EXFILTRATION VIA BASH REDIRECT
-  # Catches bash commands that write scripts via heredocs/redirects where the
-  # shell dry-run interpreter cannot expand nested subshells inside heredoc
-  # bodies. The Write tool case is handled by analyzeWrittenContent in the
-  # extractor, which parses written shell scripts through the bash AST.
+  # Defense-in-depth: the primary check is AST-based in the shell parser
+  # (extractor_shell.go:detectExfilRedirect, engine.go step 6). This regex
+  # rule is a fallback for evasive/unparseable commands where the AST check
+  # cannot run. Requires redirect target to start with a path character
+  # [/~$.] to avoid false positives on arbitrary strings containing ">".
   # ===========================================================================
   - name: detect-exfil-redirect
     locked: true
@@ -689,9 +690,15 @@ rules:
   - name: protect-git-config
     locked: true
     block:
+      # Per-repo config
       - "**/.git/config"
       - "**/.gitattributes"
       - "**/.gitmodules"
+      # Global config (can define fsmonitor, filter drivers, hooksPath)
+      - "$HOME/.gitconfig"
+      - "$HOME/.config/git/config"
+      # System-wide config
+      - "/etc/gitconfig"
     actions: [write, delete]
     message: "Blocked: git config files can define commands that execute on git operations."
     severity: critical
