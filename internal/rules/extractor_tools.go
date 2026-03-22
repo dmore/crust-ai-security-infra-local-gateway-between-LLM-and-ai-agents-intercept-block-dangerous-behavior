@@ -262,49 +262,134 @@ func (e *Extractor) extractContentField(info *ExtractedInfo) {
 // automatically catch dangerous commands embedded in written scripts —
 // regardless of where the file is written or what extension it has.
 
+// shellShebangPrefixes lists shebang prefixes that identify shell scripts.
+// Covers standard paths, env wrappers, and common shells across Linux/macOS/FreeBSD.
+var shellShebangPrefixes = []string{
+	"#!/bin/bash",
+	"#!/bin/sh",
+	"#!/bin/zsh",
+	"#!/bin/dash",
+	"#!/bin/ksh",
+	"#!/usr/bin/env bash",
+	"#!/usr/bin/env sh",
+	"#!/usr/bin/env zsh",
+	"#!/usr/bin/env -S bash",
+	"#!/usr/bin/env -S sh",
+	"#!/usr/bin/env -S zsh",
+	"#!/usr/local/bin/bash",
+	"#!/usr/local/bin/zsh",
+}
+
 // looksLikeShellScript checks whether content is a shell script by requiring
 // an explicit shebang line. This avoids false positives from parsing Python,
 // JavaScript, JSON, or other non-shell content through the bash AST parser
 // (which would mark unparseable content as evasive and hard-block it).
 func looksLikeShellScript(content string) bool {
-	return strings.HasPrefix(content, "#!/bin/bash") ||
-		strings.HasPrefix(content, "#!/bin/sh") ||
-		strings.HasPrefix(content, "#!/usr/bin/env bash") ||
-		strings.HasPrefix(content, "#!/usr/bin/env sh")
+	for _, prefix := range shellShebangPrefixes {
+		if strings.HasPrefix(content, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // analyzeWrittenContent parses Write/Edit content through the shell AST
-// parser when it looks like a shell script, then merges discovered paths
+// parser when it looks like a shell script or contains embedded commands
+// (CI configs, Dockerfiles, Makefiles, etc.), then merges discovered paths
 // and hosts back into the original ExtractedInfo.
 func (e *Extractor) analyzeWrittenContent(info *ExtractedInfo) {
-	if info.Content == "" || !looksLikeShellScript(info.Content) {
+	if info.Content == "" {
 		return
 	}
 
-	// Create a synthetic ExtractedInfo with the content as a "command"
-	synthetic := &ExtractedInfo{
-		RawArgs: map[string]any{"command": info.Content},
+	// Path 1: Shebang detection (existing, highest priority)
+	if looksLikeShellScript(info.Content) {
+		synthetic := &ExtractedInfo{
+			RawArgs: map[string]any{"command": info.Content},
+		}
+		e.extractBashCommand(synthetic)
+		mergeExtractedFields(info, synthetic)
+		return
 	}
-	e.extractBashCommand(synthetic)
 
-	// Merge discovered paths into the original info so existing rules
-	// (protect-ssh-keys, protect-env-files, etc.) match automatically.
-	for _, p := range synthetic.Paths {
-		if !slices.Contains(info.Paths, p) {
-			info.Paths = append(info.Paths, p)
+	// Path 2: File-type-based extraction (CI configs, Dockerfiles, etc.)
+	// Use the actual content field value, not info.Content which may be the
+	// re-marshaled JSON envelope when the content field is empty.
+	filename := firstWritePath(info.Paths)
+	if filename == "" {
+		return
+	}
+	actualContent := extractActualContent(info.RawArgs)
+	if actualContent == "" {
+		return
+	}
+
+	commands := extractCommandsFromContent(filename, actualContent)
+	for _, cmd := range commands {
+		synthetic := &ExtractedInfo{
+			RawArgs: map[string]any{"command": cmd},
+		}
+		e.extractBashCommand(synthetic)
+		mergeExtractedFields(info, synthetic)
+	}
+}
+
+// extractActualContent retrieves the written content from the raw args,
+// returning only content from known content fields (not the JSON envelope).
+func extractActualContent(args map[string]any) string {
+	for _, field := range knownContentFields {
+		if val, ok := args[field]; ok {
+			if strs := fieldStrings(val); len(strs) > 0 {
+				return strings.Join(strs, "\n")
+			}
+		}
+	}
+	return ""
+}
+
+// mergeExtractedFields merges paths, hosts, env vars, and command from a
+// synthetic ExtractedInfo into the original. Does NOT propagate Evasive flags —
+// content being written is not "evasive", only the paths/hosts it references matter.
+func mergeExtractedFields(dst, src *ExtractedInfo) {
+	// Merge paths
+	for _, p := range src.Paths {
+		if !slices.Contains(dst.Paths, p) {
+			dst.Paths = append(dst.Paths, p)
 		}
 	}
 
-	// Merge hosts so network-based rules match
-	for _, h := range synthetic.Hosts {
-		if !slices.Contains(info.Hosts, h) {
-			info.Hosts = append(info.Hosts, h)
+	// Merge hosts
+	for _, h := range src.Hosts {
+		if !slices.Contains(dst.Hosts, h) {
+			dst.Hosts = append(dst.Hosts, h)
 		}
 	}
 
-	// NOTE: Do NOT propagate Evasive flags from content parsing.
-	// A script being written is not "evasive" — only the paths/hosts
-	// it references matter. Evasion detection is for live commands.
+	// Merge env vars
+	for k, v := range src.EnvVars {
+		if dst.EnvVars == nil {
+			dst.EnvVars = make(map[string]string)
+		}
+		if _, exists := dst.EnvVars[k]; !exists {
+			dst.EnvVars[k] = v
+		}
+	}
+
+	// Merge command so command-pattern rules (detect-reverse-shell,
+	// detect-crontab-write, etc.) fire on written scripts.
+	if src.Command != "" && dst.Command == "" {
+		dst.Command = src.Command
+	}
+}
+
+// firstWritePath returns the first path from the info's path list, which
+// is the target file being written. Used to determine file type for
+// content-based command extraction.
+func firstWritePath(paths []string) string {
+	if len(paths) > 0 {
+		return paths[0]
+	}
+	return ""
 }
 
 // ── Mobile tool extraction ──────────────────────────────────────────────────

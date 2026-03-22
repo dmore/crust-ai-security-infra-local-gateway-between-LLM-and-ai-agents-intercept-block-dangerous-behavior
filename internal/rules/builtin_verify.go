@@ -13,8 +13,8 @@ import (
 
 const (
 	file          = "builtin/security.yaml"
-	expectedHash  = "a382c711de6c1feee6f6cb8a78ac7e701c44d027a72ca0e1989e98e12aa79767620fd501610223ba1f6a0c14dc7ede98904e4cf764ba798fafd5162978d075b5"
-	expectedCount = 30
+	expectedHash  = "3ecff7ff9e92e52761f38aaac9613c434a5f13076f719f2e5fc16a0153d1da32f4053beb3facff71198e917b87726bf40c5f3b26e690b010963ba51cc97aa310"
+	expectedCount = 34
 )
 
 // Critical rules that must be present — removal would silently disable
@@ -39,6 +39,8 @@ var criticalRules = []string{
 	"block-eval-exec",
 	"protect-system-config",
 	"protect-persistence",
+	"detect-crontab-write",
+	"detect-exfil-redirect",
 	"detect-reverse-shell",
 	"block-ssrf-metadata",
 	"protect-agent-config",
@@ -50,6 +52,8 @@ var criticalRules = []string{
 	"protect-mobile-hardware",
 	"protect-mobile-biometric",
 	"protect-mobile-purchases",
+	"protect-git-config",
+	"protect-hook-configs",
 }
 
 func main() {
