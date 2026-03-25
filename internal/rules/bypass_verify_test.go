@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/BakeLens/crust/internal/pathutil"
 )
+
+const darwinOS = "darwin"
 
 func newTestEngine(t *testing.T) *Engine {
 	t.Helper()
@@ -510,8 +513,8 @@ func TestBypassFix_ExpandedCommandDB(t *testing.T) {
 		{
 			"chmod-env", "Bash",
 			map[string]any{"command": "chmod 777 /home/user/.env"},
-			true, "protect-env-files",
-			"chmod on .env",
+			true, "detect-chmod-world-writable",
+			"chmod 777 on .env — world-writable rule fires first (alphabetical)",
 		},
 		{
 			"truncate-env", "Bash",
@@ -789,6 +792,16 @@ func TestBypassFix_NetworkOutputWrite(t *testing.T) {
 // longer matches the rule pattern "/etc/passwd". Fixed by matching against
 // BOTH forms — pre-resolved catches rules using symlink paths, post-resolved
 // catches rules using real paths and user-created symlink bypasses.
+// symlinkExpectedRule returns the expected winning rule for "cat /etc/passwd".
+// On macOS, /etc → /private/etc so both rules match; "test-real-path-rule" wins alphabetically.
+// On Linux/Windows, /etc/passwd is real (no symlink) so only "test-symlink-path-rule" matches.
+func symlinkExpectedRule() string {
+	if runtime.GOOS == darwinOS {
+		return "test-real-path-rule"
+	}
+	return "test-symlink-path-rule"
+}
+
 func TestBypassFix_SymlinkMatching(t *testing.T) {
 	// Use a custom normalizer that simulates a symlink: /etc → /private/etc
 	normalizer := NewNormalizerWithEnv("/home/user", "/home/user/project", nil)
@@ -799,8 +812,7 @@ func TestBypassFix_SymlinkMatching(t *testing.T) {
 	// the post-resolved path.
 	rules := []Rule{
 		{
-			Name:     "test-symlink-path-rule",
-			Priority: new(10), // higher priority (lower number) so it wins when both match
+			Name: "test-symlink-path-rule",
 			Block: Block{
 				Paths: []string{"/etc/passwd"},
 			},
@@ -809,8 +821,7 @@ func TestBypassFix_SymlinkMatching(t *testing.T) {
 			Severity: SeverityCritical,
 		},
 		{
-			Name:     "test-real-path-rule",
-			Priority: new(20),
+			Name: "test-real-path-rule",
 			Block: Block{
 				Paths: []string{"/private/etc/passwd"},
 			},
@@ -839,8 +850,8 @@ func TestBypassFix_SymlinkMatching(t *testing.T) {
 		{
 			"symlink-path-matches-symlink-rule", "Bash",
 			map[string]any{"command": "cat /etc/passwd"},
-			true, "test-symlink-path-rule",
-			"pre-resolved /etc/passwd matches rule /etc/passwd despite symlink resolution",
+			true, symlinkExpectedRule(),
+			"on macOS both rules match (symlink resolution); on Linux only symlink rule matches",
 		},
 		// Post-resolved path matches rule with real path.
 		// On macOS: /etc/passwd resolves to /private/etc/passwd, which

