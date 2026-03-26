@@ -140,21 +140,22 @@ func TestSchema_MethodConstants(t *testing.T) {
 		t.Fatal("schema missing $defs/wireRequest")
 	}
 
-	goMethods := map[string]bool{
+	goMethods := map[Method]bool{
 		MethodInit:     true,
 		MethodEvaluate: true,
 		MethodClose:    true,
+		MethodWrap:     true,
 	}
 
 	schemaMethods := wireDef.ExtractMethodConsts()
 
 	for _, m := range schemaMethods {
-		if !goMethods[m] {
+		if !goMethods[Method(m)] {
 			t.Errorf("schema method %q not in Go constants", m)
 		}
 	}
 	for m := range goMethods {
-		if !slices.Contains(schemaMethods, m) {
+		if !slices.Contains(schemaMethods, string(m)) {
 			t.Errorf("Go method constant %q not in schema wireRequest", m)
 		}
 	}
@@ -243,14 +244,16 @@ func TestSchema_ResultRequiredFieldsNonEmpty(t *testing.T) {
 
 // TestSchema_RoundTrip_WireRequest verifies WireRequest marshals correctly.
 func TestSchema_RoundTrip_WireRequest(t *testing.T) {
-	for _, method := range []string{MethodInit, MethodEvaluate, MethodClose} {
-		t.Run(method, func(t *testing.T) {
+	for _, method := range []Method{MethodInit, MethodEvaluate, MethodClose, MethodWrap} {
+		t.Run(string(method), func(t *testing.T) {
 			var params json.RawMessage
 			switch method {
 			case MethodInit:
 				params, _ = json.Marshal(InitParams{Name: "test", Config: json.RawMessage(`{}`)})
 			case MethodEvaluate:
 				params, _ = json.Marshal(Request{ToolName: "Bash", Operation: rules.OpExecute, Arguments: json.RawMessage(`{}`)})
+			case MethodWrap:
+				params, _ = json.Marshal(WrapParams{Policy: json.RawMessage(`{}`), Command: []string{"echo"}})
 			case MethodClose:
 				// no params
 			}
@@ -264,8 +267,8 @@ func TestSchema_RoundTrip_WireRequest(t *testing.T) {
 			var m map[string]any
 			json.Unmarshal(data, &m)
 
-			if m["method"] != method {
-				t.Errorf("method = %v, want %v", m["method"], method)
+			if m["method"] != string(method) {
+				t.Errorf("method = %v, want %v", m["method"], string(method))
 			}
 		})
 	}

@@ -17,16 +17,30 @@ import "encoding/json"
 //   6. crust sends {"method":"close"} on shutdown
 //   7. plugin responds {"result":"ok"} and exits
 
-// Method names for the wire protocol.
+// Method is a wire protocol method name.
+type Method string
+
+// Wire protocol methods.
 const (
-	MethodInit     = "init"
-	MethodEvaluate = "evaluate"
-	MethodClose    = "close"
+	MethodInit     Method = "init"
+	MethodEvaluate Method = "evaluate"
+	MethodClose    Method = "close"
+	// MethodWrap requests the plugin to apply OS-level enforcement and then
+	// exec the target command. After the plugin responds {"result":"ready"},
+	// the stdin/stdout channel switches from JSON-RPC to raw byte passthrough
+	// for the wrapped command's communication.
+	//
+	// On Unix the plugin execs the target (replacing itself, zero overhead).
+	// On Windows the plugin spawns the target and forwards stdin/stdout.
+	//
+	// Crust must not write to stdin between sending the wrap request and
+	// receiving the "ready" response (synchronous handshake).
+	MethodWrap Method = "wrap"
 )
 
 // WireRequest is a JSON-RPC-like request sent from crust to the plugin process.
 type WireRequest struct {
-	Method string          `json:"method"`
+	Method Method          `json:"method"`
 	Params json.RawMessage `json:"params,omitempty"`
 }
 
@@ -49,3 +63,9 @@ type EvaluateParams = Request
 // EvaluateResult is the response from method="evaluate".
 // null means allow, non-null means block.
 type EvaluateResult = Result
+
+// WrapParams is sent with method="wrap".
+type WrapParams struct {
+	Policy  json.RawMessage `json:"policy"`  // sandbox policy JSON
+	Command []string        `json:"command"` // target command to exec after sandboxing
+}
